@@ -165,4 +165,15 @@ async function generateListing(imageParts, instructions, apiKey) {
   throw new Error(lastError ? lastError.message : "Failed to communicate with AI.");
 }
 
-module.exports = { generateListing };
+async function generateListingFromUrls(imageUrls, instructions, apiKey) {
+  const axios = require('axios');
+  const imageParts = await Promise.all((imageUrls || []).map(async url => {
+    const resp = await axios.get(url, { responseType: 'arraybuffer' });
+    const base64 = Buffer.from(resp.data).toString('base64');
+    const mimeType = (resp.headers['content-type'] || 'image/jpeg').split(';')[0];
+    return { inlineData: { data: base64, mimeType } };
+  }));
+  return generateListing(imageParts, instructions, apiKey);
+}
+
+module.exports = { generateListing, generateListingFromUrls };

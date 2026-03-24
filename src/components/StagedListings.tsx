@@ -1,32 +1,63 @@
 import { useState } from 'react';
-import { Trash2, Edit2, Copy, Check, Calendar, LayoutGrid, List } from 'lucide-react';
+import { Trash2, Edit2, Copy, Check, Calendar, LayoutGrid, List, Wand2, TrendingUp, X, RefreshCw } from 'lucide-react';
 import type { StagedListing } from '../types';
 import ResultsEditor from './ResultsEditor';
 import ImageSearchButton from './ImageSearchButton';
+import Lightbox from './Lightbox';
+import { useToast } from '../context/ToastContext';
 
 interface StagedListingsProps {
   listings: StagedListing[];
   onUpdate: (listing: StagedListing) => void;
   onDelete: (id: string) => void;
+  onBulkDelete: (ids: string[]) => void;
   onMoveToListed: (listing: StagedListing, draftId: string) => void;
   isEbayConnected?: boolean;
+  appPassword?: string;
 }
 
 type ViewMode = 'grid' | 'list';
 
-export default function StagedListingsView({ listings, onUpdate, onDelete, onMoveToListed, isEbayConnected }: StagedListingsProps) {
+function timeAgo(ts: number): string {
+  const diff = Date.now() - ts;
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+export default function StagedListingsView({ listings, onUpdate, onDelete, onBulkDelete, onMoveToListed, isEbayConnected, appPassword = '' }: StagedListingsProps) {
+  const { toast } = useToast();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [pushingId, setPushingId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
 
+  // Bulk selection
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkPushingIds, setBulkPushingIds] = useState<Set<string>>(new Set());
+
+  // Lightbox
+  const [lightboxImages, setLightboxImages] = useState<string[] | null>(null);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
+
+  // Re-analyze
+  const [reanalyzeId, setReanalyzeId] = useState<string | null>(null);
+  const [reanalyzeInstructions, setReanalyzeInstructions] = useState('');
+  const [isReanalyzing, setIsReanalyzing] = useState(false);
+
+  // Sold comps
+  const [compsId, setCompsId] = useState<string | null>(null);
+  const [compsData, setCompsData] = useState<{ title: string; price: string; currency: string; endDate: string; url: string }[]>([]);
+  const [compsLoading, setCompsLoading] = useState(false);
+
   if (listings.length === 0) {
     return (
       <div className="glass-panel" style={{ padding: '4rem 2rem', textAlign: 'center' }}>
         <h2 style={{ marginBottom: '1rem', color: 'var(--text-secondary)' }}>No Staged Listings</h2>
-        <p style={{ color: 'var(--text-secondary)' }}>
-          Create a new listing to see it here. Staged listings are saved locally to your browser.
-        </p>
+        <p style={{ color: 'var(--text-secondary)' }}>Create a new listing to see it here.</p>
       </div>
     );
   }
@@ -35,38 +66,11 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onMov
     navigator.clipboard.writeText(html);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
+    toast('HTML description copied to clipboard.', 'success');
   };
 
-  if (editingId) {
-    const listingToEdit = listings.find(l => l.id === editingId);
-    if (!listingToEdit) return null;
-    return (
-      <div style={{ maxWidth: '800px', margin: '0 auto', height: '80vh' }}>
-        <ResultsEditor
-          data={{
-            title: listingToEdit.title,
-            description: listingToEdit.description,
-            condition: listingToEdit.condition,
-            category: listingToEdit.category,
-            priceRecommendation: listingToEdit.priceRecommendation,
-            shippingEstimate: listingToEdit.shippingEstimate,
-            itemSpecifics: listingToEdit.itemSpecifics,
-            sku: listingToEdit.sku,
-            sellerNotes: listingToEdit.sellerNotes
-          }}
-          images={[]}
-          onStage={(updatedData) => {
-            onUpdate({ ...listingToEdit, ...updatedData, images: listingToEdit.images });
-            setEditingId(null);
-          }}
-          onCancel={() => setEditingId(null)}
-        />
-      </div>
-    );
-  }
-
   const handlePushToEbay = async (listing: StagedListing) => {
-    const pw = localStorage.getItem('app_password') || '';
+    const pw = appPassword || localStorage.getItem('app_password') || '';
     setPushingId(listing.id);
     try {
       const resp = await fetch('/api/ebay/draft', {
@@ -77,26 +81,139 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onMov
       if (!resp.ok) throw new Error(await resp.text());
       const data = await resp.json();
       onMoveToListed(listing, data.draftId);
+      toast(`"${listing.title.substring(0, 40)}..." pushed to eBay!`, 'success');
     } catch (e: any) {
-      alert("Error pushing to eBay: " + e.message);
+      toast('Error pushing to eBay: ' + e.message, 'error');
     } finally {
       setPushingId(null);
     }
   };
 
+  const handleBulkPush = async () => {
+    if (!isEbayConnected) { toast('Connect to eBay first.', 'error'); return; }
+    const ids = Array.from(selectedIds);
+    const toListing = listings.filter(l => ids.includes(l.id));
+    setBulkPushingIds(new Set(ids));
+    let success = 0;
+    for (const listing of toListing) {
+      try {
+        const pw = appPassword || localStorage.getItem('app_password') || '';
+        const resp = await fetch('/api/ebay/draft', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-app-password': pw },
+          body: JSON.stringify({ listing })
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json();
+        onMoveToListed(listing, data.draftId);
+        success++;
+      } catch (e: any) {
+        toast(`Failed to push "${listing.title.substring(0, 30)}...": ${e.message}`, 'error');
+      }
+    }
+    setBulkPushingIds(new Set());
+    setSelectedIds(new Set());
+    if (success > 0) toast(`${success} listing${success > 1 ? 's' : ''} pushed to eBay.`, 'success');
+  };
+
+  const handleBulkDelete = () => {
+    const count = selectedIds.size;
+    if (!confirm(`Delete ${count} selected listing${count > 1 ? 's' : ''}?`)) return;
+    onBulkDelete(Array.from(selectedIds));
+    setSelectedIds(new Set());
+    toast(`${count} listing${count > 1 ? 's' : ''} deleted.`, 'success');
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const selectAll = () => setSelectedIds(new Set(listings.map(l => l.id)));
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const handleReanalyze = async () => {
+    const listing = listings.find(l => l.id === reanalyzeId);
+    if (!listing) return;
+    const urlImages = (listing.images || []).filter(img => img.startsWith('http'));
+    if (urlImages.length === 0) {
+      toast('No cloud images available for re-analysis. Only Cloudinary-uploaded images can be re-analyzed.', 'info');
+      return;
+    }
+    setIsReanalyzing(true);
+    try {
+      const resp = await fetch('/api/generate-from-urls', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-app-password': appPassword },
+        body: JSON.stringify({ imageUrls: urlImages, instructions: reanalyzeInstructions })
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      const result = await resp.json();
+      onUpdate({ ...listing, ...result, images: listing.images, updatedAt: Date.now() });
+      toast('Listing updated with new AI analysis.', 'success');
+      setReanalyzeId(null);
+      setReanalyzeInstructions('');
+    } catch (e: any) {
+      toast('Re-analysis failed: ' + e.message, 'error');
+    } finally {
+      setIsReanalyzing(false);
+    }
+  };
+
+  const handleFetchComps = async (listing: StagedListing) => {
+    if (compsId === listing.id) { setCompsId(null); return; }
+    setCompsId(listing.id);
+    setCompsData([]);
+    setCompsLoading(true);
+    try {
+      const query = listing.title.split(' ').slice(0, 5).join(' ');
+      const resp = await fetch(`/api/ebay/sold-comps?query=${encodeURIComponent(query)}`, {
+        headers: { 'x-app-password': appPassword }
+      });
+      const data = await resp.json();
+      setCompsData(data);
+      if (data.length === 0) toast('No recent sold comps found for this item.', 'info');
+    } catch {
+      toast('Failed to fetch sold comps.', 'error');
+    } finally {
+      setCompsLoading(false);
+    }
+  };
+
+  if (editingId) {
+    const l = listings.find(l => l.id === editingId);
+    if (!l) return null;
+    return (
+      <div style={{ maxWidth: '800px', margin: '0 auto', height: '80vh' }}>
+        <ResultsEditor
+          data={{ title: l.title, description: l.description, condition: l.condition, category: l.category, priceRecommendation: l.priceRecommendation, shippingEstimate: l.shippingEstimate, itemSpecifics: l.itemSpecifics, sku: l.sku, sellerNotes: l.sellerNotes }}
+          images={[]}
+          appPassword={appPassword}
+          onStage={(updatedData) => { onUpdate({ ...l, ...updatedData, images: l.images }); setEditingId(null); toast('Listing saved.', 'success'); }}
+          onCancel={() => setEditingId(null)}
+        />
+      </div>
+    );
+  }
+
   const ActionButtons = ({ listing }: { listing: StagedListing }) => (
     <>
-      <button
-        className="btn-primary"
+      <button className="btn-primary"
         style={{ fontSize: '0.85rem', padding: '6px 12px', opacity: !isEbayConnected ? 0.5 : 1, whiteSpace: 'nowrap' }}
-        onClick={() => {
-          if (!isEbayConnected) { alert('Please connect to eBay in the top right corner first!'); return; }
-          handlePushToEbay(listing);
-        }}
-        disabled={pushingId === listing.id}
+        onClick={() => { if (!isEbayConnected) { toast('Connect to eBay first.', 'error'); return; } handlePushToEbay(listing); }}
+        disabled={pushingId === listing.id || bulkPushingIds.has(listing.id)}
         title={!isEbayConnected ? 'Connect to eBay first' : 'Push to eBay'}
       >
-        {pushingId === listing.id ? 'Pushing...' : 'Push to eBay'}
+        {(pushingId === listing.id || bulkPushingIds.has(listing.id)) ? 'Pushing...' : 'Push to eBay'}
+      </button>
+      <button className="btn-icon" title="Find Sold Comps" onClick={() => handleFetchComps(listing)} style={{ color: compsId === listing.id ? 'var(--success)' : undefined }}>
+        <TrendingUp size={18} />
+      </button>
+      <button className="btn-icon" title="Re-analyze with AI" onClick={() => { setReanalyzeId(listing.id); setReanalyzeInstructions(''); }}>
+        <Wand2 size={18} />
       </button>
       <button className="btn-icon" title="Copy HTML Description" onClick={() => handleCopyHtml(listing.id, listing.description)}>
         {copiedId === listing.id ? <Check size={18} color="var(--success)" /> : <Copy size={18} />}
@@ -105,162 +222,234 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onMov
         <Edit2 size={18} />
       </button>
       <button className="btn-icon" style={{ color: '#ef4444' }}
-        onClick={() => { if (confirm('Delete this staged listing?')) onDelete(listing.id); }}
-        title="Delete Listing"
-      >
+        onClick={() => { if (confirm('Delete this staged listing?')) { onDelete(listing.id); toast('Listing deleted.', 'success'); } }}
+        title="Delete Listing">
         <Trash2 size={18} />
       </button>
     </>
   );
 
+  const CompsPanel = ({ listing }: { listing: StagedListing }) => {
+    if (compsId !== listing.id) return null;
+    return (
+      <div style={{ padding: '0 1.25rem 1.25rem', borderTop: '1px solid var(--border-color)', marginTop: '0.5rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem', paddingTop: '0.75rem' }}>
+          <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--success)' }}>📊 Recent Sold Comps</span>
+          <button onClick={() => setCompsId(null)} className="btn-icon" style={{ padding: '2px' }}><X size={14} /></button>
+        </div>
+        {compsLoading && <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Loading...</p>}
+        {!compsLoading && compsData.length === 0 && <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>No results found.</p>}
+        {!compsLoading && compsData.map((comp, i) => (
+          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '6px 0', borderBottom: i < compsData.length - 1 ? '1px solid var(--border-color)' : 'none', gap: '8px' }}>
+            <a href={comp.url} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: 'none' }}
+              onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-primary)')}
+              onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-secondary)')}>
+              {comp.title}
+            </a>
+            <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--success)', flexShrink: 0 }}>
+              ${comp.price}
+            </span>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div>
+      {/* Lightbox */}
+      {lightboxImages && (
+        <Lightbox images={lightboxImages} index={lightboxIndex} onClose={() => setLightboxImages(null)} onNavigate={setLightboxIndex} />
+      )}
+
+      {/* Re-analyze modal */}
+      {reanalyzeId && (
+        <div onClick={() => setReanalyzeId(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+          <div className="glass-panel" onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '480px', padding: '2rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+              <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}><RefreshCw size={18} /> Re-analyze with AI</h3>
+              <button onClick={() => setReanalyzeId(null)} className="btn-icon"><X size={18} /></button>
+            </div>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+              The AI will re-examine this listing's images with your updated instructions and regenerate all fields.
+            </p>
+            <textarea
+              className="input-base"
+              placeholder="Updated instructions (e.g. 'This is actually a 1st edition' or 'Price it higher, condition is excellent')"
+              value={reanalyzeInstructions}
+              onChange={e => setReanalyzeInstructions(e.target.value)}
+              rows={4}
+              style={{ marginBottom: '1rem' }}
+            />
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setReanalyzeId(null)}>Cancel</button>
+              <button className="btn-primary" style={{ flex: 2 }} onClick={handleReanalyze} disabled={isReanalyzing}>
+                {isReanalyzing ? <><RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} /> Analyzing...</> : <><Wand2 size={16} /> Run Analysis</>}
+              </button>
+            </div>
+          </div>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      )}
+
       {/* Toolbar */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginBottom: '1.25rem', gap: '0.5rem' }}>
-        <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginRight: 'auto' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', gap: '0.75rem', flexWrap: 'wrap' }}>
+        <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
           {listings.length} listing{listings.length !== 1 ? 's' : ''}
         </span>
-        <button
-          onClick={() => setViewMode('grid')}
-          title="Grid view"
-          style={{ padding: '6px 10px', background: viewMode === 'grid' ? 'var(--glass-bg)' : 'transparent', border: '1px solid', borderColor: viewMode === 'grid' ? 'var(--glass-border)' : 'transparent', color: 'var(--text-primary)', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-        >
-          <LayoutGrid size={18} />
-        </button>
-        <button
-          onClick={() => setViewMode('list')}
-          title="List view"
-          style={{ padding: '6px 10px', background: viewMode === 'list' ? 'var(--glass-bg)' : 'transparent', border: '1px solid', borderColor: viewMode === 'list' ? 'var(--glass-border)' : 'transparent', color: 'var(--text-primary)', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-        >
-          <List size={18} />
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          {selectedIds.size === 0 ? (
+            <button onClick={selectAll} style={{ fontSize: '0.8rem', padding: '5px 10px', background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border-color)', color: 'var(--text-secondary)', borderRadius: '6px', cursor: 'pointer' }}>
+              Select All
+            </button>
+          ) : (
+            <>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{selectedIds.size} selected</span>
+              <button onClick={handleBulkPush} disabled={bulkPushingIds.size > 0} className="btn-primary" style={{ fontSize: '0.8rem', padding: '5px 12px', opacity: !isEbayConnected ? 0.5 : 1 }}>
+                Push {selectedIds.size} to eBay
+              </button>
+              <button onClick={handleBulkDelete} style={{ fontSize: '0.8rem', padding: '5px 10px', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', color: '#ef4444', borderRadius: '6px', cursor: 'pointer' }}>
+                Delete Selected
+              </button>
+              <button onClick={clearSelection} className="btn-icon" style={{ padding: '5px' }} title="Clear selection">
+                <X size={16} />
+              </button>
+            </>
+          )}
+          <button onClick={() => setViewMode('grid')} title="Grid view"
+            style={{ padding: '6px 10px', background: viewMode === 'grid' ? 'var(--glass-bg)' : 'transparent', border: '1px solid', borderColor: viewMode === 'grid' ? 'var(--glass-border)' : 'transparent', color: 'var(--text-primary)', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+            <LayoutGrid size={18} />
+          </button>
+          <button onClick={() => setViewMode('list')} title="List view"
+            style={{ padding: '6px 10px', background: viewMode === 'list' ? 'var(--glass-bg)' : 'transparent', border: '1px solid', borderColor: viewMode === 'list' ? 'var(--glass-border)' : 'transparent', color: 'var(--text-primary)', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+            <List size={18} />
+          </button>
+        </div>
       </div>
 
       {/* Grid view */}
       {viewMode === 'grid' && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '1.5rem' }}>
-          {listings.map(listing => (
-            <div key={listing.id} className="glass-card" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              <div style={{ display: 'flex', height: '140px', background: 'rgba(0,0,0,0.5)', position: 'relative' }}>
-                {listing.images && listing.images.length > 0 ? (
-                  <>
-                    <div style={{ flex: 2, height: '100%', position: 'relative' }}>
-                      <img src={listing.images[0]} alt="Main" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                      <ImageSearchButton src={listing.images[0]} />
-                    </div>
-                    {listing.images.length > 1 && (
-                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px', marginLeft: '2px' }}>
-                        {listing.images.slice(1, 3).map((img, i) => (
-                          <div key={i} style={{ flex: 1, height: '50%', position: 'relative' }}>
-                            <img src={img} alt={`Thumb ${i}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                            <ImageSearchButton src={img} size="sm" />
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>
-                    No images
+          {listings.map(listing => {
+            const isSelected = selectedIds.has(listing.id);
+            return (
+              <div key={listing.id} className="glass-card" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', outline: isSelected ? '2px solid var(--accent-color)' : 'none', outlineOffset: '2px' }}>
+                {/* Images */}
+                <div style={{ display: 'flex', height: '140px', background: 'rgba(0,0,0,0.5)', position: 'relative' }}>
+                  {/* Checkbox */}
+                  <div onClick={() => toggleSelect(listing.id)} style={{ position: 'absolute', top: '8px', left: '8px', zIndex: 3, cursor: 'pointer', width: '22px', height: '22px', borderRadius: '5px', background: isSelected ? 'var(--accent-color)' : 'rgba(0,0,0,0.6)', border: `2px solid ${isSelected ? 'var(--accent-color)' : 'rgba(255,255,255,0.4)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s' }}>
+                    {isSelected && <Check size={13} color="white" />}
                   </div>
-                )}
-              </div>
-              <div style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', flex: 1 }}>
-                <h3 style={{ fontSize: '1.1rem', marginBottom: '0.5rem', lineHeight: 1.3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                  {listing.title}
-                </h3>
-                <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <Calendar size={14} /> {new Date(listing.createdAt).toLocaleDateString()}
-                </div>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '1.5rem', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                  {listing.condition}
-                </p>
-                <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: '0.8rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px' }}>
-                    ${listing.priceRecommendation}
-                  </span>
-                  <span style={{ fontSize: '0.8rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px' }}>
-                    {listing.category}
-                  </span>
-                  {listing.sku && (
-                    <span style={{ fontSize: '0.8rem', background: 'rgba(99,102,241,0.25)', padding: '2px 8px', borderRadius: '4px', color: '#a5b4fc' }}>
-                      SKU: {listing.sku}
-                    </span>
+                  {listing.images && listing.images.length > 0 ? (
+                    <>
+                      <div style={{ flex: 2, height: '100%', position: 'relative', cursor: 'pointer' }} onClick={() => { setLightboxImages(listing.images); setLightboxIndex(0); }}>
+                        <img src={listing.images[0]} alt="Main" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        <ImageSearchButton src={listing.images[0]} />
+                      </div>
+                      {listing.images.length > 1 && (
+                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px', marginLeft: '2px' }}>
+                          {listing.images.slice(1, 3).map((img, i) => (
+                            <div key={i} style={{ flex: 1, height: '50%', position: 'relative', cursor: 'pointer' }} onClick={() => { setLightboxImages(listing.images); setLightboxIndex(i + 1); }}>
+                              <img src={img} alt={`Thumb ${i}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                              <ImageSearchButton src={img} size="sm" />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>No images</div>
                   )}
                 </div>
-                {listing.sellerNotes && (
-                  <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', padding: '6px 8px', marginBottom: '0.75rem', fontStyle: 'italic' }}>
-                    📝 {listing.sellerNotes}
+
+                <div style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', flex: 1 }}>
+                  <h3 style={{ fontSize: '1.1rem', marginBottom: '0.5rem', lineHeight: 1.3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                    {listing.title}
+                  </h3>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}><Calendar size={13} /> {new Date(listing.createdAt).toLocaleDateString()}</span>
+                    {listing.updatedAt && listing.updatedAt !== listing.createdAt && (
+                      <span style={{ opacity: 0.7 }}>· updated {timeAgo(listing.updatedAt)}</span>
+                    )}
+                  </div>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '1rem', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                    {listing.condition}
                   </p>
-                )}
-                <div style={{ marginTop: 'auto', display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', alignItems: 'center', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
-                  <span style={{ marginRight: 'auto' }}></span>
-                  <ActionButtons listing={listing} />
+                  <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '0.8rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px' }}>${listing.priceRecommendation}</span>
+                    <span style={{ fontSize: '0.8rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px' }}>{listing.category}</span>
+                    {listing.sku && <span style={{ fontSize: '0.8rem', background: 'rgba(99,102,241,0.25)', padding: '2px 8px', borderRadius: '4px', color: '#a5b4fc' }}>SKU: {listing.sku}</span>}
+                  </div>
+                  {listing.sellerNotes && (
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', padding: '6px 8px', marginBottom: '0.5rem', fontStyle: 'italic' }}>
+                      📝 {listing.sellerNotes}
+                    </p>
+                  )}
+                  <div style={{ marginTop: 'auto', display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', alignItems: 'center', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)' }}>
+                    <span style={{ marginRight: 'auto' }} />
+                    <ActionButtons listing={listing} />
+                  </div>
                 </div>
+
+                <CompsPanel listing={listing} />
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
       {/* List view */}
       {viewMode === 'list' && (
         <div className="glass-panel" style={{ padding: 0, overflow: 'hidden' }}>
-          {listings.map((listing, idx) => (
-            <div
-              key={listing.id}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.75rem 1.25rem',
-                borderBottom: idx < listings.length - 1 ? '1px solid var(--border-color)' : 'none',
-              }}
-            >
-              {/* Thumbnail */}
-              <div style={{ width: '56px', height: '56px', flexShrink: 0, borderRadius: '6px', overflow: 'hidden', background: 'rgba(0,0,0,0.4)', position: 'relative' }}>
-                {listing.images?.[0] ? (
-                  <>
-                    <img src={listing.images[0]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                    <ImageSearchButton src={listing.images[0]} size="sm" />
-                  </>
-                ) : (
-                  <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', fontSize: '0.7rem' }}>—</div>
-                )}
-              </div>
+          {listings.map((listing, idx) => {
+            const isSelected = selectedIds.has(listing.id);
+            return (
+              <div key={listing.id}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.75rem 1.25rem', background: isSelected ? 'rgba(99,102,241,0.06)' : 'none', borderBottom: '1px solid var(--border-color)' }}>
+                  {/* Checkbox */}
+                  <div onClick={() => toggleSelect(listing.id)} style={{ width: '18px', height: '18px', flexShrink: 0, borderRadius: '4px', background: isSelected ? 'var(--accent-color)' : 'transparent', border: `2px solid ${isSelected ? 'var(--accent-color)' : 'var(--border-color)'}`, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {isSelected && <Check size={11} color="white" />}
+                  </div>
 
-              {/* Title + notes */}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ margin: 0, fontWeight: 500, fontSize: '0.95rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {listing.title}
-                </p>
-                {listing.sellerNotes && (
-                  <p style={{ margin: '2px 0 0', fontSize: '0.78rem', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontStyle: 'italic' }}>
-                    📝 {listing.sellerNotes}
-                  </p>
-                )}
-              </div>
+                  {/* Thumbnail */}
+                  <div style={{ width: '56px', height: '56px', flexShrink: 0, borderRadius: '6px', overflow: 'hidden', background: 'rgba(0,0,0,0.4)', position: 'relative', cursor: listing.images?.[0] ? 'pointer' : 'default' }}
+                    onClick={() => listing.images?.[0] && (setLightboxImages(listing.images), setLightboxIndex(0))}>
+                    {listing.images?.[0] ? (
+                      <><img src={listing.images[0]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /><ImageSearchButton src={listing.images[0]} size="sm" /></>
+                    ) : (
+                      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', fontSize: '0.7rem' }}>—</div>
+                    )}
+                  </div>
 
-              {/* Meta badges */}
-              <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0, flexWrap: 'nowrap' }}>
-                <span style={{ fontSize: '0.78rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px', whiteSpace: 'nowrap' }}>
-                  ${listing.priceRecommendation}
-                </span>
-                {listing.sku && (
-                  <span style={{ fontSize: '0.78rem', background: 'rgba(99,102,241,0.25)', padding: '2px 8px', borderRadius: '4px', color: '#a5b4fc', whiteSpace: 'nowrap' }}>
-                    {listing.sku}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ margin: 0, fontWeight: 500, fontSize: '0.95rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{listing.title}</p>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '2px' }}>
+                      {listing.sellerNotes && <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontStyle: 'italic', flex: 1 }}>📝 {listing.sellerNotes}</p>}
+                      {listing.updatedAt && listing.updatedAt !== listing.createdAt && <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', flexShrink: 0, opacity: 0.7 }}>updated {timeAgo(listing.updatedAt)}</span>}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
+                    <span style={{ fontSize: '0.78rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px', whiteSpace: 'nowrap' }}>${listing.priceRecommendation}</span>
+                    {listing.sku && <span style={{ fontSize: '0.78rem', background: 'rgba(99,102,241,0.25)', padding: '2px 8px', borderRadius: '4px', color: '#a5b4fc', whiteSpace: 'nowrap' }}>{listing.sku}</span>}
+                  </div>
+
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', flexShrink: 0, minWidth: '80px', textAlign: 'right' }}>
+                    {new Date(listing.createdAt).toLocaleDateString()}
                   </span>
+
+                  <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0, alignItems: 'center' }}>
+                    <ActionButtons listing={listing} />
+                  </div>
+                </div>
+                {compsId === listing.id && (
+                  <div style={{ padding: '0 1.25rem', borderBottom: idx < listings.length - 1 ? '1px solid var(--border-color)' : 'none' }}>
+                    <CompsPanel listing={listing} />
+                  </div>
                 )}
               </div>
-
-              {/* Date */}
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', flexShrink: 0, minWidth: '80px', textAlign: 'right' }}>
-                {new Date(listing.createdAt).toLocaleDateString()}
-              </span>
-
-              {/* Actions */}
-              <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0, alignItems: 'center' }}>
-                <ActionButtons listing={listing} />
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

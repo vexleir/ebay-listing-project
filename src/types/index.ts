@@ -15,6 +15,7 @@ export interface StagedListing {
   ebayDraftId?: string;
   archived?: boolean;
   status?: 'staged' | 'listed';
+  updatedAt?: number;
 }
 
 export interface AppState {

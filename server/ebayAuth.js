@@ -143,9 +143,17 @@ async function hasValidSession() {
   return !!(process.env.EBAY_OAUTH_TOKEN && process.env.EBAY_OAUTH_TOKEN !== 'YOUR_EBAY_TOKEN_HERE');
 }
 
+async function getTokenExpiry() {
+  const tokens = await getTokens();
+  return {
+    refresh_token_expires_at: tokens?.refresh_token_expires_at || null
+  };
+}
+
 module.exports = {
   getAuthUrl,
   exchangeCodeForToken,
   getValidAccessToken,
-  hasValidSession
+  hasValidSession,
+  getTokenExpiry
 };

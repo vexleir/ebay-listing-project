@@ -3,8 +3,8 @@ const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
 const path = require('path');
-const { generateListing } = require('./ai');
-const { getAuthUrl, exchangeCodeForToken, getValidAccessToken, hasValidSession } = require('./ebayAuth');
+const { generateListing, generateListingFromUrls } = require('./ai');
+const { getAuthUrl, exchangeCodeForToken, getValidAccessToken, hasValidSession, getTokenExpiry } = require('./ebayAuth');
 const { getListings, createListing, updateListing, deleteListing, getAllListingsMeta } = require('./listings');
 const { uploadImage } = require('./cloudinary');
 
@@ -36,6 +36,15 @@ const EBAY_API_BASE = 'https://api.ebay.com';
 // Simple endpoint to let the frontend know if their password was valid under the global middleware
 app.get('/api/verify-password', (req, res) => {
   res.json({ success: true });
+});
+
+// GET /api/ebay/token-info
+app.get('/api/ebay/token-info', async (req, res) => {
+  try {
+    res.json(await getTokenExpiry());
+  } catch (e) {
+    res.json({ refresh_token_expires_at: null });
+  }
 });
 
 // GET /api/ebay/auth-status
@@ -150,6 +159,60 @@ app.post('/api/images/upload', async (req, res) => {
   } catch (e) {
     console.error('[images/upload] error:', e.message);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/generate-from-urls  — re-analyze an existing listing using Cloudinary image URLs
+app.post('/api/generate-from-urls', async (req, res) => {
+  try {
+    const { imageUrls, instructions } = req.body;
+    if (!process.env.GEMINI_API_KEY) return res.status(500).json({ error: 'Server missing GEMINI_API_KEY' });
+    const result = await generateListingFromUrls(imageUrls || [], instructions || '', process.env.GEMINI_API_KEY);
+    res.json(result);
+  } catch (e) {
+    console.error('[generate-from-urls] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/ebay/categories?query=  — Trading API category suggestions
+app.get('/api/ebay/categories', async (req, res) => {
+  try {
+    const query = (req.query.query || '').trim();
+    if (!query) return res.json([]);
+    const token = await getValidAccessToken();
+    const xml = `<?xml version="1.0" encoding="utf-8"?><GetSuggestedCategoriesRequest xmlns="urn:ebay:apis:eBLBaseComponents"><Query><![CDATA[${query}]]></Query></GetSuggestedCategoriesRequest>`;
+    const resp = await axios.post('https://api.ebay.com/ws/api.dll', xml, {
+      headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1331', 'X-EBAY-API-CALL-NAME': 'GetSuggestedCategories', 'X-EBAY-API-SITEID': '0', 'X-EBAY-API-IAF-TOKEN': token, 'Content-Type': 'text/xml' }
+    });
+    const matches = [...resp.data.matchAll(/<CategoryID>(\d+)<\/CategoryID>[\s\S]*?<CategoryName>(.*?)<\/CategoryName>/g)];
+    res.json(matches.slice(0, 8).map(m => ({ id: m[1], name: m[2] })));
+  } catch (e) {
+    console.error('[categories] error:', e.message);
+    res.json([]);
+  }
+});
+
+// GET /api/ebay/sold-comps?query=  — eBay Finding API completed/sold items
+app.get('/api/ebay/sold-comps', async (req, res) => {
+  try {
+    const query = (req.query.query || '').trim();
+    if (!query) return res.json([]);
+    const appId = process.env.EBAY_CLIENT_ID;
+    if (!appId) return res.json([]);
+    const url = `https://svcs.ebay.com/services/search/FindingService/v1?OPERATION-NAME=findCompletedItems&SERVICE-VERSION=1.0.0&SECURITY-APPNAME=${appId}&RESPONSE-DATA-FORMAT=JSON&keywords=${encodeURIComponent(query)}&itemFilter(0).name=SoldItemsOnly&itemFilter(0).value=true&sortOrder=EndTimeSoonest&paginationInput.entriesPerPage=6`;
+    const resp = await axios.get(url);
+    const items = resp.data?.findCompletedItemsResponse?.[0]?.searchResult?.[0]?.item || [];
+    res.json(items.map(item => ({
+      title: item.title?.[0] || '',
+      price: parseFloat(item.sellingStatus?.[0]?.currentPrice?.[0]?.__value__ || '0').toFixed(2),
+      currency: item.sellingStatus?.[0]?.currentPrice?.[0]?.['@currencyId'] || 'USD',
+      endDate: item.listingInfo?.[0]?.endTime?.[0] || '',
+      url: item.viewItemURL?.[0] || ''
+    })));
+  } catch (e) {
+    console.error('[sold-comps] error:', e.message);
+    res.json([]);
   }
 });
 

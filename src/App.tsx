@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
-import { PlusCircle, List, Check } from 'lucide-react';
+import { PlusCircle, List, Check, AlertTriangle } from 'lucide-react';
 import './index.css';
 
-// We will create these components next
 import Uploader from './components/Uploader';
 import ResultsEditor from './components/ResultsEditor';
 import StagedListings from './components/StagedListings';
@@ -10,56 +9,70 @@ import ListedProducts from './components/ListedProducts';
 import LoginScreen from './components/LoginScreen';
 import { generateListing } from './services/ai';
 import type { StagedListing } from './types';
+import { useToast } from './context/ToastContext';
 import './App.css';
 
+const DRAFT_INSTRUCTIONS_KEY = 'draft_instructions';
+const DRAFT_GENERATED_KEY = 'draft_generated';
+
 function App() {
+  const { toast } = useToast();
+
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isEbayConnected, setIsEbayConnected] = useState(false);
   const [appPassword, setAppPassword] = useState(localStorage.getItem('app_password') || '');
   const [isVerifying, setIsVerifying] = useState(true);
+  const [tokenExpiresAt, setTokenExpiresAt] = useState<number | null>(null);
 
   const [images, setImages] = useState<File[]>([]);
-  const [instructions, setInstructions] = useState('');
+  const [instructions, setInstructions] = useState(() => sessionStorage.getItem(DRAFT_INSTRUCTIONS_KEY) || '');
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedData, setGeneratedData] = useState<{
-    title: string;
-    description: string;
-    condition: string;
-    itemSpecifics: Record<string, string>;
-    category: string;
-    priceRecommendation: string;
-    priceJustification: string;
-    shippingEstimate: string;
-  } | null>(null);
-  
+    title: string; description: string; condition: string;
+    itemSpecifics: Record<string, string>; category: string;
+    priceRecommendation: string; priceJustification: string; shippingEstimate: string;
+  } | null>(() => {
+    try { const s = sessionStorage.getItem(DRAFT_GENERATED_KEY); return s ? JSON.parse(s) : null; } catch { return null; }
+  });
+
   const [stagedListings, setStagedListings] = useState<StagedListing[]>([]);
   const [activeTab, setActiveTab] = useState<'new' | 'staged' | 'listed'>('new');
   const [listedProducts, setListedProducts] = useState<StagedListing[]>([]);
   const [isLoadingListings, setIsLoadingListings] = useState(false);
 
+  // Draft autosave
+  useEffect(() => { sessionStorage.setItem(DRAFT_INSTRUCTIONS_KEY, instructions); }, [instructions]);
+  useEffect(() => {
+    if (generatedData) sessionStorage.setItem(DRAFT_GENERATED_KEY, JSON.stringify(generatedData));
+    else sessionStorage.removeItem(DRAFT_GENERATED_KEY);
+  }, [generatedData]);
+
   // Auto-Login Verification
   useEffect(() => {
     if (appPassword) {
-      fetch('/api/verify-password', {
-        headers: { 'x-app-password': appPassword }
-      })
-      .then(res => {
-        if (res.ok) {
-          setIsAuthenticated(true);
-          loadListings(appPassword);
-          // Check eBay auth status
-          fetch('/api/ebay/auth-status', {
-            headers: { 'x-app-password': appPassword }
-          })
-            .then(r => r.json())
-            .then(data => setIsEbayConnected(data.connected))
-            .catch(e => console.error("Error checking eBay auth:", e));
-        } else {
-          setAppPassword('');
-        }
-        setIsVerifying(false);
-      })
-      .catch(() => setIsVerifying(false));
+      fetch('/api/verify-password', { headers: { 'x-app-password': appPassword } })
+        .then(res => {
+          if (res.ok) {
+            setIsAuthenticated(true);
+            loadListings(appPassword);
+            fetch('/api/ebay/auth-status', { headers: { 'x-app-password': appPassword } })
+              .then(r => r.json())
+              .then(data => {
+                setIsEbayConnected(data.connected);
+                if (data.connected) {
+                  fetch('/api/ebay/token-info', { headers: { 'x-app-password': appPassword } })
+                    .then(r => r.json())
+                    .then(info => setTokenExpiresAt(info.refresh_token_expires_at || null))
+                    .catch(() => {});
+                }
+              })
+              .catch(e => console.error('Error checking eBay auth:', e));
+          } else {
+            setAppPassword('');
+          }
+          setIsVerifying(false);
+        })
+        .catch(() => setIsVerifying(false));
     } else {
       setIsVerifying(false);
     }
@@ -67,41 +80,30 @@ function App() {
 
   const handleEbayConnect = async () => {
     try {
-      const resp = await fetch('/api/ebay/auth-url', {
-        headers: { 'x-app-password': appPassword }
-      });
+      const resp = await fetch('/api/ebay/auth-url', { headers: { 'x-app-password': appPassword } });
       const data = await resp.json();
-      if (data.url) {
-        window.location.href = data.url;
-      } else if (data.error) {
-        alert("eBay Configuration Error: " + data.error);
-      }
-    } catch (e) {
-      alert("Error getting eBay login URL. Is the server running?");
+      if (data.url) window.location.href = data.url;
+      else if (data.error) toast('eBay Configuration Error: ' + data.error, 'error');
+    } catch {
+      toast('Error getting eBay login URL. Is the server running?', 'error');
     }
   };
 
-  const apiHeaders = (pw: string) => ({
-    'Content-Type': 'application/json',
-    'x-app-password': pw
-  });
+  const apiHeaders = (pw: string) => ({ 'Content-Type': 'application/json', 'x-app-password': pw });
 
-  // Images are stored locally per-device since they're large and device-specific
   const saveImages = (id: string, images: string[]) => {
     const store = JSON.parse(localStorage.getItem('listing_images') || '{}');
     store[id] = images;
     localStorage.setItem('listing_images', JSON.stringify(store));
   };
   const loadImages = (id: string): string[] => {
-    const store = JSON.parse(localStorage.getItem('listing_images') || '{}');
-    return store[id] || [];
+    return JSON.parse(localStorage.getItem('listing_images') || '{}')[id] || [];
   };
   const removeImages = (id: string) => {
     const store = JSON.parse(localStorage.getItem('listing_images') || '{}');
     delete store[id];
     localStorage.setItem('listing_images', JSON.stringify(store));
   };
-  // Prefer images from server (Cloudinary URLs); fall back to localStorage for legacy listings
   const mergeImages = (listings: StagedListing[]) => listings.map(l => ({
     ...l,
     images: l.images?.length ? l.images : loadImages(l.id)
@@ -111,16 +113,14 @@ function App() {
     if (base64Images.length === 0) return [];
     try {
       const resp = await fetch('/api/images/upload', {
-        method: 'POST',
-        headers: apiHeaders(appPassword),
+        method: 'POST', headers: apiHeaders(appPassword),
         body: JSON.stringify({ images: base64Images })
       });
       if (!resp.ok) throw new Error(await resp.text());
-      const data = await resp.json();
-      return data.urls as string[];
+      return (await resp.json()).urls as string[];
     } catch (e) {
       console.warn('Cloudinary upload failed, falling back to localStorage only:', e);
-      return base64Images; // fallback: keep base64 locally
+      return base64Images;
     }
   };
 
@@ -137,24 +137,17 @@ function App() {
       ...(Array.isArray(serverStaged) ? serverStaged : []).map((l: StagedListing) => l.id),
       ...(Array.isArray(serverListed) ? serverListed : []).map((l: StagedListing) => l.id),
     ]);
-
     const toUpload = [
       ...localStaged.filter(l => !serverIds.has(l.id)).map(l => ({ ...l, status: 'staged' as const })),
       ...localListed.filter(l => !serverIds.has(l.id)).map(l => ({ ...l, status: 'listed' as const })),
     ];
-
     if (toUpload.length > 0) {
-      console.log(`Migrating ${toUpload.length} listings from localStorage to server...`);
-      // Save images to per-device localStorage store, send metadata-only to server
-      toUpload.forEach(listing => {
-        if (listing.images?.length) saveImages(listing.id, listing.images);
-      });
+      toUpload.forEach(listing => { if (listing.images?.length) saveImages(listing.id, listing.images); });
       await Promise.all(toUpload.map(listing =>
         fetch('/api/listings', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-app-password': pw }, body: JSON.stringify({ listing }) })
       ));
       localStorage.removeItem('staged_ebay_listings');
       localStorage.removeItem('listed_ebay_listings');
-      console.log('Migration complete.');
     }
   };
 
@@ -166,7 +159,6 @@ function App() {
         fetch('/api/listings?status=staged', { headers: { 'x-app-password': pw } }).then(r => r.json()),
         fetch('/api/listings?status=listed', { headers: { 'x-app-password': pw } }).then(r => r.json()),
       ]);
-      console.log(`Loaded ${staged?.length ?? 0} staged, ${listed?.length ?? 0} listed from server`);
       setStagedListings(Array.isArray(staged) ? mergeImages(staged) : []);
       setListedProducts(Array.isArray(listed) ? mergeImages(listed) : []);
     } catch (e) {
@@ -181,13 +173,10 @@ function App() {
     const { images: rawImages, ...meta } = listing as any;
     const base64Images: string[] = (rawImages || []).filter((img: string) => img.startsWith('data:'));
     const existingUrls: string[] = (rawImages || []).filter((img: string) => img.startsWith('http'));
-
-    // Upload new base64 images to Cloudinary; keep any already-URL images
     const uploadedUrls = await uploadImagesToCloud(base64Images);
     const finalImages = [...existingUrls, ...uploadedUrls];
-
-    const newListing: StagedListing = { ...meta, id, createdAt: Date.now(), status: 'staged', images: finalImages };
-    // Also save to localStorage as fallback (e.g. if Cloudinary not configured)
+    const now = Date.now();
+    const newListing: StagedListing = { ...meta, id, createdAt: now, updatedAt: now, status: 'staged', images: finalImages };
     if (finalImages.some(img => img.startsWith('data:'))) saveImages(id, finalImages);
     setStagedListings(prev => [newListing, ...prev]);
     setImages([]);
@@ -199,8 +188,9 @@ function App() {
   };
 
   const handleUpdateStagedListing = async (updatedListing: StagedListing) => {
-    setStagedListings(prev => prev.map(l => l.id === updatedListing.id ? updatedListing : l));
-    await fetch(`/api/listings/${updatedListing.id}`, { method: 'PUT', headers: apiHeaders(appPassword), body: JSON.stringify({ updates: updatedListing }) });
+    const withTimestamp = { ...updatedListing, updatedAt: Date.now() };
+    setStagedListings(prev => prev.map(l => l.id === updatedListing.id ? withTimestamp : l));
+    await fetch(`/api/listings/${updatedListing.id}`, { method: 'PUT', headers: apiHeaders(appPassword), body: JSON.stringify({ updates: withTimestamp }) });
   };
 
   const handleDeleteStagedListing = async (id: string) => {
@@ -209,8 +199,14 @@ function App() {
     await fetch(`/api/listings/${id}`, { method: 'DELETE', headers: { 'x-app-password': appPassword } });
   };
 
+  const handleBulkDelete = async (ids: string[]) => {
+    ids.forEach(removeImages);
+    setStagedListings(prev => prev.filter(l => !ids.includes(l.id)));
+    await Promise.all(ids.map(id => fetch(`/api/listings/${id}`, { method: 'DELETE', headers: { 'x-app-password': appPassword } })));
+  };
+
   const handleMoveToListed = async (listing: StagedListing, draftId: string) => {
-    const listedListing: StagedListing = { ...listing, status: 'listed', ebayDraftId: draftId } as StagedListing;
+    const listedListing: StagedListing = { ...listing, status: 'listed', ebayDraftId: draftId, updatedAt: Date.now() };
     setStagedListings(prev => prev.filter(l => l.id !== listing.id));
     setListedProducts(prev => [listedListing, ...prev]);
     setActiveTab('listed');
@@ -230,110 +226,72 @@ function App() {
     const listing = listedProducts.find(l => l.id === id);
     if (!listing) return;
     const archived = !listing.archived;
-    setListedProducts(prev => prev.map(l => l.id === id ? { ...l, archived } : l));
-    await fetch(`/api/listings/${id}`, { method: 'PUT', headers: apiHeaders(appPassword), body: JSON.stringify({ updates: { archived } }) });
+    setListedProducts(prev => prev.map(l => l.id === id ? { ...l, archived, updatedAt: Date.now() } : l));
+    await fetch(`/api/listings/${id}`, { method: 'PUT', headers: apiHeaders(appPassword), body: JSON.stringify({ updates: { archived, updatedAt: Date.now() } }) });
   };
 
   const handleGenerate = async (activeImages: File[], activeInstructions: string) => {
     if (activeImages.length === 0 && !activeInstructions.trim()) {
-      alert("Please either add some images or provide instructions to generate a listing.");
+      toast('Please select at least one image or provide written instructions.', 'error');
       return;
     }
-    
     setIsGenerating(true);
     setGeneratedData(null);
     try {
       const result = await generateListing(activeImages, activeInstructions, appPassword);
       setGeneratedData(result);
     } catch (e: any) {
-      alert(e.message);
+      toast(e.message, 'error');
     } finally {
       setIsGenerating(false);
     }
   };
 
-  if (isVerifying) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><p>Authenticating...</p></div>;
+  // Token expiry display
+  const tokenDaysLeft = tokenExpiresAt ? Math.ceil((tokenExpiresAt - Date.now()) / (1000 * 60 * 60 * 24)) : null;
+  const tokenExpiryColor = tokenDaysLeft !== null
+    ? (tokenDaysLeft <= 2 ? '#ef4444' : tokenDaysLeft <= 7 ? '#f59e0b' : 'var(--success)')
+    : 'var(--success)';
 
+  const tabBtnStyle = (tab: string): React.CSSProperties => ({
+    background: activeTab === tab ? 'var(--glass-bg)' : 'transparent',
+    border: '1px solid',
+    borderColor: activeTab === tab ? 'var(--glass-border)' : 'transparent',
+    color: 'var(--text-primary)',
+    padding: '8px 16px', borderRadius: '6px', cursor: 'pointer',
+    display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 500, transition: 'all 0.2s ease'
+  });
+
+  if (isVerifying) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><p>Authenticating...</p></div>;
   if (!isAuthenticated) {
     return <LoginScreen setAuthenticated={(pw) => { localStorage.setItem('app_password', pw); setAppPassword(pw); setIsAuthenticated(true); }} />;
   }
 
   return (
     <div style={{ minHeight: '100vh', padding: '1rem' }}>
-      <nav style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 2rem', background: 'var(--glass-bg)', backdropFilter: 'blur(10px)', borderRadius: '1rem', border: '1px solid var(--border-color)', marginBottom: '2rem' }}>
+      <nav style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 2rem', background: 'var(--glass-bg)', backdropFilter: 'blur(10px)', borderRadius: '1rem', border: '1px solid var(--border-color)', marginBottom: '2rem', flexWrap: 'wrap', gap: '1rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'linear-gradient(135deg, #a855f7, #6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '1.2rem' }}>
-            eB
-          </div>
+          <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'linear-gradient(135deg, #a855f7, #6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '1.2rem' }}>eB</div>
           <h1 style={{ margin: 0, fontSize: '1.5rem' }}>Listing<span className="text-gradient">Stager</span></h1>
         </div>
         <div style={{ display: 'flex', gap: '1rem' }}>
-          <button 
-            className={`tab-btn ${activeTab === 'new' ? 'active' : ''}`}
-            onClick={() => setActiveTab('new')}
-            style={{
-              background: activeTab === 'new' ? 'var(--glass-bg)' : 'transparent',
-              border: '1px solid',
-              borderColor: activeTab === 'new' ? 'var(--glass-border)' : 'transparent',
-              color: 'var(--text-primary)',
-              padding: '8px 16px',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              fontWeight: 500,
-              transition: 'all 0.2s ease'
-            }}
-          >
-            <PlusCircle size={18} /> New Listing
-          </button>
-          <button 
-            className={`tab-btn ${activeTab === 'staged' ? 'active' : ''}`}
-            onClick={() => setActiveTab('staged')}
-            style={{
-              background: activeTab === 'staged' ? 'var(--glass-bg)' : 'transparent',
-              border: '1px solid',
-              borderColor: activeTab === 'staged' ? 'var(--glass-border)' : 'transparent',
-              color: 'var(--text-primary)',
-              padding: '8px 16px',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              fontWeight: 500,
-              transition: 'all 0.2s ease'
-            }}
-          >
-            <List size={18} /> Staged ({stagedListings.length})
-          </button>
-          <button 
-            className={`tab-btn ${activeTab === 'listed' ? 'active' : ''}`}
-            onClick={() => setActiveTab('listed')}
-            style={{
-              background: activeTab === 'listed' ? 'var(--glass-bg)' : 'transparent',
-              border: '1px solid',
-              borderColor: activeTab === 'listed' ? 'var(--glass-border)' : 'transparent',
-              color: 'var(--text-primary)',
-              padding: '8px 16px',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              fontWeight: 500,
-              transition: 'all 0.2s ease'
-            }}
-          >
-            <Check size={18} /> Listed ({listedProducts.length})
-          </button>
+          <button style={tabBtnStyle('new')} onClick={() => setActiveTab('new')}><PlusCircle size={18} /> New Listing</button>
+          <button style={tabBtnStyle('staged')} onClick={() => setActiveTab('staged')}><List size={18} /> Staged ({stagedListings.length})</button>
+          <button style={tabBtnStyle('listed')} onClick={() => setActiveTab('listed')}><Check size={18} /> Listed ({listedProducts.length})</button>
         </div>
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
           {isEbayConnected ? (
-            <span style={{ color: 'var(--success)', fontSize: '0.9rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-              <Check size={16} /> eBay: Connected
-            </span>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+              <span style={{ color: tokenExpiryColor, fontSize: '0.9rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                {tokenDaysLeft !== null && tokenDaysLeft <= 7 && <AlertTriangle size={14} />}
+                <Check size={16} /> eBay: Connected
+              </span>
+              {tokenDaysLeft !== null && (
+                <span style={{ fontSize: '0.72rem', color: tokenExpiryColor, opacity: 0.85 }}>
+                  Token expires in {tokenDaysLeft}d
+                </span>
+              )}
+            </div>
           ) : (
             <button className="btn-primary" onClick={handleEbayConnect} style={{ fontSize: '0.85rem', padding: '6px 12px' }}>
               Connect to eBay
@@ -345,31 +303,24 @@ function App() {
         </div>
       </nav>
 
-      {/* Main Content */}
       <main style={{ padding: '0 1rem 2rem 1rem', flex: 1, maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
         {isLoadingListings ? (
           <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>Loading listings...</div>
         ) : activeTab === 'new' ? (
           <div className="animate-fade-in" style={{ display: 'grid', gap: '2rem', gridTemplateColumns: generatedData ? 'minmax(400px, 1fr) minmax(600px, 1.8fr)' : 'max-content', justifyContent: 'center' }}>
             <div style={{ width: generatedData ? '100%' : '600px', maxWidth: '100%', margin: generatedData ? '0' : '0 auto' }}>
-              <Uploader 
-                images={images}
-                setImages={setImages}
-                instructions={instructions}
-                setInstructions={setInstructions}
-                onGenerate={handleGenerate}
-                isGenerating={isGenerating}
-                disabled={false}
+              <Uploader
+                images={images} setImages={setImages}
+                instructions={instructions} setInstructions={setInstructions}
+                onGenerate={handleGenerate} isGenerating={isGenerating} disabled={false}
               />
             </div>
-            
             {generatedData && (
               <div className="animate-fade-in">
-                <ResultsEditor 
-                  data={generatedData} 
-                  images={images}
-                  onStage={handleStageListing}
-                  onCancel={() => setGeneratedData(null)}
+                <ResultsEditor
+                  data={generatedData} images={images}
+                  onStage={handleStageListing} onCancel={() => setGeneratedData(null)}
+                  appPassword={appPassword}
                 />
               </div>
             )}
@@ -380,8 +331,10 @@ function App() {
               listings={stagedListings}
               onUpdate={handleUpdateStagedListing}
               onDelete={handleDeleteStagedListing}
+              onBulkDelete={handleBulkDelete}
               onMoveToListed={handleMoveToListed}
               isEbayConnected={isEbayConnected}
+              appPassword={appPassword}
             />
           </div>
         ) : (
