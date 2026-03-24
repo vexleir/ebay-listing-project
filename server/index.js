@@ -78,9 +78,12 @@ app.get('/api/ebay/callback', async (req, res) => {
 // GET /api/listings?status=staged|listed
 app.get('/api/listings', async (req, res) => {
   try {
-    const listings = await getListings(req.query.status || 'staged');
+    const status = req.query.status || 'staged';
+    const listings = await getListings(status);
+    console.log(`[listings] GET status=${status} -> ${listings.length} results`);
     res.json(listings);
   } catch (e) {
+    console.error('[listings] GET error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -88,9 +91,13 @@ app.get('/api/listings', async (req, res) => {
 // POST /api/listings
 app.post('/api/listings', async (req, res) => {
   try {
-    await createListing(req.body.listing);
+    const listing = req.body.listing;
+    console.log(`[listings] POST id=${listing?.id} status=${listing?.status} title=${listing?.title?.substring(0, 40)}`);
+    await createListing(listing);
+    console.log(`[listings] POST saved ok`);
     res.json({ success: true });
   } catch (e) {
+    console.error('[listings] POST error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });

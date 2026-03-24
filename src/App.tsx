@@ -86,13 +86,45 @@ function App() {
     'x-app-password': pw
   });
 
+  const migrateFromLocalStorage = async (pw: string) => {
+    const localStaged: StagedListing[] = JSON.parse(localStorage.getItem('staged_ebay_listings') || '[]');
+    const localListed: StagedListing[] = JSON.parse(localStorage.getItem('listed_ebay_listings') || '[]');
+    if (localStaged.length === 0 && localListed.length === 0) return;
+
+    const [serverStaged, serverListed] = await Promise.all([
+      fetch('/api/listings?status=staged', { headers: { 'x-app-password': pw } }).then(r => r.json()),
+      fetch('/api/listings?status=listed', { headers: { 'x-app-password': pw } }).then(r => r.json()),
+    ]);
+    const serverIds = new Set([
+      ...(Array.isArray(serverStaged) ? serverStaged : []).map((l: StagedListing) => l.id),
+      ...(Array.isArray(serverListed) ? serverListed : []).map((l: StagedListing) => l.id),
+    ]);
+
+    const toUpload = [
+      ...localStaged.filter(l => !serverIds.has(l.id)).map(l => ({ ...l, status: 'staged' as const })),
+      ...localListed.filter(l => !serverIds.has(l.id)).map(l => ({ ...l, status: 'listed' as const })),
+    ];
+
+    if (toUpload.length > 0) {
+      console.log(`Migrating ${toUpload.length} listings from localStorage to server...`);
+      await Promise.all(toUpload.map(listing =>
+        fetch('/api/listings', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-app-password': pw }, body: JSON.stringify({ listing }) })
+      ));
+      localStorage.removeItem('staged_ebay_listings');
+      localStorage.removeItem('listed_ebay_listings');
+      console.log('Migration complete.');
+    }
+  };
+
   const loadListings = async (pw: string) => {
     setIsLoadingListings(true);
     try {
+      await migrateFromLocalStorage(pw).catch(e => console.warn('Migration failed (non-fatal):', e));
       const [staged, listed] = await Promise.all([
         fetch('/api/listings?status=staged', { headers: { 'x-app-password': pw } }).then(r => r.json()),
         fetch('/api/listings?status=listed', { headers: { 'x-app-password': pw } }).then(r => r.json()),
       ]);
+      console.log(`Loaded ${staged?.length ?? 0} staged, ${listed?.length ?? 0} listed from server`);
       setStagedListings(Array.isArray(staged) ? staged : []);
       setListedProducts(Array.isArray(listed) ? listed : []);
     } catch (e) {
@@ -109,7 +141,8 @@ function App() {
     setInstructions('');
     setGeneratedData(null);
     setActiveTab('staged');
-    await fetch('/api/listings', { method: 'POST', headers: apiHeaders(appPassword), body: JSON.stringify({ listing: newListing }) });
+    const resp = await fetch('/api/listings', { method: 'POST', headers: apiHeaders(appPassword), body: JSON.stringify({ listing: newListing }) });
+    if (!resp.ok) console.error('Failed to save listing to server:', await resp.text());
   };
 
   const handleUpdateStagedListing = async (updatedListing: StagedListing) => {
