@@ -71,7 +71,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, isEba
     const pw = localStorage.getItem('app_password') || '';
     setPushingId(listing.id);
     try {
-      const resp = await fetch('http://localhost:3001/api/ebay/draft', {
+      const resp = await fetch('/api/ebay/draft', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

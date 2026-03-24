@@ -14,7 +14,7 @@ export default function LoginScreen({ setAuthenticated }: Props) {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('http://localhost:3001/api/verify-password', {
+      const res = await fetch('/api/verify-password', {
         headers: { 'x-app-password': pw }
       });
       if (res.ok) {

@@ -51,14 +51,14 @@ function App() {
   // Auto-Login Verification
   useEffect(() => {
     if (appPassword) {
-      fetch('http://localhost:3001/api/verify-password', {
+      fetch('/api/verify-password', {
         headers: { 'x-app-password': appPassword }
       })
       .then(res => {
         if (res.ok) {
           setIsAuthenticated(true);
           // Check eBay auth status
-          fetch('http://localhost:3001/api/ebay/auth-status', {
+          fetch('/api/ebay/auth-status', {
             headers: { 'x-app-password': appPassword }
           })
             .then(r => r.json())
@@ -77,7 +77,7 @@ function App() {
 
   const handleEbayConnect = async () => {
     try {
-      const resp = await fetch('http://localhost:3001/api/ebay/auth-url', {
+      const resp = await fetch('/api/ebay/auth-url', {
         headers: { 'x-app-password': appPassword }
       });
       const data = await resp.json();
