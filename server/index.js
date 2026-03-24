@@ -39,8 +39,11 @@ app.get('/api/verify-password', (req, res) => {
 // GET /api/ebay/auth-status
 app.get('/api/ebay/auth-status', async (req, res) => {
   try {
-    res.json({ connected: await hasValidSession() });
+    const connected = await hasValidSession();
+    console.log('[auth-status] hasValidSession =', connected);
+    res.json({ connected });
   } catch (error) {
+    console.error('[auth-status] error:', error.message);
     res.json({ connected: false });
   }
 });

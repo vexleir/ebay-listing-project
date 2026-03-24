@@ -43,16 +43,17 @@ async function saveTokens(tokens) {
   
   await connectDb();
   if (tokenCollection) {
-    const existing = (await getTokens()) || {};
-    const updatedTokens = {
-      ...existing,
-      ...tokens
-    };
+    const { _id, ...existing } = (await getTokens()) || {};
+    const updatedTokens = { ...existing, ...tokens };
+    console.log('[saveTokens] saving tokens, refresh_token_expires_at:', updatedTokens.refresh_token_expires_at);
     await tokenCollection.updateOne(
       { _id: 'admin_tokens' },
       { $set: updatedTokens },
       { upsert: true }
     );
+    console.log('[saveTokens] saved successfully');
+  } else {
+    console.warn('[saveTokens] tokenCollection not available - tokens not persisted');
   }
 }
 
