@@ -25,15 +25,25 @@ async function getAllListingsMeta() {
   return all;
 }
 
+function stripBase64Images(images) {
+  if (!Array.isArray(images)) return [];
+  // Keep URL images (Cloudinary/https), strip base64 data URLs (too large for MongoDB)
+  return images.filter(img => typeof img === 'string' && img.startsWith('http'));
+}
+
 async function createListing(listing) {
   const database = await getDb();
   const { _id, ...doc } = listing;
+  doc.images = stripBase64Images(listing.images);
   await database.collection('listings').insertOne(doc);
 }
 
 async function updateListing(id, updates) {
   const database = await getDb();
   const { _id, ...safeUpdates } = updates;
+  if (safeUpdates.images !== undefined) {
+    safeUpdates.images = stripBase64Images(safeUpdates.images);
+  }
   await database.collection('listings').updateOne({ id }, { $set: safeUpdates });
 }
 

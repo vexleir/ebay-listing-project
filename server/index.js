@@ -6,6 +6,7 @@ const path = require('path');
 const { generateListing } = require('./ai');
 const { getAuthUrl, exchangeCodeForToken, getValidAccessToken, hasValidSession } = require('./ebayAuth');
 const { getListings, createListing, updateListing, deleteListing, getAllListingsMeta } = require('./listings');
+const { uploadImage } = require('./cloudinary');
 
 const app = express();
 app.use(cors());
@@ -132,6 +133,26 @@ app.delete('/api/listings/:id', async (req, res) => {
   }
 });
 
+// POST /api/images/upload
+app.post('/api/images/upload', async (req, res) => {
+  try {
+    const { images } = req.body; // array of base64 data URLs
+    if (!Array.isArray(images) || images.length === 0) {
+      return res.status(400).json({ error: 'No images provided' });
+    }
+    if (!process.env.CLOUDINARY_CLOUD_NAME) {
+      return res.status(500).json({ error: 'Cloudinary not configured on server' });
+    }
+    console.log(`[images/upload] Uploading ${images.length} image(s) to Cloudinary...`);
+    const urls = await Promise.all(images.map(img => uploadImage(img)));
+    console.log(`[images/upload] Done. URLs:`, urls);
+    res.json({ urls });
+  } catch (e) {
+    console.error('[images/upload] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /api/generate (Moved from Frontend)
 app.post('/api/generate', async (req, res) => {
   try {
@@ -209,12 +230,26 @@ app.post('/api/ebay/draft', async (req, res) => {
     if (listing.images && listing.images.length > 0) {
       console.log(`Uploading ${listing.images.length} images to eBay EPS...`);
       for (let i = 0; i < listing.images.length; i++) {
-        const headerMatch = listing.images[i].match(/^data:image\/([a-zA-Z0-9]+);base64,/);
-        const format = headerMatch ? headerMatch[1] : 'jpeg';
-        
-        const base64Data = listing.images[i].split(',')[1] || listing.images[i];
-        if (!base64Data) continue;
-        
+        let imageBytes;
+        let format = 'jpeg';
+
+        if (listing.images[i].startsWith('http')) {
+          // Cloudinary or other URL — download the bytes
+          console.log(`Downloading image ${i + 1} from URL: ${listing.images[i].substring(0, 60)}...`);
+          const urlPath = listing.images[i].split('?')[0];
+          const ext = urlPath.split('.').pop()?.toLowerCase();
+          if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) format = ext === 'jpg' ? 'jpeg' : ext;
+          const imgRes = await axios.get(listing.images[i], { responseType: 'arraybuffer' });
+          imageBytes = Buffer.from(imgRes.data);
+        } else {
+          // Base64 data URL
+          const headerMatch = listing.images[i].match(/^data:image\/([a-zA-Z0-9]+);base64,/);
+          if (headerMatch) format = headerMatch[1];
+          const base64Data = listing.images[i].split(',')[1] || listing.images[i];
+          if (!base64Data) continue;
+          imageBytes = Buffer.from(base64Data, 'base64');
+        }
+
         console.log(`Uploading image ${i + 1} of format: ${format}`);
         // eBay EPS is highly prone to "File has corrupt image data" errors when sending Base64 purely inside XML.
         // The safest and only officially fully-supported method is MIME multipart/form-data.
@@ -235,7 +270,6 @@ app.post('/api/ebay/draft', async (req, res) => {
           `Content-Disposition: form-data; name="dummy"; filename="image_${i}.${format}"\r\n` +
           `Content-Type: application/octet-stream\r\n\r\n`
         );
-        const imageBytes = Buffer.from(base64Data, 'base64');
         const part3 = Buffer.from(`\r\n--${boundary}--\r\n`);
         const finalPayload = Buffer.concat([part1, imageBytes, part3]);
 

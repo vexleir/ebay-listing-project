@@ -86,6 +86,44 @@ function App() {
     'x-app-password': pw
   });
 
+  // Images are stored locally per-device since they're large and device-specific
+  const saveImages = (id: string, images: string[]) => {
+    const store = JSON.parse(localStorage.getItem('listing_images') || '{}');
+    store[id] = images;
+    localStorage.setItem('listing_images', JSON.stringify(store));
+  };
+  const loadImages = (id: string): string[] => {
+    const store = JSON.parse(localStorage.getItem('listing_images') || '{}');
+    return store[id] || [];
+  };
+  const removeImages = (id: string) => {
+    const store = JSON.parse(localStorage.getItem('listing_images') || '{}');
+    delete store[id];
+    localStorage.setItem('listing_images', JSON.stringify(store));
+  };
+  // Prefer images from server (Cloudinary URLs); fall back to localStorage for legacy listings
+  const mergeImages = (listings: StagedListing[]) => listings.map(l => ({
+    ...l,
+    images: l.images?.length ? l.images : loadImages(l.id)
+  }));
+
+  const uploadImagesToCloud = async (base64Images: string[]): Promise<string[]> => {
+    if (base64Images.length === 0) return [];
+    try {
+      const resp = await fetch('/api/images/upload', {
+        method: 'POST',
+        headers: apiHeaders(appPassword),
+        body: JSON.stringify({ images: base64Images })
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      const data = await resp.json();
+      return data.urls as string[];
+    } catch (e) {
+      console.warn('Cloudinary upload failed, falling back to localStorage only:', e);
+      return base64Images; // fallback: keep base64 locally
+    }
+  };
+
   const migrateFromLocalStorage = async (pw: string) => {
     const localStaged: StagedListing[] = JSON.parse(localStorage.getItem('staged_ebay_listings') || '[]');
     const localListed: StagedListing[] = JSON.parse(localStorage.getItem('listed_ebay_listings') || '[]');
@@ -107,6 +145,10 @@ function App() {
 
     if (toUpload.length > 0) {
       console.log(`Migrating ${toUpload.length} listings from localStorage to server...`);
+      // Save images to per-device localStorage store, send metadata-only to server
+      toUpload.forEach(listing => {
+        if (listing.images?.length) saveImages(listing.id, listing.images);
+      });
       await Promise.all(toUpload.map(listing =>
         fetch('/api/listings', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-app-password': pw }, body: JSON.stringify({ listing }) })
       ));
@@ -125,8 +167,8 @@ function App() {
         fetch('/api/listings?status=listed', { headers: { 'x-app-password': pw } }).then(r => r.json()),
       ]);
       console.log(`Loaded ${staged?.length ?? 0} staged, ${listed?.length ?? 0} listed from server`);
-      setStagedListings(Array.isArray(staged) ? staged : []);
-      setListedProducts(Array.isArray(listed) ? listed : []);
+      setStagedListings(Array.isArray(staged) ? mergeImages(staged) : []);
+      setListedProducts(Array.isArray(listed) ? mergeImages(listed) : []);
     } catch (e) {
       console.error('Failed to load listings:', e);
     } finally {
@@ -135,7 +177,18 @@ function App() {
   };
 
   const handleStageListing = async (listing: Omit<StagedListing, 'id' | 'createdAt'>) => {
-    const newListing: StagedListing = { ...listing, id: crypto.randomUUID(), createdAt: Date.now(), status: 'staged' } as StagedListing;
+    const id = crypto.randomUUID();
+    const { images: rawImages, ...meta } = listing as any;
+    const base64Images: string[] = (rawImages || []).filter((img: string) => img.startsWith('data:'));
+    const existingUrls: string[] = (rawImages || []).filter((img: string) => img.startsWith('http'));
+
+    // Upload new base64 images to Cloudinary; keep any already-URL images
+    const uploadedUrls = await uploadImagesToCloud(base64Images);
+    const finalImages = [...existingUrls, ...uploadedUrls];
+
+    const newListing: StagedListing = { ...meta, id, createdAt: Date.now(), status: 'staged', images: finalImages };
+    // Also save to localStorage as fallback (e.g. if Cloudinary not configured)
+    if (finalImages.some(img => img.startsWith('data:'))) saveImages(id, finalImages);
     setStagedListings(prev => [newListing, ...prev]);
     setImages([]);
     setInstructions('');
@@ -151,6 +204,7 @@ function App() {
   };
 
   const handleDeleteStagedListing = async (id: string) => {
+    removeImages(id);
     setStagedListings(prev => prev.filter(l => l.id !== id));
     await fetch(`/api/listings/${id}`, { method: 'DELETE', headers: { 'x-app-password': appPassword } });
   };
@@ -167,6 +221,7 @@ function App() {
   };
 
   const handleDeleteListedListing = async (id: string) => {
+    removeImages(id);
     setListedProducts(prev => prev.filter(l => l.id !== id));
     await fetch(`/api/listings/${id}`, { method: 'DELETE', headers: { 'x-app-password': appPassword } });
   };
