@@ -1,8 +1,20 @@
-const fs = require('fs');
-const path = require('path');
 const axios = require('axios');
+const { MongoClient } = require('mongodb');
 
-const TOKENS_FILE = path.join(__dirname, 'ebay_tokens.json');
+let client;
+let db;
+let tokenCollection;
+
+async function connectDb() {
+  const uri = process.env.MONGODB_URI;
+  if (!uri) return; // Fallback to memory or env if absolutely necessary, but expected to fail without DB
+  if (!client) {
+    client = new MongoClient(uri);
+    await client.connect();
+    db = client.db('ebay_lister');
+    tokenCollection = db.collection('tokens');
+  }
+}
 
 const SCOPES = [
   'https://api.ebay.com/oauth/api_scope',
@@ -11,18 +23,16 @@ const SCOPES = [
   'https://api.ebay.com/oauth/api_scope/sell.inventory'
 ].join(' ');
 
-function getTokens() {
-  if (fs.existsSync(TOKENS_FILE)) {
-    try {
-      return JSON.parse(fs.readFileSync(TOKENS_FILE, 'utf8'));
-    } catch (e) {
-      console.error("Failed to parse ebay_tokens.json");
-    }
+async function getTokens() {
+  await connectDb();
+  if (tokenCollection) {
+    const doc = await tokenCollection.findOne({ _id: 'admin_tokens' });
+    return doc || null;
   }
   return null;
 }
 
-function saveTokens(tokens) {
+async function saveTokens(tokens) {
   // Add an expiration timestamp
   if (tokens.expires_in) {
     tokens.expires_at = Date.now() + (tokens.expires_in * 1000) - (5 * 60 * 1000); // 5 mins buffer
@@ -31,14 +41,19 @@ function saveTokens(tokens) {
     tokens.refresh_token_expires_at = Date.now() + (tokens.refresh_token_expires_in * 1000);
   }
   
-  // If we're just refreshing the access token, we might not get a new refresh token. Keep the old one.
-  const existing = getTokens() || {};
-  const updatedTokens = {
-    ...existing,
-    ...tokens
-  };
-  
-  fs.writeFileSync(TOKENS_FILE, JSON.stringify(updatedTokens, null, 2));
+  await connectDb();
+  if (tokenCollection) {
+    const existing = (await getTokens()) || {};
+    const updatedTokens = {
+      ...existing,
+      ...tokens
+    };
+    await tokenCollection.updateOne(
+      { _id: 'admin_tokens' },
+      { $set: updatedTokens },
+      { upsert: true }
+    );
+  }
 }
 
 function getAuthUrl() {
@@ -77,12 +92,12 @@ async function exchangeCodeForToken(code) {
     }
   });
 
-  saveTokens(response.data);
+  await saveTokens(response.data);
   return response.data;
 }
 
 async function getValidAccessToken() {
-  let tokens = getTokens();
+  let tokens = await getTokens();
   
   if (!tokens || !tokens.refresh_token) {
     // Fallback to manual token if available
@@ -115,12 +130,12 @@ async function getValidAccessToken() {
     }
   });
 
-  saveTokens(response.data);
+  await saveTokens(response.data);
   return response.data.access_token;
 }
 
-function hasValidSession() {
-  const tokens = getTokens();
+async function hasValidSession() {
+  const tokens = await getTokens();
   if (tokens && tokens.refresh_token && tokens.refresh_token_expires_at > Date.now()) {
     return true;
   }
