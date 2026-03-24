@@ -16,6 +16,11 @@ function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [tempApiKey, setTempApiKey] = useState('');
   const [tempEbayToken, setTempEbayToken] = useState('');
+  const [ebayConfig, setEbayConfig] = useState({
+    fulfillmentPolicy: '', paymentPolicy: '', returnPolicy: '',
+    merchantLocation: '', categoryId: ''
+  });
+  const [tempEbayConfig, setTempEbayConfig] = useState(ebayConfig);
   
   // App state for the current generation
   const [images, setImages] = useState<File[]>([]);
@@ -45,6 +50,16 @@ function App() {
       setEbayToken(savedEbay);
       setTempEbayToken(savedEbay);
     }
+    const savedConfig = localStorage.getItem('ebay_push_config');
+    if (savedConfig) {
+      try {
+        const parsed = JSON.parse(savedConfig);
+        setEbayConfig(parsed);
+        setTempEbayConfig(parsed);
+      } catch (e) {
+        console.error('Failed to parse config');
+      }
+    }
     
     const savedListings = localStorage.getItem('staged_ebay_listings');
     if (savedListings) {
@@ -68,8 +83,10 @@ function App() {
   const saveSettings = () => {
     localStorage.setItem('gemini_api_key', tempApiKey);
     localStorage.setItem('ebay_api_token', tempEbayToken);
+    localStorage.setItem('ebay_push_config', JSON.stringify(tempEbayConfig));
     setApiKey(tempApiKey);
     setEbayToken(tempEbayToken);
+    setEbayConfig(tempEbayConfig);
     setIsSettingsOpen(false);
   };
 
@@ -256,37 +273,59 @@ function App() {
           backgroundColor: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
         }}>
-          <div className="glass-panel" style={{ width: '400px', padding: '2rem' }}>
+          <div className="glass-panel" style={{ width: '500px', padding: '2rem', maxHeight: '90vh', overflowY: 'auto' }}>
             <h2 style={{ marginBottom: '1.5rem' }}>Settings</h2>
-            
             
             <div style={{ marginBottom: '1.5rem' }}>
               <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)' }}>
                 Google Gemini API Key
               </label>
-              <input 
-                type="password" 
-                className="input-base" 
-                value={tempApiKey}
-                onChange={e => setTempApiKey(e.target.value)}
-                placeholder="AIzaSy..."
-              />
+              <input type="password" className="input-base" value={tempApiKey}
+                onChange={e => setTempApiKey(e.target.value)} placeholder="AIzaSy..." />
+            </div>
+
+            <h3 style={{ marginBottom: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
+              eBay Integration (Required for Live Push)
+            </h3>
+
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)' }}>
+                eBay User OAuth Token
+              </label>
+              <input type="password" className="input-base" value={tempEbayToken}
+                onChange={e => setTempEbayToken(e.target.value)} placeholder="v^1.1#i^1#r^..." />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+              <div>
+                <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)' }}>Fulfillment Policy ID</label>
+                <input type="text" className="input-base" value={tempEbayConfig.fulfillmentPolicy}
+                  onChange={e => setTempEbayConfig({...tempEbayConfig, fulfillmentPolicy: e.target.value})} placeholder="e.g. 12345678013" />
+              </div>
+              <div>
+                <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)' }}>Payment Policy ID</label>
+                <input type="text" className="input-base" value={tempEbayConfig.paymentPolicy}
+                  onChange={e => setTempEbayConfig({...tempEbayConfig, paymentPolicy: e.target.value})} placeholder="e.g. 12345678014" />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
+              <div>
+                <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)' }}>Return Policy ID</label>
+                <input type="text" className="input-base" value={tempEbayConfig.returnPolicy}
+                  onChange={e => setTempEbayConfig({...tempEbayConfig, returnPolicy: e.target.value})} placeholder="e.g. 12345678015" />
+              </div>
+              <div>
+                <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)' }}>Merchant Location Key</label>
+                <input type="text" className="input-base" value={tempEbayConfig.merchantLocation}
+                  onChange={e => setTempEbayConfig({...tempEbayConfig, merchantLocation: e.target.value})} placeholder="e.g. DEFAULT" />
+              </div>
             </div>
 
             <div style={{ marginBottom: '1.5rem' }}>
-              <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)' }}>
-                eBay User OAuth Token (Optional)
-              </label>
-              <input 
-                type="password" 
-                className="input-base" 
-                value={tempEbayToken}
-                onChange={e => setTempEbayToken(e.target.value)}
-                placeholder="v^1.1#i^1#r^..."
-              />
-              <p style={{ marginTop: '8px', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                Required for pushing to eBay. Saved securely in your browser.
-              </p>
+              <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)' }}>Default eBay Category ID</label>
+              <input type="text" className="input-base" value={tempEbayConfig.categoryId}
+                onChange={e => setTempEbayConfig({...tempEbayConfig, categoryId: e.target.value})} placeholder="e.g. 261068" />
             </div>
             
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>

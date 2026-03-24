@@ -15,6 +15,13 @@ export default function StagedListingsView({ listings, onUpdate, onDelete }: Sta
   const [pushingId, setPushingId] = useState<string | null>(null);
 
   const getEbayToken = () => localStorage.getItem('ebay_api_token') || '';
+  const getEbayConfig = () => {
+    try {
+      return JSON.parse(localStorage.getItem('ebay_push_config') || '{}');
+    } catch {
+      return {};
+    }
+  };
 
   if (listings.length === 0) {
     return (
@@ -70,10 +77,17 @@ export default function StagedListingsView({ listings, onUpdate, onDelete }: Sta
 
   const handlePushToEbay = async (listing: StagedListing) => {
     const token = getEbayToken();
+    const config = getEbayConfig();
+    
     if (!token) {
       alert("Please configure your eBay Token in Settings first.");
       return;
     }
+    if (!config.fulfillmentPolicy || !config.paymentPolicy || !config.returnPolicy || !config.merchantLocation || !config.categoryId) {
+      alert("Please configure all your eBay Policy IDs and Category ID in Settings to enable live pushing.");
+      return;
+    }
+
     setPushingId(listing.id);
     try {
       const resp = await fetch('http://localhost:3001/api/ebay/draft', {
@@ -82,7 +96,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete }: Sta
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify(listing)
+        body: JSON.stringify({ listing, config })
       });
       if (!resp.ok) throw new Error(await resp.text());
       const data = await resp.json();

@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const axios = require('axios');
 
 const app = express();
 app.use(cors());
@@ -7,53 +8,98 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const PORT = 3001;
+const EBAY_API_BASE = 'https://api.ebay.com';
 
 // POST /api/ebay/draft
-// Creates a draft listing on eBay using the user's OAuth token
 app.post('/api/ebay/draft', async (req, res) => {
   const token = req.headers.authorization?.split(' ')[1];
-  const listingData = req.body;
+  const { listing, config } = req.body;
 
   if (!token) {
     return res.status(401).json({ error: 'Missing eBay API token' });
   }
 
   try {
-    console.log('--- Received request to push to eBay ---');
-    console.log('Title:', listingData.title);
-    console.log('Price:', listingData.priceRecommendation);
-    console.log('Specifics:', listingData.itemSpecifics);
+    console.log(`--- Initiating live push to eBay for: ${listing.title} ---`);
     
-    // IMPORTANT TODO: Integrating with eBay's API directly.
-    // eBay's Inventory API requires the following to create a listing:
-    // 1. A predefined Fulfillment Policy, Payment Policy, and Return Policy ID on your eBay account.
-    // 2. A mapped eBay Category ID (e.g., 261068).
-    // 
-    // Usually, you would call:
-    // 1. PUT https://api.ebay.com/sell/inventory/v1/inventory_item/{sku}
-    // 2. POST https://api.ebay.com/sell/inventory/v1/offer
-    // 
-    // Since Business Policies are unique to the user, we've set up this proxy 
-    // to handle the request safely. You will need to substitute this mock response 
-    // with the actual fetch calls to api.ebay.com using your policy IDs.
+    // 1. Generate a unique SKU for this item
+    const sku = `SKU-${Date.now()}`;
+    
+    // Parse numeric price from recommendation (assuming format string might have "$100" or similar)
+    const rawPrice = listing.priceRecommendation.replace(/[^0-9.]/g, '');
+    const validPrice = rawPrice && !isNaN(parseFloat(rawPrice)) ? parseFloat(rawPrice).toFixed(2) : "50.00";
 
-    // Simulated API call delay
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    // 2. Create the Inventory Item (Product Details)
+    // Note: We skip `imageUrls` because eBay Inventory API requires public HTTPS links, not base64. 
+    // Sending base64 strings directly to this endpoint will result in an error.
+    const inventoryPayload = {
+      product: {
+        title: listing.title,
+        description: listing.description,
+        aspects: {} // We could map itemSpecifics here, but they require strict exact string matching with eBay catalog.
+      },
+      condition: "USED_EXCELLENT",
+      availability: {
+        shipToLocationAvailability: {
+          quantity: 1
+        }
+      }
+    };
 
-    // Simulated successful response
-    const mockDraftId = 'EBY-' + Math.floor(Math.random() * 10000000);
+    console.log('Creating Inventory Item...');
+    await axios.put(`${EBAY_API_BASE}/sell/inventory/v1/inventory_item/${sku}`, inventoryPayload, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Language': 'en-US',
+        'Content-Type': 'application/json'
+      }
+    });
+
+    // 3. Create the Offer (Unpublished Draft)
+    const offerPayload = {
+      sku: sku,
+      marketplaceId: "EBAY_US",
+      format: "FIXED_PRICE",
+      categoryId: config.categoryId || "261068",
+      availableQuantity: 1,
+      pricingSummary: {
+        price: {
+          value: validPrice,
+          currency: "USD"
+        }
+      },
+      listingPolicies: {
+        fulfillmentPolicyId: config.fulfillmentPolicy,
+        paymentPolicyId: config.paymentPolicy,
+        returnPolicyId: config.returnPolicy
+      },
+      merchantLocationKey: config.merchantLocation
+    };
+
+    console.log('Creating Offer...');
+    const offerResp = await axios.post(`${EBAY_API_BASE}/sell/inventory/v1/offer`, offerPayload, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Language': 'en-US',
+        'Content-Type': 'application/json'
+      }
+    });
+
+    const offerId = offerResp.data.offerId;
+    console.log(`Successfully pushed to eBay! Offer ID: ${offerId}`);
     
-    console.log(`Successfully mocked push for ${listingData.title}. Draft ID: ${mockDraftId}`);
-    
-    res.json({ success: true, draftId: mockDraftId });
+    res.json({ success: true, draftId: offerId, sku: sku });
     
   } catch (error) {
-    console.error('eBay API Error:', error);
+    if (error.response) {
+      console.error('eBay API Error Response:', JSON.stringify(error.response.data, null, 2));
+      return res.status(error.response.status).json({ error: 'eBay API Error: ' + JSON.stringify(error.response.data.errors) });
+    }
+    console.error('Node Error:', error.message);
     res.status(500).json({ error: 'Failed to push draft to eBay' });
   }
 });
 
 app.listen(PORT, () => {
   console.log(`eBay Proxy Server running locally on http://localhost:${PORT}`);
-  console.log(`Make sure to supply your eBay OAuth token from the frontend UI.`);
 });
