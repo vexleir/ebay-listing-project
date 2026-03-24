@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ExternalLink, Calendar, CheckCircle, Trash2, Archive, ArchiveRestore, Search, ChevronDown, LayoutGrid, List } from 'lucide-react';
 import type { StagedListing } from '../types';
+import ImageSearchButton from './ImageSearchButton';
 
 interface ListedProductsProps {
   listings: StagedListing[];
@@ -82,8 +83,9 @@ export default function ListedProductsView({ listings, onDelete, onArchive }: Li
       )}
       <div style={{ display: 'flex', height: '140px', background: 'rgba(0,0,0,0.5)' }}>
         {listing.images && listing.images.length > 0 ? (
-          <div style={{ flex: 1, height: '100%' }}>
+          <div style={{ flex: 1, height: '100%', position: 'relative' }}>
             <img src={listing.images[0]} alt="Main" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <ImageSearchButton src={listing.images[0]} />
           </div>
         ) : (
           <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>
@@ -143,9 +145,12 @@ export default function ListedProductsView({ listings, onDelete, onArchive }: Li
       }}
     >
       {/* Thumbnail */}
-      <div style={{ width: '56px', height: '56px', flexShrink: 0, borderRadius: '6px', overflow: 'hidden', background: 'rgba(0,0,0,0.4)' }}>
+      <div style={{ width: '56px', height: '56px', flexShrink: 0, borderRadius: '6px', overflow: 'hidden', background: 'rgba(0,0,0,0.4)', position: 'relative' }}>
         {listing.images?.[0] ? (
-          <img src={listing.images[0]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          <>
+            <img src={listing.images[0]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <ImageSearchButton src={listing.images[0]} size="sm" />
+          </>
         ) : (
           <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', fontSize: '0.7rem' }}>—</div>
         )}

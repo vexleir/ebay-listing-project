@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Trash2, Edit2, Copy, Check, Calendar, LayoutGrid, List } from 'lucide-react';
 import type { StagedListing } from '../types';
 import ResultsEditor from './ResultsEditor';
+import ImageSearchButton from './ImageSearchButton';
 
 interface StagedListingsProps {
   listings: StagedListing[];
@@ -140,17 +141,19 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onMov
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '1.5rem' }}>
           {listings.map(listing => (
             <div key={listing.id} className="glass-card" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              <div style={{ display: 'flex', height: '140px', background: 'rgba(0,0,0,0.5)' }}>
+              <div style={{ display: 'flex', height: '140px', background: 'rgba(0,0,0,0.5)', position: 'relative' }}>
                 {listing.images && listing.images.length > 0 ? (
                   <>
-                    <div style={{ flex: 2, height: '100%' }}>
+                    <div style={{ flex: 2, height: '100%', position: 'relative' }}>
                       <img src={listing.images[0]} alt="Main" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      <ImageSearchButton src={listing.images[0]} />
                     </div>
                     {listing.images.length > 1 && (
                       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px', marginLeft: '2px' }}>
                         {listing.images.slice(1, 3).map((img, i) => (
-                          <div key={i} style={{ flex: 1, height: '50%' }}>
+                          <div key={i} style={{ flex: 1, height: '50%', position: 'relative' }}>
                             <img src={img} alt={`Thumb ${i}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            <ImageSearchButton src={img} size="sm" />
                           </div>
                         ))}
                       </div>
@@ -212,9 +215,12 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onMov
               }}
             >
               {/* Thumbnail */}
-              <div style={{ width: '56px', height: '56px', flexShrink: 0, borderRadius: '6px', overflow: 'hidden', background: 'rgba(0,0,0,0.4)' }}>
+              <div style={{ width: '56px', height: '56px', flexShrink: 0, borderRadius: '6px', overflow: 'hidden', background: 'rgba(0,0,0,0.4)', position: 'relative' }}>
                 {listing.images?.[0] ? (
-                  <img src={listing.images[0]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  <>
+                    <img src={listing.images[0]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    <ImageSearchButton src={listing.images[0]} size="sm" />
+                  </>
                 ) : (
                   <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', fontSize: '0.7rem' }}>—</div>
                 )}
