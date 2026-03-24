@@ -11,6 +11,8 @@ interface ResultsEditorProps {
     category: string;
     priceRecommendation: string;
     shippingEstimate: string;
+    sku?: string;
+    sellerNotes?: string;
   };
   images: File[];
   onStage: (listing: Omit<StagedListing, 'id' | 'createdAt'>) => void;
@@ -25,6 +27,8 @@ export default function ResultsEditor({ data, images, onStage, onCancel }: Resul
   const [priceRecommendation, setPriceRecommendation] = useState(data.priceRecommendation);
   const [shippingEstimate, setShippingEstimate] = useState(data.shippingEstimate);
   const [itemSpecifics, setItemSpecifics] = useState<Record<string, string>>(data.itemSpecifics);
+  const [sku, setSku] = useState(data.sku || '');
+  const [sellerNotes, setSellerNotes] = useState(data.sellerNotes || '');
   const [previewMode, setPreviewMode] = useState<boolean>(true);
   
   // Create object URLs for images just to save them in our staged listing
@@ -85,7 +89,7 @@ export default function ResultsEditor({ data, images, onStage, onCancel }: Resul
           )}
         </div>
 
-        {/* Category & Pricing & Shipping */}
+        {/* Category & Pricing & SKU */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '1rem' }}>
           <div>
             <label style={{ display: 'flex', marginBottom: '8px', color: 'var(--text-secondary)' }}>Category</label>
@@ -95,11 +99,20 @@ export default function ResultsEditor({ data, images, onStage, onCancel }: Resul
             <label style={{ display: 'flex', marginBottom: '8px', color: 'var(--text-secondary)' }}>Price Recommendation</label>
             <input type="text" className="input-base" value={priceRecommendation} onChange={e => setPriceRecommendation(e.target.value)} />
           </div>
+          <div>
+            <label style={{ display: 'flex', marginBottom: '8px', color: 'var(--text-secondary)' }}>SKU / Custom Label <span style={{ fontSize: '0.75rem', opacity: 0.6, marginLeft: '4px' }}>(sent to eBay)</span></label>
+            <input type="text" className="input-base" value={sku} onChange={e => setSku(e.target.value)} placeholder="e.g. ITEM-001" />
+          </div>
         </div>
 
         <div>
            <label style={{ display: 'flex', marginBottom: '8px', color: 'var(--text-secondary)' }}>Shipping Estimate</label>
            <textarea className="input-base" value={shippingEstimate} onChange={e => setShippingEstimate(e.target.value)} rows={4} style={{ resize: 'vertical' }} />
+        </div>
+
+        <div>
+          <label style={{ display: 'flex', marginBottom: '8px', color: 'var(--text-secondary)' }}>Seller Notes <span style={{ fontSize: '0.75rem', opacity: 0.6, marginLeft: '4px' }}>(internal only, not sent to eBay)</span></label>
+          <textarea className="input-base" value={sellerNotes} onChange={e => setSellerNotes(e.target.value)} rows={2} placeholder="Personal notes about this item..." style={{ resize: 'vertical' }} />
         </div>
 
         {/* Condition Field */}
@@ -186,7 +199,7 @@ export default function ResultsEditor({ data, images, onStage, onCancel }: Resul
           className="btn-primary" 
           style={{ flex: 2 }} 
           disabled={title.length > 80}
-          onClick={() => onStage({ title, condition, description, category, priceRecommendation, shippingEstimate, itemSpecifics, images: imageUrls })}
+          onClick={() => onStage({ title, condition, description, category, priceRecommendation, shippingEstimate, itemSpecifics, images: imageUrls, sku, sellerNotes })}
         >
           <Save size={18} /> Save & Stage Listing
         </button>

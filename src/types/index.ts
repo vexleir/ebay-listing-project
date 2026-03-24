@@ -9,6 +9,8 @@ export interface StagedListing {
   shippingEstimate: string;
   images: string[]; // base64 or object URLs
   createdAt: number;
+  sku?: string;
+  sellerNotes?: string;
 }
 
 export interface AppState {

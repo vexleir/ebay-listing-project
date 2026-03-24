@@ -143,6 +143,15 @@ function App() {
     saveStagedListings(updated);
   };
 
+  const handleMoveToListed = (listing: StagedListing, draftId: string) => {
+    const updated = stagedListings.filter(l => l.id !== listing.id);
+    saveStagedListings(updated);
+    const listed = [{ ...listing, ebayDraftId: draftId }, ...listedProducts];
+    setListedProducts(listed);
+    localStorage.setItem('listed_ebay_listings', JSON.stringify(listed));
+    setActiveTab('listed');
+  };
+
   const handleGenerate = async (activeImages: File[], activeInstructions: string) => {
     if (activeImages.length === 0 && !activeInstructions.trim()) {
       alert("Please either add some images or provide instructions to generate a listing.");
@@ -283,10 +292,11 @@ function App() {
           </div>
         ) : activeTab === 'staged' ? (
           <div className="animate-fade-in">
-            <StagedListings 
-              listings={stagedListings} 
+            <StagedListings
+              listings={stagedListings}
               onUpdate={handleUpdateStagedListing}
               onDelete={handleDeleteStagedListing}
+              onMoveToListed={handleMoveToListed}
               isEbayConnected={isEbayConnected}
             />
           </div>

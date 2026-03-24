@@ -247,6 +247,7 @@ app.post('/api/ebay/draft', async (req, res) => {
   <WarningLevel>High</WarningLevel>
   <Item>
     <Title><![CDATA[${listing.title.substring(0, 80)}]]></Title>
+    ${listing.sku ? `<SKU><![CDATA[${listing.sku}]]></SKU>` : ''}
     <Description><![CDATA[${listing.description}]]></Description>
     <PrimaryCategory>
       <CategoryID>${config.categoryId}</CategoryID>

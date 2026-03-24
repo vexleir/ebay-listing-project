@@ -7,10 +7,11 @@ interface StagedListingsProps {
   listings: StagedListing[];
   onUpdate: (listing: StagedListing) => void;
   onDelete: (id: string) => void;
+  onMoveToListed: (listing: StagedListing, draftId: string) => void;
   isEbayConnected?: boolean;
 }
 
-export default function StagedListingsView({ listings, onUpdate, onDelete, isEbayConnected }: StagedListingsProps) {
+export default function StagedListingsView({ listings, onUpdate, onDelete, onMoveToListed, isEbayConnected }: StagedListingsProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [pushingId, setPushingId] = useState<string | null>(null);
@@ -42,7 +43,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, isEba
     
     return (
       <div style={{ maxWidth: '800px', margin: '0 auto', height: '80vh' }}>
-        <ResultsEditor 
+        <ResultsEditor
           data={{
             title: listingToEdit.title,
             description: listingToEdit.description,
@@ -50,7 +51,9 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, isEba
             category: listingToEdit.category,
             priceRecommendation: listingToEdit.priceRecommendation,
             shippingEstimate: listingToEdit.shippingEstimate,
-            itemSpecifics: listingToEdit.itemSpecifics
+            itemSpecifics: listingToEdit.itemSpecifics,
+            sku: listingToEdit.sku,
+            sellerNotes: listingToEdit.sellerNotes
           }}
           images={[]} // Images are already base64 in the listing, so we don't re-upload
           onStage={(updatedData) => {
@@ -81,8 +84,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, isEba
       });
       if (!resp.ok) throw new Error(await resp.text());
       const data = await resp.json();
-      alert(`Success! Check your eBay Drafts for Item ID: ${data.draftId}`);
-      // In a full implementation, we would move this to the "Listed" tab.
+      onMoveToListed(listing, data.draftId);
     } catch (e: any) {
       alert("Error pushing to eBay: " + e.message);
     } finally {
@@ -137,14 +139,24 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, isEba
               {listing.condition}
             </p>
             
-            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
               <span style={{ fontSize: '0.8rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px' }}>
                 Est: {listing.priceRecommendation}
               </span>
               <span style={{ fontSize: '0.8rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px' }}>
                 {listing.category}
               </span>
+              {listing.sku && (
+                <span style={{ fontSize: '0.8rem', background: 'rgba(99,102,241,0.25)', padding: '2px 8px', borderRadius: '4px', color: '#a5b4fc' }}>
+                  SKU: {listing.sku}
+                </span>
+              )}
             </div>
+            {listing.sellerNotes && (
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', padding: '6px 8px', marginBottom: '0.75rem', fontStyle: 'italic' }}>
+                📝 {listing.sellerNotes}
+              </p>
+            )}
 
             <div style={{ marginTop: 'auto', display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', alignItems: 'center', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
               
