@@ -72,10 +72,11 @@ async function generateListing(imageParts, instructions, apiKey) {
       2. "description": An HTML description optimized to maximize purchase likelihood. Include a clear Call To Action. The styling must be inline CSS with a color scheme matching the product. Look premium and trustworthy. Do NOT wrap this field value in markdown.
       3. "itemSpecifics": A JSON object containing key/value pairs of relevant eBay Item Specifics (e.g. "Brand": "Nike", "MPN": "Does Not Apply"). Fill in "Unable to determine" if unknown.
       4. "category": The most accurate suggested eBay category path (e.g. "Collectibles > Historical Memorabilia").
-      5. "priceRecommendation": A recommended historical or estimated price range based on similar items.
-      6. "shippingEstimate": A detailed shipping estimate including estimated weight, dimensions, recommended service, packaging, and cost.
+      5. "priceRecommendation": A single recommended sell price as a plain decimal number string only (e.g. "49.99"). No currency symbols, no ranges, no text — just the number.
+      6. "priceJustification": A brief explanation of why that price was chosen (comparable sold listings, condition, rarity, etc.). This is for the seller's reference only.
+      7. "shippingEstimate": A detailed shipping estimate including estimated weight, dimensions, recommended service, packaging, and cost.
 
-      Respond ONLY with the raw JSON object matching the keys: condition, description, itemSpecifics, category, priceRecommendation, shippingEstimate. Do not include markdown code block wrappers.
+      Respond ONLY with the raw JSON object matching the keys: condition, description, itemSpecifics, category, priceRecommendation, priceJustification, shippingEstimate. Do not include markdown code block wrappers.
     `;
 
     const finalResult = await model.generateContent([descConditionPrompt, ...imageParts]);
@@ -107,7 +108,8 @@ async function generateListing(imageParts, instructions, apiKey) {
       description: parsedFinal.description,
       itemSpecifics: parsedFinal.itemSpecifics || {},
       category: parsedFinal.category || "Unknown",
-      priceRecommendation: parsedFinal.priceRecommendation || "Unknown",
+      priceRecommendation: parsedFinal.priceRecommendation || "0.00",
+      priceJustification: parsedFinal.priceJustification || "",
       shippingEstimate: finalShipping
     };
   };

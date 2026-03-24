@@ -10,6 +10,7 @@ interface ResultsEditorProps {
     itemSpecifics: Record<string, string>;
     category: string;
     priceRecommendation: string;
+    priceJustification?: string;
     shippingEstimate: string;
     sku?: string;
     sellerNotes?: string;
@@ -25,6 +26,7 @@ export default function ResultsEditor({ data, images, onStage, onCancel }: Resul
   const [condition, setCondition] = useState(data.condition);
   const [category, setCategory] = useState(data.category);
   const [priceRecommendation, setPriceRecommendation] = useState(data.priceRecommendation);
+  const [priceJustification] = useState(data.priceJustification || '');
   const [shippingEstimate, setShippingEstimate] = useState(data.shippingEstimate);
   const [itemSpecifics, setItemSpecifics] = useState<Record<string, string>>(data.itemSpecifics);
   const [sku, setSku] = useState(data.sku || '');
@@ -96,8 +98,15 @@ export default function ResultsEditor({ data, images, onStage, onCancel }: Resul
             <input type="text" className="input-base" value={category} onChange={e => setCategory(e.target.value)} />
           </div>
           <div>
-            <label style={{ display: 'flex', marginBottom: '8px', color: 'var(--text-secondary)' }}>Price Recommendation</label>
-            <input type="text" className="input-base" value={priceRecommendation} onChange={e => setPriceRecommendation(e.target.value)} />
+            <label style={{ display: 'flex', marginBottom: '8px', color: 'var(--text-secondary)' }}>
+              List Price (USD) <span style={{ fontSize: '0.75rem', opacity: 0.6, marginLeft: '4px' }}>(sent to eBay)</span>
+            </label>
+            <input type="text" className="input-base" value={priceRecommendation} onChange={e => setPriceRecommendation(e.target.value)} placeholder="e.g. 49.99" />
+            {priceJustification && (
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '6px', fontStyle: 'italic', lineHeight: 1.4 }}>
+                💡 {priceJustification}
+              </p>
+            )}
           </div>
           <div>
             <label style={{ display: 'flex', marginBottom: '8px', color: 'var(--text-secondary)' }}>SKU / Custom Label <span style={{ fontSize: '0.75rem', opacity: 0.6, marginLeft: '4px' }}>(sent to eBay)</span></label>
@@ -199,7 +208,7 @@ export default function ResultsEditor({ data, images, onStage, onCancel }: Resul
           className="btn-primary" 
           style={{ flex: 2 }} 
           disabled={title.length > 80}
-          onClick={() => onStage({ title, condition, description, category, priceRecommendation, shippingEstimate, itemSpecifics, images: imageUrls, sku, sellerNotes })}
+          onClick={() => onStage({ title, condition, description, category, priceRecommendation, priceJustification, shippingEstimate, itemSpecifics, images: imageUrls, sku, sellerNotes })}
         >
           <Save size={18} /> Save & Stage Listing
         </button>

@@ -9,6 +9,7 @@ export interface StagedListing {
   shippingEstimate: string;
   images: string[]; // base64 or object URLs
   createdAt: number;
+  priceJustification?: string;
   sku?: string;
   sellerNotes?: string;
   ebayDraftId?: string;

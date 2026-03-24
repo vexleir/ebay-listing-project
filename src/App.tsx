@@ -28,6 +28,7 @@ function App() {
     itemSpecifics: Record<string, string>;
     category: string;
     priceRecommendation: string;
+    priceJustification: string;
     shippingEstimate: string;
   } | null>(null);
   
