@@ -21,6 +21,7 @@ function App() {
     merchantLocation: '', categoryId: ''
   });
   const [tempEbayConfig, setTempEbayConfig] = useState(ebayConfig);
+  const [isFetchingConfig, setIsFetchingConfig] = useState(false);
   
   // App state for the current generation
   const [images, setImages] = useState<File[]>([]);
@@ -93,6 +94,38 @@ function App() {
   const saveStagedListings = (listings: StagedListing[]) => {
     setStagedListings(listings);
     localStorage.setItem('staged_ebay_listings', JSON.stringify(listings));
+  };
+
+  const handleAutoFetchStats = async () => {
+    if (!tempEbayToken) {
+      alert("Please enter your eBay User OAuth Token first, then click Auto-Fetch!");
+      return;
+    }
+    setIsFetchingConfig(true);
+    try {
+      const resp = await fetch('http://localhost:3001/api/ebay/settings', {
+        headers: { 'Authorization': `Bearer ${tempEbayToken}` }
+      });
+      if (!resp.ok) {
+        let errText = await resp.text();
+        try { errText = JSON.parse(errText).error; } catch {}
+        throw new Error(errText);
+      }
+      const data = await resp.json();
+      
+      setTempEbayConfig(prev => ({
+        ...prev,
+        fulfillmentPolicy: data.fulfillmentPolicy || prev.fulfillmentPolicy,
+        paymentPolicy: data.paymentPolicy || prev.paymentPolicy,
+        returnPolicy: data.returnPolicy || prev.returnPolicy,
+        merchantLocation: data.merchantLocation || prev.merchantLocation
+      }));
+      alert("Successfully auto-fetched policies and location from your eBay account!");
+    } catch (e: any) {
+      alert("Failed to auto-fetch settings. Note: Ensure your eBay Token has the `sell.account.readonly` and `sell.inventory.readonly` scopes!\nError: " + e.message);
+    } finally {
+      setIsFetchingConfig(false);
+    }
   };
 
   const handleStageListing = async (listing: Omit<StagedListing, 'id' | 'createdAt'>) => {
@@ -284,9 +317,18 @@ function App() {
                 onChange={e => setTempApiKey(e.target.value)} placeholder="AIzaSy..." />
             </div>
 
-            <h3 style={{ marginBottom: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
-              eBay Integration (Required for Live Push)
-            </h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
+              <h3 style={{ margin: 0 }}>
+                eBay Integration (Required for Live Push)
+              </h3>
+              <button 
+                onClick={handleAutoFetchStats} 
+                disabled={isFetchingConfig} 
+                style={{ background: 'var(--accent-color)', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}
+              >
+                {isFetchingConfig ? 'Fetching...' : '⚡ Auto-Fetch'}
+              </button>
+            </div>
 
             <div style={{ marginBottom: '1rem' }}>
               <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)' }}>
