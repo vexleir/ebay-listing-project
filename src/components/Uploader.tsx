@@ -111,9 +111,25 @@ export default function Uploader({
 
       {images.length > 0 && (
         <div style={{ marginBottom: '2rem' }}>
-          <p style={{ color: 'var(--text-secondary)', marginBottom: '12px', fontSize: '0.9rem' }}>
-            Select the specific images you want the AI to analyze. Deselecting redundant images saves API costs.
-          </p>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', margin: 0 }}>
+              Select images to analyze. <span style={{ opacity: 0.7 }}>{selectedFiles.size} of {images.length} selected.</span>
+            </p>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button
+                onClick={() => setSelectedFiles(new Set(images))}
+                style={{ fontSize: '0.8rem', padding: '4px 10px', background: 'rgba(255,255,255,0.08)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', borderRadius: '6px', cursor: 'pointer' }}
+              >
+                Select All
+              </button>
+              <button
+                onClick={() => setSelectedFiles(new Set())}
+                style={{ fontSize: '0.8rem', padding: '4px 10px', background: 'rgba(255,255,255,0.08)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', borderRadius: '6px', cursor: 'pointer' }}
+              >
+                Deselect All
+              </button>
+            </div>
+          </div>
           <div style={{ display: 'flex', gap: '1rem', overflowX: 'auto', paddingBottom: '1rem' }}>
             {images.map((file, index) => {
               const isSelected = selectedFiles.has(file);

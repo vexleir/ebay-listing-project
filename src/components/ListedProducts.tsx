@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ExternalLink, Calendar, CheckCircle, Trash2, Archive, ArchiveRestore, Search, ChevronDown } from 'lucide-react';
+import { ExternalLink, Calendar, CheckCircle, Trash2, Archive, ArchiveRestore, Search, ChevronDown, LayoutGrid, List } from 'lucide-react';
 import type { StagedListing } from '../types';
 
 interface ListedProductsProps {
@@ -9,6 +9,7 @@ interface ListedProductsProps {
 }
 
 type SortOption = 'date-desc' | 'date-asc' | 'title-asc' | 'title-desc' | 'price-asc' | 'price-desc';
+type ViewMode = 'grid' | 'list';
 
 function parsePrice(val: string): number {
   const m = val.replace(/[^0-9.]/g, '');
@@ -19,6 +20,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive }: Li
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortOption>('date-desc');
   const [showArchived, setShowArchived] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>('grid');
 
   const active = listings.filter(l => !l.archived);
   const archived = listings.filter(l => l.archived);
@@ -34,12 +36,12 @@ export default function ListedProductsView({ listings, onDelete, onArchive }: Li
       )
       .sort((a, b) => {
         switch (sort) {
-          case 'date-asc':  return a.createdAt - b.createdAt;
-          case 'date-desc': return b.createdAt - a.createdAt;
-          case 'title-asc': return a.title.localeCompare(b.title);
-          case 'title-desc':return b.title.localeCompare(a.title);
-          case 'price-asc': return parsePrice(a.priceRecommendation) - parsePrice(b.priceRecommendation);
-          case 'price-desc':return parsePrice(b.priceRecommendation) - parsePrice(a.priceRecommendation);
+          case 'date-asc':   return a.createdAt - b.createdAt;
+          case 'date-desc':  return b.createdAt - a.createdAt;
+          case 'title-asc':  return a.title.localeCompare(b.title);
+          case 'title-desc': return b.title.localeCompare(a.title);
+          case 'price-asc':  return parsePrice(a.priceRecommendation) - parsePrice(b.priceRecommendation);
+          case 'price-desc': return parsePrice(b.priceRecommendation) - parsePrice(a.priceRecommendation);
           default: return 0;
         }
       });
@@ -67,19 +69,17 @@ export default function ListedProductsView({ listings, onDelete, onArchive }: Li
         opacity: isArchived ? 0.65 : 1
       }}
     >
-      {!isArchived && (
+      {!isArchived ? (
         <div style={{ padding: '8px 12px', background: 'var(--success-light)', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', fontWeight: 600 }}>
           <CheckCircle size={16} /> Successfully Pushed
           {listing.ebayDraftId && <span style={{ marginLeft: 'auto', fontSize: '0.75rem', opacity: 0.8 }}>ID: {listing.ebayDraftId}</span>}
         </div>
-      )}
-      {isArchived && (
+      ) : (
         <div style={{ padding: '8px 12px', background: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem' }}>
           <Archive size={16} /> Archived
           {listing.ebayDraftId && <span style={{ marginLeft: 'auto', fontSize: '0.75rem', opacity: 0.6 }}>ID: {listing.ebayDraftId}</span>}
         </div>
       )}
-
       <div style={{ display: 'flex', height: '140px', background: 'rgba(0,0,0,0.5)' }}>
         {listing.images && listing.images.length > 0 ? (
           <div style={{ flex: 1, height: '100%' }}>
@@ -91,19 +91,16 @@ export default function ListedProductsView({ listings, onDelete, onArchive }: Li
           </div>
         )}
       </div>
-
       <div style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', flex: 1 }}>
         <h3 style={{ fontSize: '1.1rem', marginBottom: '0.5rem', lineHeight: 1.3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
           {listing.title}
         </h3>
-
         <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
           <Calendar size={14} /> {new Date(listing.createdAt).toLocaleDateString()}
         </div>
-
         <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
           <span style={{ fontSize: '0.8rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px' }}>
-            Est: {listing.priceRecommendation}
+            ${listing.priceRecommendation}
           </span>
           <span style={{ fontSize: '0.8rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px' }}>
             {listing.category}
@@ -114,41 +111,96 @@ export default function ListedProductsView({ listings, onDelete, onArchive }: Li
             </span>
           )}
         </div>
-
         {listing.sellerNotes && (
           <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', padding: '6px 8px', marginBottom: '0.75rem', fontStyle: 'italic' }}>
             📝 {listing.sellerNotes}
           </p>
         )}
-
         <div style={{ marginTop: 'auto', display: 'flex', gap: '0.5rem', alignItems: 'center', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
-          <a
-            className="btn-primary"
-            href="https://www.ebay.com/mes/sellerhub"
-            target="_blank"
-            rel="noreferrer"
-            style={{ textDecoration: 'none', flex: 1, fontSize: '0.85rem', padding: '6px 12px' }}
-          >
+          <a className="btn-primary" href="https://www.ebay.com/mes/sellerhub" target="_blank" rel="noreferrer"
+            style={{ textDecoration: 'none', flex: 1, fontSize: '0.85rem', padding: '6px 12px' }}>
             <ExternalLink size={16} /> View on eBay
           </a>
-          <button
-            className="btn-icon"
-            title={isArchived ? 'Unarchive' : 'Archive'}
-            onClick={() => onArchive(listing.id)}
-          >
+          <button className="btn-icon" title={isArchived ? 'Unarchive' : 'Archive'} onClick={() => onArchive(listing.id)}>
             {isArchived ? <ArchiveRestore size={18} /> : <Archive size={18} />}
           </button>
-          <button
-            className="btn-icon"
-            title="Delete"
-            style={{ color: '#ef4444' }}
-            onClick={() => {
-              if (confirm('Remove this listing from your records?')) onDelete(listing.id);
-            }}
-          >
+          <button className="btn-icon" title="Delete" style={{ color: '#ef4444' }}
+            onClick={() => { if (confirm('Remove this listing from your records?')) onDelete(listing.id); }}>
             <Trash2 size={18} />
           </button>
         </div>
+      </div>
+    </div>
+  );
+
+  const renderListRow = (listing: StagedListing, isArchived: boolean) => (
+    <div
+      key={listing.id}
+      style={{
+        display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.75rem 1.25rem',
+        opacity: isArchived ? 0.65 : 1,
+        borderBottom: '1px solid var(--border-color)',
+      }}
+    >
+      {/* Thumbnail */}
+      <div style={{ width: '56px', height: '56px', flexShrink: 0, borderRadius: '6px', overflow: 'hidden', background: 'rgba(0,0,0,0.4)' }}>
+        {listing.images?.[0] ? (
+          <img src={listing.images[0]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        ) : (
+          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', fontSize: '0.7rem' }}>—</div>
+        )}
+      </div>
+
+      {/* Status dot */}
+      <div style={{ flexShrink: 0 }}>
+        {isArchived
+          ? <Archive size={16} style={{ color: 'var(--text-secondary)' }} />
+          : <CheckCircle size={16} style={{ color: 'var(--success)' }} />
+        }
+      </div>
+
+      {/* Title + notes */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{ margin: 0, fontWeight: 500, fontSize: '0.95rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {listing.title}
+        </p>
+        {listing.sellerNotes && (
+          <p style={{ margin: '2px 0 0', fontSize: '0.78rem', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontStyle: 'italic' }}>
+            📝 {listing.sellerNotes}
+          </p>
+        )}
+      </div>
+
+      {/* Meta */}
+      <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
+        <span style={{ fontSize: '0.78rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px', whiteSpace: 'nowrap' }}>
+          ${listing.priceRecommendation}
+        </span>
+        {listing.sku && (
+          <span style={{ fontSize: '0.78rem', background: 'rgba(99,102,241,0.25)', padding: '2px 8px', borderRadius: '4px', color: '#a5b4fc', whiteSpace: 'nowrap' }}>
+            {listing.sku}
+          </span>
+        )}
+      </div>
+
+      {/* Date */}
+      <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', flexShrink: 0, minWidth: '80px', textAlign: 'right' }}>
+        {new Date(listing.createdAt).toLocaleDateString()}
+      </span>
+
+      {/* Actions */}
+      <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0, alignItems: 'center' }}>
+        <a className="btn-primary" href="https://www.ebay.com/mes/sellerhub" target="_blank" rel="noreferrer"
+          style={{ textDecoration: 'none', fontSize: '0.8rem', padding: '5px 10px', whiteSpace: 'nowrap' }}>
+          <ExternalLink size={14} /> eBay
+        </a>
+        <button className="btn-icon" title={isArchived ? 'Unarchive' : 'Archive'} onClick={() => onArchive(listing.id)}>
+          {isArchived ? <ArchiveRestore size={18} /> : <Archive size={18} />}
+        </button>
+        <button className="btn-icon" title="Delete" style={{ color: '#ef4444' }}
+          onClick={() => { if (confirm('Remove this listing from your records?')) onDelete(listing.id); }}>
+          <Trash2 size={18} />
+        </button>
       </div>
     </div>
   );
@@ -160,21 +212,15 @@ export default function ListedProductsView({ listings, onDelete, onArchive }: Li
         <div style={{ position: 'relative', flex: 1, minWidth: '200px' }}>
           <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)', pointerEvents: 'none' }} />
           <input
-            type="text"
-            className="input-base"
+            type="text" className="input-base"
             placeholder="Search by title, SKU, or category..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
+            value={search} onChange={e => setSearch(e.target.value)}
             style={{ paddingLeft: '36px' }}
           />
         </div>
         <div style={{ position: 'relative' }}>
-          <select
-            className="input-base"
-            value={sort}
-            onChange={e => setSort(e.target.value as SortOption)}
-            style={{ paddingRight: '2rem', appearance: 'none', cursor: 'pointer', minWidth: '160px' }}
-          >
+          <select className="input-base" value={sort} onChange={e => setSort(e.target.value as SortOption)}
+            style={{ paddingRight: '2rem', appearance: 'none', cursor: 'pointer', minWidth: '160px' }}>
             <option value="date-desc">Date: Newest First</option>
             <option value="date-asc">Date: Oldest First</option>
             <option value="title-asc">Title: A → Z</option>
@@ -183,6 +229,17 @@ export default function ListedProductsView({ listings, onDelete, onArchive }: Li
             <option value="price-asc">Price: Low → High</option>
           </select>
           <ChevronDown size={14} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-secondary)' }} />
+        </div>
+        {/* View toggle */}
+        <div style={{ display: 'flex', gap: '0.25rem' }}>
+          <button onClick={() => setViewMode('grid')} title="Grid view"
+            style={{ padding: '6px 10px', background: viewMode === 'grid' ? 'var(--glass-bg)' : 'transparent', border: '1px solid', borderColor: viewMode === 'grid' ? 'var(--glass-border)' : 'transparent', color: 'var(--text-primary)', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+            <LayoutGrid size={18} />
+          </button>
+          <button onClick={() => setViewMode('list')} title="List view"
+            style={{ padding: '6px 10px', background: viewMode === 'list' ? 'var(--glass-bg)' : 'transparent', border: '1px solid', borderColor: viewMode === 'list' ? 'var(--glass-border)' : 'transparent', color: 'var(--text-primary)', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+            <List size={18} />
+          </button>
         </div>
       </div>
 
@@ -197,25 +254,35 @@ export default function ListedProductsView({ listings, onDelete, onArchive }: Li
           <p style={{ color: 'var(--text-secondary)' }}>No results for "{search}"</p>
         </div>
       )}
-      {filteredActive.length > 0 && (
+      {filteredActive.length > 0 && viewMode === 'grid' && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '1.5rem', marginBottom: '1.5rem' }}>
           {filteredActive.map(l => renderCard(l, false))}
+        </div>
+      )}
+      {filteredActive.length > 0 && viewMode === 'list' && (
+        <div className="glass-panel" style={{ padding: 0, overflow: 'hidden', marginBottom: '1.5rem' }}>
+          {filteredActive.map(l => renderListRow(l, false))}
+          <div style={{ height: '1px' }} /> {/* remove last border */}
         </div>
       )}
 
       {/* Archived section */}
       {archived.length > 0 && (
         <div>
-          <button
-            onClick={() => setShowArchived(v => !v)}
-            style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.9rem', marginBottom: '1rem', padding: '4px 0' }}
-          >
+          <button onClick={() => setShowArchived(v => !v)}
+            style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.9rem', marginBottom: '1rem', padding: '4px 0' }}>
             <ChevronDown size={16} style={{ transform: showArchived ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
             Archived ({filteredArchived.length}{search ? ` of ${archived.length}` : ''})
           </button>
-          {showArchived && filteredArchived.length > 0 && (
+          {showArchived && filteredArchived.length > 0 && viewMode === 'grid' && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '1.5rem' }}>
               {filteredArchived.map(l => renderCard(l, true))}
+            </div>
+          )}
+          {showArchived && filteredArchived.length > 0 && viewMode === 'list' && (
+            <div className="glass-panel" style={{ padding: 0, overflow: 'hidden' }}>
+              {filteredArchived.map(l => renderListRow(l, true))}
+              <div style={{ height: '1px' }} />
             </div>
           )}
           {showArchived && filteredArchived.length === 0 && search && (
