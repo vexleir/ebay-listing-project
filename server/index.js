@@ -4,6 +4,7 @@ const cors = require('cors');
 const axios = require('axios');
 const path = require('path');
 const { generateListing } = require('./ai');
+const { getAuthUrl, exchangeCodeForToken, getValidAccessToken, hasValidSession } = require('./ebayAuth');
 
 const app = express();
 app.use(cors());
@@ -15,6 +16,11 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // Global Security Middleware (v4)
 app.use((req, res, next) => {
+  // Exempt the eBay OAuth callback from the password gate because the 
+  // browser redirects here directly from eBay without custom headers
+  if (req.path === '/api/ebay/callback') {
+    return next();
+  }
   if (req.path.startsWith('/api/') && req.headers['x-app-password'] !== process.env.APP_PASSWORD) {
     return res.status(401).json({ error: "Unauthorized: Invalid App Password" });
   }
@@ -28,6 +34,37 @@ const EBAY_API_BASE = 'https://api.ebay.com';
 // Simple endpoint to let the frontend know if their password was valid under the global middleware
 app.get('/api/verify-password', (req, res) => {
   res.json({ success: true });
+});
+
+// GET /api/ebay/auth-status
+app.get('/api/ebay/auth-status', (req, res) => {
+  res.json({ connected: hasValidSession() });
+});
+
+// GET /api/ebay/auth-url
+app.get('/api/ebay/auth-url', (req, res) => {
+  try {
+    const url = getAuthUrl();
+    res.json({ url });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/ebay/callback
+app.get('/api/ebay/callback', async (req, res) => {
+  const code = req.query.code;
+  if (!code) {
+    return res.status(400).send('No authorization code provided.');
+  }
+  
+  try {
+    await exchangeCodeForToken(code);
+    res.redirect('/');
+  } catch (error) {
+    console.error('OAuth Callback Error:', error.message);
+    res.status(500).send('Failed to authenticate with eBay.');
+  }
 });
 
 // POST /api/generate (Moved from Frontend)
@@ -48,10 +85,8 @@ app.post('/api/generate', async (req, res) => {
 // GET /api/ebay/settings
 // Automatically fetches the first available policy IDs and merchant location
 app.get('/api/ebay/settings', async (req, res) => {
-  const token = req.headers.authorization?.split(' ')[1];
-  if (!token) return res.status(401).json({ error: 'Missing eBay API token' });
-
   try {
+    const token = await getValidAccessToken();
     const headers = {
       'Authorization': `Bearer ${token}`,
       'Content-Language': 'en-US'
@@ -88,105 +123,182 @@ app.get('/api/ebay/settings', async (req, res) => {
 });
 
 // POST /api/ebay/draft
-// Note: This relies entirely on environment variables now! No frontend payload needed for config.
+// Rewritten for V4: Uses eBay XML Trading API to support EPS Image Uploads and Scheduled Drafts
 app.post('/api/ebay/draft', async (req, res) => {
   const { listing } = req.body;
-  const token = process.env.EBAY_OAUTH_TOKEN;
 
-  // We explicitly load the Policy IDs from .env now!
   const config = {
     fulfillmentPolicy: process.env.EBAY_FULFILLMENT_POLICY_ID,
     paymentPolicy: process.env.EBAY_PAYMENT_POLICY_ID,
     returnPolicy: process.env.EBAY_RETURN_POLICY_ID,
-    merchantLocation: process.env.EBAY_MERCHANT_LOCATION_KEY,
     categoryId: process.env.EBAY_DEFAULT_CATEGORY_ID || "261068"
   };
 
-  if (!token || token === 'YOUR_EBAY_TOKEN_HERE') {
-    return res.status(500).json({ error: 'Server missing EBAY_OAUTH_TOKEN in .env' });
-  }
-  if (!config.fulfillmentPolicy || !config.paymentPolicy || !config.returnPolicy) {
-    return res.status(500).json({ error: 'Server missing Policy IDs in .env' });
-  }
-
   try {
-    console.log(`--- Initiating live push to eBay for: ${listing.title} ---`);
-    
-    // 1. Generate a unique SKU for this item
-    const sku = `SKU-${Date.now()}`;
-    
-    // Parse numeric price from recommendation (assuming format string might have "$100" or similar)
-    const rawPrice = listing.priceRecommendation.replace(/[^0-9.]/g, '');
+    const token = await getValidAccessToken();
+    console.log(`--- Initiating XML Trading API push to eBay for: ${listing.title} ---`);
+    const TRADING_URL = 'https://api.ebay.com/ws/api.dll';
+
+    // 1. Upload Images to EPS (eBay Picture Services)
+    const uploadedPictureUrls = [];
+    if (listing.images && listing.images.length > 0) {
+      console.log(`Uploading ${listing.images.length} images to eBay EPS...`);
+      for (let i = 0; i < listing.images.length; i++) {
+        const headerMatch = listing.images[i].match(/^data:image\/([a-zA-Z0-9]+);base64,/);
+        const format = headerMatch ? headerMatch[1] : 'jpeg';
+        
+        const base64Data = listing.images[i].split(',')[1] || listing.images[i];
+        if (!base64Data) continue;
+        
+        console.log(`Uploading image ${i + 1} of format: ${format}`);
+        // eBay EPS is highly prone to "File has corrupt image data" errors when sending Base64 purely inside XML.
+        // The safest and only officially fully-supported method is MIME multipart/form-data.
+        const xmlPayload = `<?xml version="1.0" encoding="utf-8"?>
+<UploadSiteHostedPicturesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <PictureName>image_${i}.${format}</PictureName>
+  <PictureSet>Standard</PictureSet>
+  <ExtensionInDays>30</ExtensionInDays>
+</UploadSiteHostedPicturesRequest>`;
+
+        const boundary = '----eBayEpsBoundary12345' + Date.now() + i;
+        const part1 = Buffer.from(
+          `--${boundary}\r\n` +
+          `Content-Disposition: form-data; name="XML Payload"\r\n` +
+          `Content-Type: text/xml\r\n\r\n` +
+          xmlPayload + `\r\n` +
+          `--${boundary}\r\n` +
+          `Content-Disposition: form-data; name="dummy"; filename="image_${i}.${format}"\r\n` +
+          `Content-Type: application/octet-stream\r\n\r\n`
+        );
+        const imageBytes = Buffer.from(base64Data, 'base64');
+        const part3 = Buffer.from(`\r\n--${boundary}--\r\n`);
+        const finalPayload = Buffer.concat([part1, imageBytes, part3]);
+
+        const picRes = await axios.post(TRADING_URL, finalPayload, {
+          headers: {
+            'X-EBAY-API-COMPATIBILITY-LEVEL': '1331',
+            'X-EBAY-API-CALL-NAME': 'UploadSiteHostedPictures',
+            'X-EBAY-API-SITEID': '0',
+            'X-EBAY-API-IAF-TOKEN': token,
+            'Content-Type': `multipart/form-data; boundary=${boundary}`
+          }
+        });
+        
+        const match = picRes.data.match(/<FullURL>(.*?)<\/FullURL>/);
+        if (match && match[1]) {
+          uploadedPictureUrls.push(match[1]);
+        } else {
+          console.warn('Failed to upload image. XML Response:', picRes.data);
+          const errMsg = picRes.data.match(/<LongMessage>(.*?)<\/LongMessage>/);
+          return res.status(400).json({ error: 'eBay EPS Image Upload Failed: ' + (errMsg ? errMsg[1] : 'Unknown error') });
+        }
+      }
+    }
+
+    if (listing.images && listing.images.length > 0 && uploadedPictureUrls.length === 0) {
+      return res.status(400).json({ error: 'All image uploads to eBay failed. Check server console for details.' });
+    }
+
+    // Parse numeric price
+    const rawPrice = (listing.priceRecommendation || '').replace(/[^0-9.]/g, '');
     const validPrice = rawPrice && !isNaN(parseFloat(rawPrice)) ? parseFloat(rawPrice).toFixed(2) : "50.00";
-
-    // 2. Create the Inventory Item (Product Details)
-    // Note: We skip `imageUrls` because eBay Inventory API requires public HTTPS links, not base64. 
-    // Sending base64 strings directly to this endpoint will result in an error.
-    const inventoryPayload = {
-      product: {
-        title: listing.title,
-        description: listing.description,
-        aspects: {} // We could map itemSpecifics here, but they require strict exact string matching with eBay catalog.
-      },
-      condition: "USED_EXCELLENT",
-      availability: {
-        shipToLocationAvailability: {
-          quantity: 1
-        }
-      }
-    };
-
-    console.log('Creating Inventory Item...');
-    await axios.put(`${EBAY_API_BASE}/sell/inventory/v1/inventory_item/${sku}`, inventoryPayload, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Language': 'en-US',
-        'Content-Type': 'application/json'
-      }
-    });
-
-    // 3. Create the Offer (Unpublished Draft)
-    const offerPayload = {
-      sku: sku,
-      marketplaceId: "EBAY_US",
-      format: "FIXED_PRICE",
-      categoryId: config.categoryId || "261068",
-      availableQuantity: 1,
-      pricingSummary: {
-        price: {
-          value: validPrice,
-          currency: "USD"
-        }
-      },
-      listingPolicies: {
-        fulfillmentPolicyId: config.fulfillmentPolicy,
-        paymentPolicyId: config.paymentPolicy,
-        returnPolicyId: config.returnPolicy
-      },
-      merchantLocationKey: config.merchantLocation
-    };
-
-    console.log('Creating Offer...');
-    const offerResp = await axios.post(`${EBAY_API_BASE}/sell/inventory/v1/offer`, offerPayload, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Language': 'en-US',
-        'Content-Type': 'application/json'
-      }
-    });
-
-    const offerId = offerResp.data.offerId;
-    console.log(`Successfully pushed to eBay! Offer ID: ${offerId}`);
     
-    res.json({ success: true, draftId: offerId, sku: sku });
+    // Condition mapping: Assume 3000 (Used) unless condition string specifically indicates New exclusively
+    const isNew = listing.condition.toLowerCase().includes('new') && !listing.condition.toLowerCase().includes('like new');
+    const conditionId = isNew ? "1000" : "3000";
+
+    // Set ScheduleTime 21 days in the future to keep it as an editable draft
+    const scheduleDate = new Date();
+    scheduleDate.setDate(scheduleDate.getDate() + 21);
+    const scheduleTimeStr = scheduleDate.toISOString();
+
+    // Construct PictureDetails XML
+    let pictureDetailsXml = '';
+    if (uploadedPictureUrls.length > 0) {
+      pictureDetailsXml = '<PictureDetails>\n';
+      uploadedPictureUrls.forEach(url => {
+        pictureDetailsXml += `<PictureURL>${url}</PictureURL>\n`;
+      });
+      pictureDetailsXml += '</PictureDetails>';
+    }
+
+    // Construct ItemSpecifics XML dynamically from AI dictionary
+    let itemSpecificsXml = '';
+    if (listing.itemSpecifics && Object.keys(listing.itemSpecifics).length > 0) {
+      itemSpecificsXml = '<ItemSpecifics>\n' + Object.entries(listing.itemSpecifics).map(([name, val]) => `
+        <NameValueList>
+          <Name><![CDATA[${name}]]></Name>
+          <Value><![CDATA[${val}]]></Value>
+        </NameValueList>`).join('\n') + '\n</ItemSpecifics>';
+    }
+
+    // 2. Create the Scheduled Listing (Draft)
+    console.log('Pushing AddFixedPriceItem Schedule payload...');
+    const addItemXml = `<?xml version="1.0" encoding="utf-8"?>
+<AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <ErrorLanguage>en_US</ErrorLanguage>
+  <WarningLevel>High</WarningLevel>
+  <Item>
+    <Title><![CDATA[${listing.title.substring(0, 80)}]]></Title>
+    <Description><![CDATA[${listing.description}]]></Description>
+    <PrimaryCategory>
+      <CategoryID>${config.categoryId}</CategoryID>
+    </PrimaryCategory>
+    <StartPrice currencyID="USD">${validPrice}</StartPrice>
+    <ConditionID>${conditionId}</ConditionID>
+    <Country>US</Country>
+    <Currency>USD</Currency>
+    <DispatchTimeMax>3</DispatchTimeMax>
+    <ListingDuration>GTC</ListingDuration>
+    <ListingType>FixedPriceItem</ListingType>
+    ${pictureDetailsXml}
+    ${itemSpecificsXml}
+    <PostalCode>90210</PostalCode>
+    <Location><![CDATA[United States]]></Location>
+    <SellerProfiles>
+      <SellerPaymentProfile>
+        <PaymentProfileID>${config.paymentPolicy}</PaymentProfileID>
+      </SellerPaymentProfile>
+      <SellerReturnProfile>
+        <ReturnProfileID>${config.returnPolicy}</ReturnProfileID>
+      </SellerReturnProfile>
+      <SellerShippingProfile>
+        <ShippingProfileID>${config.fulfillmentPolicy}</ShippingProfileID>
+      </SellerShippingProfile>
+    </SellerProfiles>
+    <ScheduleTime>${scheduleTimeStr}</ScheduleTime>
+  </Item>
+</AddFixedPriceItemRequest>`;
+
+    const addRes = await axios.post(TRADING_URL, addItemXml, {
+      headers: {
+        'X-EBAY-API-COMPATIBILITY-LEVEL': '1331',
+        'X-EBAY-API-CALL-NAME': 'AddFixedPriceItem',
+        'X-EBAY-API-SITEID': '0',
+        'X-EBAY-API-IAF-TOKEN': token,
+        'Content-Type': 'text/xml'
+      }
+    });
+
+    if (addRes.data.includes('<Ack>Failure</Ack>') || addRes.data.includes('<Ack>Error</Ack>')) {
+      const errorMatches = [...addRes.data.matchAll(/<LongMessage>(.*?)<\/LongMessage>/g)];
+      const errorMsg = errorMatches.length > 0 ? errorMatches.map(m => m[1]).join(' | ') : 'Unknown Trading API Error';
+      console.error("eBay Trading API Error:", errorMsg);
+      // Try to dump full text if it's super vague
+      console.log(addRes.data);
+      return res.status(400).json({ error: 'eBay API Error: ' + errorMsg });
+    }
+
+    const itemIdMatch = addRes.data.match(/<ItemID>(.*?)<\/ItemID>/);
+    const draftId = itemIdMatch ? itemIdMatch[1] : 'Unknown ID';
+    
+    console.log(`Successfully pushed to eBay! Scheduled Item ID: ${draftId}`);
+    res.json({ success: true, draftId: draftId });
     
   } catch (error) {
-    if (error.response) {
-      console.error('eBay API Error Response:', JSON.stringify(error.response.data, null, 2));
-      return res.status(error.response.status).json({ error: 'eBay API Error: ' + JSON.stringify(error.response.data.errors) });
-    }
     console.error('Node Error:', error.message);
-    res.status(500).json({ error: 'Failed to push draft to eBay' });
+    if (error.response) console.error('Response:', error.response.data);
+    res.status(500).json({ error: 'Failed to push scheduled draft to eBay via XML' });
   }
 });
 

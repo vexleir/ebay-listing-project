@@ -7,9 +7,10 @@ interface StagedListingsProps {
   listings: StagedListing[];
   onUpdate: (listing: StagedListing) => void;
   onDelete: (id: string) => void;
+  isEbayConnected?: boolean;
 }
 
-export default function StagedListingsView({ listings, onUpdate, onDelete }: StagedListingsProps) {
+export default function StagedListingsView({ listings, onUpdate, onDelete, isEbayConnected }: StagedListingsProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [pushingId, setPushingId] = useState<string | null>(null);
@@ -149,9 +150,16 @@ export default function StagedListingsView({ listings, onUpdate, onDelete }: Sta
               
               <button 
                 className="btn-primary" 
-                style={{ marginRight: 'auto', fontSize: '0.85rem', padding: '6px 12px' }}
-                onClick={() => handlePushToEbay(listing)}
+                style={{ marginRight: 'auto', fontSize: '0.85rem', padding: '6px 12px', opacity: !isEbayConnected ? 0.5 : 1 }}
+                onClick={() => {
+                  if (!isEbayConnected) {
+                    alert('Please connect to eBay in the top right corner first!');
+                    return;
+                  }
+                  handlePushToEbay(listing);
+                }}
                 disabled={pushingId === listing.id}
+                title={!isEbayConnected ? "Connect to eBay first" : "Push to eBay"}
               >
                 {pushingId === listing.id ? 'Pushing...' : 'Push to eBay'}
               </button>

@@ -26,6 +26,7 @@ export interface StagedListing {
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isEbayConnected, setIsEbayConnected] = useState(false);
   const [appPassword, setAppPassword] = useState(localStorage.getItem('app_password') || '');
   const [isVerifying, setIsVerifying] = useState(true);
 
@@ -54,8 +55,18 @@ function App() {
         headers: { 'x-app-password': appPassword }
       })
       .then(res => {
-        if (res.ok) setIsAuthenticated(true);
-        else setAppPassword('');
+        if (res.ok) {
+          setIsAuthenticated(true);
+          // Check eBay auth status
+          fetch('http://localhost:3001/api/ebay/auth-status', {
+            headers: { 'x-app-password': appPassword }
+          })
+            .then(r => r.json())
+            .then(data => setIsEbayConnected(data.connected))
+            .catch(e => console.error("Error checking eBay auth:", e));
+        } else {
+          setAppPassword('');
+        }
         setIsVerifying(false);
       })
       .catch(() => setIsVerifying(false));
@@ -63,6 +74,22 @@ function App() {
       setIsVerifying(false);
     }
   }, [appPassword]);
+
+  const handleEbayConnect = async () => {
+    try {
+      const resp = await fetch('http://localhost:3001/api/ebay/auth-url', {
+        headers: { 'x-app-password': appPassword }
+      });
+      const data = await resp.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else if (data.error) {
+        alert("eBay Configuration Error: " + data.error);
+      }
+    } catch (e) {
+      alert("Error getting eBay login URL. Is the server running?");
+    }
+  };
 
   useEffect(() => {
     const savedListings = localStorage.getItem('staged_ebay_listings');
@@ -211,7 +238,16 @@ function App() {
             <Check size={18} /> Listed ({listedProducts.length})
           </button>
         </div>
-        <div>
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          {isEbayConnected ? (
+            <span style={{ color: 'var(--success)', fontSize: '0.9rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+              <Check size={16} /> eBay: Connected
+            </span>
+          ) : (
+            <button className="btn-primary" onClick={handleEbayConnect} style={{ fontSize: '0.85rem', padding: '6px 12px' }}>
+              Connect to eBay
+            </button>
+          )}
           <button className="btn-icon" onClick={() => { localStorage.removeItem('app_password'); setIsAuthenticated(false); }} title="Logout">
             Logout
           </button>
@@ -251,6 +287,7 @@ function App() {
               listings={stagedListings} 
               onUpdate={handleUpdateStagedListing}
               onDelete={handleDeleteStagedListing}
+              isEbayConnected={isEbayConnected}
             />
           </div>
         ) : (
