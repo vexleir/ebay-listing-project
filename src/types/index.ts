@@ -13,6 +13,7 @@ export interface StagedListing {
   sellerNotes?: string;
   ebayDraftId?: string;
   archived?: boolean;
+  status?: 'staged' | 'listed';
 }
 
 export interface AppState {

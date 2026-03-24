@@ -5,6 +5,7 @@ const axios = require('axios');
 const path = require('path');
 const { generateListing } = require('./ai');
 const { getAuthUrl, exchangeCodeForToken, getValidAccessToken, hasValidSession } = require('./ebayAuth');
+const { getListings, createListing, updateListing, deleteListing } = require('./listings');
 
 const app = express();
 app.use(cors());
@@ -71,6 +72,46 @@ app.get('/api/ebay/callback', async (req, res) => {
   } catch (error) {
     console.error('OAuth Callback Error:', error.message);
     res.status(500).send('Failed to authenticate with eBay.');
+  }
+});
+
+// GET /api/listings?status=staged|listed
+app.get('/api/listings', async (req, res) => {
+  try {
+    const listings = await getListings(req.query.status || 'staged');
+    res.json(listings);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/listings
+app.post('/api/listings', async (req, res) => {
+  try {
+    await createListing(req.body.listing);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /api/listings/:id
+app.put('/api/listings/:id', async (req, res) => {
+  try {
+    await updateListing(req.params.id, req.body.updates);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /api/listings/:id
+app.delete('/api/listings/:id', async (req, res) => {
+  try {
+    await deleteListing(req.params.id);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 

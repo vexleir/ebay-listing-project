@@ -32,9 +32,9 @@ function App() {
   } | null>(null);
   
   const [stagedListings, setStagedListings] = useState<StagedListing[]>([]);
-  // App State continued
   const [activeTab, setActiveTab] = useState<'new' | 'staged' | 'listed'>('new');
   const [listedProducts, setListedProducts] = useState<StagedListing[]>([]);
+  const [isLoadingListings, setIsLoadingListings] = useState(false);
 
   // Auto-Login Verification
   useEffect(() => {
@@ -45,6 +45,7 @@ function App() {
       .then(res => {
         if (res.ok) {
           setIsAuthenticated(true);
+          loadListings(appPassword);
           // Check eBay auth status
           fetch('/api/ebay/auth-status', {
             headers: { 'x-app-password': appPassword }
@@ -79,76 +80,69 @@ function App() {
     }
   };
 
-  useEffect(() => {
-    const savedListings = localStorage.getItem('staged_ebay_listings');
-    if (savedListings) {
-      try {
-        setStagedListings(JSON.parse(savedListings));
-      } catch (e) {
-        console.error('Failed to parse saved listings');
-      }
-    }
+  const apiHeaders = (pw: string) => ({
+    'Content-Type': 'application/json',
+    'x-app-password': pw
+  });
 
-    const savedPushed = localStorage.getItem('listed_ebay_listings');
-    if (savedPushed) {
-      try {
-        setListedProducts(JSON.parse(savedPushed));
-      } catch (e) {
-        console.error('Failed to parse listed listings');
-      }
+  const loadListings = async (pw: string) => {
+    setIsLoadingListings(true);
+    try {
+      const [staged, listed] = await Promise.all([
+        fetch('/api/listings?status=staged', { headers: { 'x-app-password': pw } }).then(r => r.json()),
+        fetch('/api/listings?status=listed', { headers: { 'x-app-password': pw } }).then(r => r.json()),
+      ]);
+      setStagedListings(Array.isArray(staged) ? staged : []);
+      setListedProducts(Array.isArray(listed) ? listed : []);
+    } catch (e) {
+      console.error('Failed to load listings:', e);
+    } finally {
+      setIsLoadingListings(false);
     }
-  }, []);
-
-  const saveStagedListings = (listings: StagedListing[]) => {
-    setStagedListings(listings);
-    localStorage.setItem('staged_ebay_listings', JSON.stringify(listings));
   };
 
   const handleStageListing = async (listing: Omit<StagedListing, 'id' | 'createdAt'>) => {
-    const newListing: StagedListing = {
-      ...listing,
-      id: crypto.randomUUID(),
-      createdAt: Date.now(),
-    };
-    
-    const updated = [newListing, ...stagedListings];
-    saveStagedListings(updated);
-    
-    // Reset form and switch tab
+    const newListing: StagedListing = { ...listing, id: crypto.randomUUID(), createdAt: Date.now(), status: 'staged' } as StagedListing;
+    setStagedListings(prev => [newListing, ...prev]);
     setImages([]);
     setInstructions('');
     setGeneratedData(null);
     setActiveTab('staged');
+    await fetch('/api/listings', { method: 'POST', headers: apiHeaders(appPassword), body: JSON.stringify({ listing: newListing }) });
   };
 
-  const handleUpdateStagedListing = (updatedListing: StagedListing) => {
-    const updated = stagedListings.map(l => l.id === updatedListing.id ? updatedListing : l);
-    saveStagedListings(updated);
+  const handleUpdateStagedListing = async (updatedListing: StagedListing) => {
+    setStagedListings(prev => prev.map(l => l.id === updatedListing.id ? updatedListing : l));
+    await fetch(`/api/listings/${updatedListing.id}`, { method: 'PUT', headers: apiHeaders(appPassword), body: JSON.stringify({ updates: updatedListing }) });
   };
 
-  const handleDeleteStagedListing = (id: string) => {
-    const updated = stagedListings.filter(l => l.id !== id);
-    saveStagedListings(updated);
+  const handleDeleteStagedListing = async (id: string) => {
+    setStagedListings(prev => prev.filter(l => l.id !== id));
+    await fetch(`/api/listings/${id}`, { method: 'DELETE', headers: { 'x-app-password': appPassword } });
   };
 
-  const saveListedProducts = (items: StagedListing[]) => {
-    setListedProducts(items);
-    localStorage.setItem('listed_ebay_listings', JSON.stringify(items));
-  };
-
-  const handleMoveToListed = (listing: StagedListing, draftId: string) => {
-    const updated = stagedListings.filter(l => l.id !== listing.id);
-    saveStagedListings(updated);
-    saveListedProducts([{ ...listing, ebayDraftId: draftId }, ...listedProducts]);
+  const handleMoveToListed = async (listing: StagedListing, draftId: string) => {
+    const listedListing: StagedListing = { ...listing, status: 'listed', ebayDraftId: draftId } as StagedListing;
+    setStagedListings(prev => prev.filter(l => l.id !== listing.id));
+    setListedProducts(prev => [listedListing, ...prev]);
     setActiveTab('listed');
+    await Promise.all([
+      fetch(`/api/listings/${listing.id}`, { method: 'DELETE', headers: { 'x-app-password': appPassword } }),
+      fetch('/api/listings', { method: 'POST', headers: apiHeaders(appPassword), body: JSON.stringify({ listing: listedListing }) }),
+    ]);
   };
 
-  const handleDeleteListedListing = (id: string) => {
-    saveListedProducts(listedProducts.filter(l => l.id !== id));
+  const handleDeleteListedListing = async (id: string) => {
+    setListedProducts(prev => prev.filter(l => l.id !== id));
+    await fetch(`/api/listings/${id}`, { method: 'DELETE', headers: { 'x-app-password': appPassword } });
   };
 
-  const handleArchiveListedListing = (id: string) => {
-    saveListedProducts(listedProducts.map(l => l.id === id ? { ...l, archived: !l.archived } : l));
+  const handleArchiveListedListing = async (id: string) => {
+    const listing = listedProducts.find(l => l.id === id);
+    if (!listing) return;
+    const archived = !listing.archived;
+    setListedProducts(prev => prev.map(l => l.id === id ? { ...l, archived } : l));
+    await fetch(`/api/listings/${id}`, { method: 'PUT', headers: apiHeaders(appPassword), body: JSON.stringify({ updates: { archived } }) });
   };
 
   const handleGenerate = async (activeImages: File[], activeInstructions: string) => {
@@ -264,7 +258,9 @@ function App() {
 
       {/* Main Content */}
       <main style={{ padding: '0 1rem 2rem 1rem', flex: 1, maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
-        {activeTab === 'new' ? (
+        {isLoadingListings ? (
+          <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>Loading listings...</div>
+        ) : activeTab === 'new' ? (
           <div className="animate-fade-in" style={{ display: 'grid', gap: '2rem', gridTemplateColumns: generatedData ? 'minmax(400px, 1fr) minmax(600px, 1.8fr)' : 'max-content', justifyContent: 'center' }}>
             <div style={{ width: generatedData ? '100%' : '600px', maxWidth: '100%', margin: generatedData ? '0' : '0 auto' }}>
               <Uploader 
