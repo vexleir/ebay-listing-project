@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Trash2, Edit2, ExternalLink, Calendar, Copy, Check } from 'lucide-react';
+import { Trash2, Edit2, Copy, Check, Calendar } from 'lucide-react';
 import type { StagedListing } from '../types';
 import ResultsEditor from './ResultsEditor';
 
@@ -13,15 +13,6 @@ export default function StagedListingsView({ listings, onUpdate, onDelete }: Sta
   const [editingId, setEditingId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [pushingId, setPushingId] = useState<string | null>(null);
-
-  const getEbayToken = () => localStorage.getItem('ebay_api_token') || '';
-  const getEbayConfig = () => {
-    try {
-      return JSON.parse(localStorage.getItem('ebay_push_config') || '{}');
-    } catch {
-      return {};
-    }
-  };
 
   if (listings.length === 0) {
     return (
@@ -76,27 +67,16 @@ export default function StagedListingsView({ listings, onUpdate, onDelete }: Sta
   }
 
   const handlePushToEbay = async (listing: StagedListing) => {
-    const token = getEbayToken();
-    const config = getEbayConfig();
-    
-    if (!token) {
-      alert("Please configure your eBay Token in Settings first.");
-      return;
-    }
-    if (!config.fulfillmentPolicy || !config.paymentPolicy || !config.returnPolicy || !config.merchantLocation || !config.categoryId) {
-      alert("Please configure all your eBay Policy IDs and Category ID in Settings to enable live pushing.");
-      return;
-    }
-
+    const pw = localStorage.getItem('app_password') || '';
     setPushingId(listing.id);
     try {
       const resp = await fetch('http://localhost:3001/api/ebay/draft', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          'x-app-password': pw
         },
-        body: JSON.stringify({ listing, config })
+        body: JSON.stringify({ listing })
       });
       if (!resp.ok) throw new Error(await resp.text());
       const data = await resp.json();

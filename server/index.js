@@ -1,14 +1,49 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
+const path = require('path');
+const { generateListing } = require('./ai');
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-const PORT = 3001;
+// Serve static React files
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Global Security Middleware (v4)
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/') && req.headers['x-app-password'] !== process.env.APP_PASSWORD) {
+    return res.status(401).json({ error: "Unauthorized: Invalid App Password" });
+  }
+  next();
+});
+
+const PORT = process.env.PORT || 3001;
 const EBAY_API_BASE = 'https://api.ebay.com';
+
+// GET /api/verify-password
+// Simple endpoint to let the frontend know if their password was valid under the global middleware
+app.get('/api/verify-password', (req, res) => {
+  res.json({ success: true });
+});
+
+// POST /api/generate (Moved from Frontend)
+app.post('/api/generate', async (req, res) => {
+  try {
+    const { imageParts, instructions } = req.body;
+    if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === 'YOUR_GEMINI_KEY_HERE') {
+      return res.status(500).json({ error: "Server missing GEMINI_API_KEY. Please configure the .env file." });
+    }
+    const result = await generateListing(imageParts, instructions, process.env.GEMINI_API_KEY);
+    res.json(result);
+  } catch (error) {
+    console.error("AI Generation Error:", error.message);
+    res.status(500).json({ error: error.message || "Failed to generate AI listing" });
+  }
+});
 
 // GET /api/ebay/settings
 // Automatically fetches the first available policy IDs and merchant location
@@ -39,10 +74,6 @@ app.get('/api/ebay/settings', async (req, res) => {
     const returnPolicy = returnRes.data?.returnPolicies?.[0]?.returnPolicyId || '';
     const merchantLocation = locationRes.data?.locations?.[0]?.merchantLocationKey || '';
 
-    if (!fulfillmentPolicy && !paymentPolicy && !returnPolicy) {
-      return res.status(400).json({ error: "No policies found! You must visit eBay to actively create Business Policies (Shipping, Payment, Return) for this account before the API can retrieve them." });
-    }
-
     res.json({
       fulfillmentPolicy,
       paymentPolicy,
@@ -57,12 +88,25 @@ app.get('/api/ebay/settings', async (req, res) => {
 });
 
 // POST /api/ebay/draft
+// Note: This relies entirely on environment variables now! No frontend payload needed for config.
 app.post('/api/ebay/draft', async (req, res) => {
-  const token = req.headers.authorization?.split(' ')[1];
-  const { listing, config } = req.body;
+  const { listing } = req.body;
+  const token = process.env.EBAY_OAUTH_TOKEN;
 
-  if (!token) {
-    return res.status(401).json({ error: 'Missing eBay API token' });
+  // We explicitly load the Policy IDs from .env now!
+  const config = {
+    fulfillmentPolicy: process.env.EBAY_FULFILLMENT_POLICY_ID,
+    paymentPolicy: process.env.EBAY_PAYMENT_POLICY_ID,
+    returnPolicy: process.env.EBAY_RETURN_POLICY_ID,
+    merchantLocation: process.env.EBAY_MERCHANT_LOCATION_KEY,
+    categoryId: process.env.EBAY_DEFAULT_CATEGORY_ID || "261068"
+  };
+
+  if (!token || token === 'YOUR_EBAY_TOKEN_HERE') {
+    return res.status(500).json({ error: 'Server missing EBAY_OAUTH_TOKEN in .env' });
+  }
+  if (!config.fulfillmentPolicy || !config.paymentPolicy || !config.returnPolicy) {
+    return res.status(500).json({ error: 'Server missing Policy IDs in .env' });
   }
 
   try {
@@ -143,6 +187,13 @@ app.post('/api/ebay/draft', async (req, res) => {
     }
     console.error('Node Error:', error.message);
     res.status(500).json({ error: 'Failed to push draft to eBay' });
+  }
+});
+
+// Catch-all to send React SPA for non-api routes
+app.get('*', (req, res) => {
+  if (!req.path.startsWith('/api/')) {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
   }
 });
 
