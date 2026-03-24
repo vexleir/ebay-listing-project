@@ -19,6 +19,12 @@ async function getListings(status) {
   return database.collection('listings').find({ status }).sort({ createdAt: -1 }).toArray();
 }
 
+async function getAllListingsMeta() {
+  const database = await getDb();
+  const all = await database.collection('listings').find({}, { projection: { _id: 0, id: 1, status: 1, title: 1, createdAt: 1 } }).toArray();
+  return all;
+}
+
 async function createListing(listing) {
   const database = await getDb();
   const { _id, ...doc } = listing;
@@ -36,4 +42,4 @@ async function deleteListing(id) {
   await database.collection('listings').deleteOne({ id });
 }
 
-module.exports = { getListings, createListing, updateListing, deleteListing };
+module.exports = { getListings, createListing, updateListing, deleteListing, getAllListingsMeta };

@@ -5,7 +5,7 @@ const axios = require('axios');
 const path = require('path');
 const { generateListing } = require('./ai');
 const { getAuthUrl, exchangeCodeForToken, getValidAccessToken, hasValidSession } = require('./ebayAuth');
-const { getListings, createListing, updateListing, deleteListing } = require('./listings');
+const { getListings, createListing, updateListing, deleteListing, getAllListingsMeta } = require('./listings');
 
 const app = express();
 app.use(cors());
@@ -107,6 +107,16 @@ app.put('/api/listings/:id', async (req, res) => {
   try {
     await updateListing(req.params.id, req.body.updates);
     res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/listings/debug — shows everything in the collection without status filter
+app.get('/api/listings/debug', async (req, res) => {
+  try {
+    const all = await getAllListingsMeta();
+    res.json({ total: all.length, items: all });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
