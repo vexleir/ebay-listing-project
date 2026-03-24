@@ -11,6 +11,8 @@ export interface StagedListing {
   createdAt: number;
   sku?: string;
   sellerNotes?: string;
+  ebayDraftId?: string;
+  archived?: boolean;
 }
 
 export interface AppState {

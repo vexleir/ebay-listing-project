@@ -9,20 +9,8 @@ import StagedListings from './components/StagedListings';
 import ListedProducts from './components/ListedProducts';
 import LoginScreen from './components/LoginScreen';
 import { generateListing } from './services/ai';
+import type { StagedListing } from './types';
 import './App.css';
-
-export interface StagedListing {
-  id: string;
-  title: string;
-  condition: string;
-  description: string;
-  itemSpecifics: Record<string, string>;
-  category: string;
-  priceRecommendation: string;
-  shippingEstimate: string;
-  images: string[];
-  createdAt: number;
-}
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -143,13 +131,24 @@ function App() {
     saveStagedListings(updated);
   };
 
+  const saveListedProducts = (items: StagedListing[]) => {
+    setListedProducts(items);
+    localStorage.setItem('listed_ebay_listings', JSON.stringify(items));
+  };
+
   const handleMoveToListed = (listing: StagedListing, draftId: string) => {
     const updated = stagedListings.filter(l => l.id !== listing.id);
     saveStagedListings(updated);
-    const listed = [{ ...listing, ebayDraftId: draftId }, ...listedProducts];
-    setListedProducts(listed);
-    localStorage.setItem('listed_ebay_listings', JSON.stringify(listed));
+    saveListedProducts([{ ...listing, ebayDraftId: draftId }, ...listedProducts]);
     setActiveTab('listed');
+  };
+
+  const handleDeleteListedListing = (id: string) => {
+    saveListedProducts(listedProducts.filter(l => l.id !== id));
+  };
+
+  const handleArchiveListedListing = (id: string) => {
+    saveListedProducts(listedProducts.map(l => l.id === id ? { ...l, archived: !l.archived } : l));
   };
 
   const handleGenerate = async (activeImages: File[], activeInstructions: string) => {
@@ -302,7 +301,11 @@ function App() {
           </div>
         ) : (
           <div className="animate-fade-in">
-            <ListedProducts listings={listedProducts} />
+            <ListedProducts
+              listings={listedProducts}
+              onDelete={handleDeleteListedListing}
+              onArchive={handleArchiveListedListing}
+            />
           </div>
         )}
       </main>
