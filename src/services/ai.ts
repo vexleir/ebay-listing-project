@@ -20,7 +20,7 @@ export async function fileToGenerativePart(file: File): Promise<Part> {
 export async function generateListing(images: File[], instructions: string, appPassword: string) {
   const imageParts = await Promise.all(images.map(fileToGenerativePart));
 
-  const resp = await fetch('http://localhost:3001/api/generate', {
+  const resp = await fetch('/api/generate', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
