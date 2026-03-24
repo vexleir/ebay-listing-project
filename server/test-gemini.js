@@ -1,23 +1,31 @@
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const axios = require('axios');
 
-async function testKey() {
+async function listModels() {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     console.log("No GEMINI_API_KEY found in .env");
     return;
   }
-  console.log("Testing key ending in:", apiKey.slice(-4));
   
   try {
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-    const result = await model.generateContent("Hello, strictly reply with 'OK' and nothing else.");
-    console.log("Result:", result.response.text());
+    const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
+    const response = await axios.get(url);
+    console.log("Available generation models:");
+    const models = response.data.models;
+    for (const m of models) {
+      if (m.supportedGenerationMethods && m.supportedGenerationMethods.includes("generateContent")) {
+        console.log("-", m.name);
+      }
+    }
   } catch (e) {
-    console.log("Error:", e.message);
+    if (e.response) {
+       console.log("Error:", e.response.status, e.response.data);
+    } else {
+       console.log("Error:", e.message);
+    }
   }
 }
 
-testKey();
+listModels();

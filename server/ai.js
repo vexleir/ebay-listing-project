@@ -146,6 +146,14 @@ async function generateListing(imageParts, instructions, apiKey) {
     } catch (error) {
       console.warn(`Model ${modelName} failed:`, error.message);
       lastError = error;
+      // Fail immediately for auth errors — cycling through models won't help
+      if (error.message.includes('API_KEY_INVALID') ||
+          error.message.includes('API key not found') ||
+          error.message.includes('API Key not found') ||
+          error.message.includes('Please pass a valid API key')) {
+        throw new Error(`Invalid Gemini API key. Please check the GEMINI_API_KEY environment variable on Render.com.`);
+      }
+      // Only continue to next model for 404/model-not-found errors
       if (!error.message.includes('404 ') && !error.message.includes('not found')) {
         throw new Error(`Error with ${modelName}: ${error.message}`);
       }
