@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Trash2, Edit2, Copy, Check, Calendar, LayoutGrid, List, Wand2, TrendingUp, X, RefreshCw, ImagePlus, GripVertical, UploadCloud } from 'lucide-react';
 import type { StagedListing } from '../types';
 import ResultsEditor from './ResultsEditor';
@@ -87,7 +88,7 @@ function ImageEditModal({ listing, appPassword, onSave, onClose }: {
     }
   };
 
-  return (
+  return createPortal(
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
       <div className="glass-panel" onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '560px', padding: '2rem', maxHeight: '90vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
@@ -187,7 +188,8 @@ function ImageEditModal({ listing, appPassword, onSave, onClose }: {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -438,13 +440,14 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
 
   return (
     <div>
-      {/* Lightbox */}
-      {lightboxImages && (
-        <Lightbox images={lightboxImages} index={lightboxIndex} onClose={() => setLightboxImages(null)} onNavigate={setLightboxIndex} />
+      {/* Lightbox — portalled to avoid transform ancestor issues */}
+      {lightboxImages && createPortal(
+        <Lightbox images={lightboxImages} index={lightboxIndex} onClose={() => setLightboxImages(null)} onNavigate={setLightboxIndex} />,
+        document.body
       )}
 
-      {/* Re-analyze modal */}
-      {reanalyzeId && (
+      {/* Re-analyze modal — portalled */}
+      {reanalyzeId && createPortal(
         <div onClick={() => setReanalyzeId(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
           <div className="glass-panel" onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '480px', padding: '2rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
@@ -470,10 +473,11 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
             </div>
           </div>
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {/* Image edit modal */}
+      {/* Image edit modal — portalled */}
       {imageEditListing && (
         <ImageEditModal
           listing={imageEditListing}
