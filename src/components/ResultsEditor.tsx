@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Save, X, Eye, Code, Type, LayoutTemplate, Tag, Wand2 } from 'lucide-react';
+import { Save, X, Eye, Code, Type, LayoutTemplate, Tag, Wand2, GripVertical } from 'lucide-react';
 import type { StagedListing } from '../types';
 import { useToast } from '../context/ToastContext';
 
@@ -11,12 +11,13 @@ interface ResultsEditorProps {
     sku?: string; sellerNotes?: string;
   };
   images: File[];
+  existingImageUrls?: string[];
   onStage: (listing: Omit<StagedListing, 'id' | 'createdAt'>) => void;
   onCancel: () => void;
   appPassword?: string;
 }
 
-export default function ResultsEditor({ data, images, onStage, onCancel, appPassword = '' }: ResultsEditorProps) {
+export default function ResultsEditor({ data, images, existingImageUrls, onStage, onCancel, appPassword = '' }: ResultsEditorProps) {
   const { toast } = useToast();
   const [title, setTitle] = useState(data.title);
   const [description, setDescription] = useState(data.description);
@@ -61,15 +62,19 @@ export default function ResultsEditor({ data, images, onStage, onCancel, appPass
     }
   };
 
-  const [imageUrls, setImageUrls] = useState<string[]>([]);
+  const [allImages, setAllImages] = useState<string[]>(existingImageUrls || []);
+  const [imgDragOverIdx, setImgDragOverIdx] = useState<number | null>(null);
+  const imgDraggedIdxRef = useRef<number | null>(null);
+
   useEffect(() => {
+    if (images.length === 0) return;
     const convertImages = async () => {
       const b64s = await Promise.all(images.map(img => new Promise<string>((resolve) => {
         const reader = new FileReader();
         reader.onloadend = () => resolve(reader.result as string);
         reader.readAsDataURL(img);
       })));
-      setImageUrls(b64s);
+      setAllImages(prev => [...prev, ...b64s]);
     };
     convertImages();
   }, [images]);
@@ -83,6 +88,63 @@ export default function ResultsEditor({ data, images, onStage, onCancel, appPass
       </h2>
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '1.5rem', overflowY: 'auto', paddingRight: '8px' }}>
+
+        {/* Image strip */}
+        {allImages.length > 0 && (
+          <div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+              Images <span style={{ opacity: 0.6, fontSize: '0.78rem' }}>— drag to reorder · first image is main</span>
+            </label>
+            <div style={{ display: 'flex', gap: '10px', overflowX: 'auto', paddingBottom: '6px' }}>
+              {allImages.map((src, idx) => (
+                <div
+                  key={idx}
+                  draggable
+                  onDragStart={e => { imgDraggedIdxRef.current = idx; e.dataTransfer.effectAllowed = 'move'; }}
+                  onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setImgDragOverIdx(idx); }}
+                  onDragLeave={() => setImgDragOverIdx(null)}
+                  onDrop={e => {
+                    e.preventDefault();
+                    const from = imgDraggedIdxRef.current;
+                    if (from !== null && from !== idx) {
+                      setAllImages(prev => {
+                        const arr = [...prev];
+                        const [item] = arr.splice(from, 1);
+                        arr.splice(idx, 0, item);
+                        return arr;
+                      });
+                    }
+                    imgDraggedIdxRef.current = null;
+                    setImgDragOverIdx(null);
+                  }}
+                  onDragEnd={() => { imgDraggedIdxRef.current = null; setImgDragOverIdx(null); }}
+                  style={{
+                    position: 'relative', width: '80px', height: '80px', flexShrink: 0,
+                    borderRadius: '6px', overflow: 'hidden', cursor: 'grab',
+                    border: `2px solid ${imgDragOverIdx === idx ? 'var(--accent-color)' : idx === 0 ? 'rgba(99,102,241,0.6)' : 'var(--border-color)'}`,
+                    boxShadow: imgDragOverIdx === idx ? '0 0 0 3px rgba(99,102,241,0.35)' : 'none',
+                    transition: 'border-color 0.15s, box-shadow 0.15s',
+                    opacity: imgDraggedIdxRef.current === idx ? 0.3 : 1
+                  }}
+                >
+                  <img src={src} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }} />
+                  {idx === 0 && (
+                    <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'rgba(99,102,241,0.8)', fontSize: '0.6rem', textAlign: 'center', color: 'white', padding: '2px 0', letterSpacing: '0.05em' }}>MAIN</div>
+                  )}
+                  <div style={{ position: 'absolute', top: '3px', left: '3px', color: 'rgba(255,255,255,0.5)', pointerEvents: 'none' }}>
+                    <GripVertical size={11} />
+                  </div>
+                  <button
+                    onClick={() => setAllImages(prev => prev.filter((_, i) => i !== idx))}
+                    style={{ position: 'absolute', top: '3px', right: '3px', background: 'rgba(0,0,0,0.7)', border: 'none', color: 'white', borderRadius: '50%', width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
+                  >
+                    <X size={10} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Title */}
         <div>
@@ -204,7 +266,7 @@ export default function ResultsEditor({ data, images, onStage, onCancel, appPass
       <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
         <button className="btn-secondary" style={{ flex: 1 }} onClick={onCancel}><X size={18} /> Discard</button>
         <button className="btn-primary" style={{ flex: 2 }} disabled={title.length > 80}
-          onClick={() => onStage({ title, condition, description, category, priceRecommendation, priceJustification, shippingEstimate, itemSpecifics, images: imageUrls, sku, sellerNotes })}>
+          onClick={() => onStage({ title, condition, description, category, priceRecommendation, priceJustification, shippingEstimate, itemSpecifics, images: allImages, sku, sellerNotes })}>
           <Save size={18} /> Save & Stage Listing
         </button>
       </div>

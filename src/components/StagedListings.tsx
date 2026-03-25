@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Trash2, Edit2, Copy, Check, Calendar, LayoutGrid, List, Wand2, TrendingUp, X, RefreshCw } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { Trash2, Edit2, Copy, Check, Calendar, LayoutGrid, List, Wand2, TrendingUp, X, RefreshCw, ImagePlus, GripVertical, UploadCloud } from 'lucide-react';
 import type { StagedListing } from '../types';
 import ResultsEditor from './ResultsEditor';
 import ImageSearchButton from './ImageSearchButton';
@@ -28,6 +28,169 @@ function timeAgo(ts: number): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+function ImageEditModal({ listing, appPassword, onSave, onClose }: {
+  listing: StagedListing;
+  appPassword: string;
+  onSave: (images: string[]) => void;
+  onClose: () => void;
+}) {
+  const { toast } = useToast();
+  const [images, setImages] = useState<string[]>(listing.images || []);
+  const [newFiles, setNewFiles] = useState<File[]>([]);
+  const [newFilePreviews, setNewFilePreviews] = useState<string[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
+  const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const addFiles = (files: FileList | null) => {
+    if (!files) return;
+    const valid = Array.from(files).filter(f => f.type.startsWith('image/'));
+    const previews = valid.map(f => URL.createObjectURL(f));
+    setNewFiles(prev => [...prev, ...valid]);
+    setNewFilePreviews(prev => [...prev, ...previews]);
+  };
+
+  const removeExisting = (idx: number) => setImages(prev => prev.filter((_, i) => i !== idx));
+  const removeNew = (idx: number) => {
+    URL.revokeObjectURL(newFilePreviews[idx]);
+    setNewFiles(prev => prev.filter((_, i) => i !== idx));
+    setNewFilePreviews(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      let uploadedUrls: string[] = [];
+      if (newFiles.length > 0) {
+        const base64Array = await Promise.all(newFiles.map(file => new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve((reader.result as string).split(',')[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        })));
+        const resp = await fetch('/api/images/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-app-password': appPassword },
+          body: JSON.stringify({ images: base64Array })
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json();
+        uploadedUrls = data.urls;
+      }
+      onSave([...images, ...uploadedUrls]);
+    } catch (e: any) {
+      toast('Failed to save images: ' + e.message, 'error');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+      <div className="glass-panel" onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '560px', padding: '2rem', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
+          <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}><ImagePlus size={18} /> Edit Images</h3>
+          <button onClick={onClose} className="btn-icon"><X size={18} /></button>
+        </div>
+
+        {/* Existing images — drag to reorder */}
+        {images.length > 0 && (
+          <div style={{ marginBottom: '1.25rem' }}>
+            <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '10px' }}>Drag to reorder · click × to remove</p>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              {images.map((src, idx) => {
+                const isOver = dragOverIdx === idx;
+                const isDragging = draggedIdx === idx;
+                return (
+                  <div
+                    key={idx}
+                    draggable={true}
+                    onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setTimeout(() => setDraggedIdx(idx), 0); }}
+                    onDragOver={e => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; if (dragOverIdx !== idx) setDragOverIdx(idx); }}
+                    onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverIdx(null); }}
+                    onDrop={e => {
+                      e.preventDefault();
+                      if (draggedIdx !== null && draggedIdx !== idx) {
+                        const from = draggedIdx;
+                        setImages(prev => {
+                          const arr = [...prev];
+                          const [item] = arr.splice(from, 1);
+                          arr.splice(idx, 0, item);
+                          return arr;
+                        });
+                      }
+                      setDraggedIdx(null);
+                      setDragOverIdx(null);
+                    }}
+                    onDragEnd={() => { setDraggedIdx(null); setDragOverIdx(null); }}
+                    style={{
+                      position: 'relative', width: '90px', height: '90px', flexShrink: 0,
+                      borderRadius: '6px', overflow: 'hidden',
+                      border: `2px solid ${isOver ? 'var(--accent-color)' : 'var(--border-color)'}`,
+                      cursor: 'grab', opacity: isDragging ? 0.35 : 1,
+                      boxShadow: isOver ? '0 0 0 3px rgba(99,102,241,0.35)' : 'none',
+                      transition: 'border-color 0.15s, box-shadow 0.15s, opacity 0.15s',
+                      userSelect: 'none'
+                    }}
+                  >
+                    <img src={src} alt="" draggable={false} style={{ width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }} />
+                    {idx === 0 && (
+                      <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'rgba(99,102,241,0.8)', fontSize: '0.62rem', textAlign: 'center', color: 'white', padding: '2px 0' }}>MAIN</div>
+                    )}
+                    <div style={{ position: 'absolute', top: '4px', left: '4px', color: 'rgba(255,255,255,0.5)', pointerEvents: 'none' }}><GripVertical size={12} /></div>
+                    <button onClick={() => removeExisting(idx)} style={{ position: 'absolute', top: '4px', right: '4px', background: 'rgba(0,0,0,0.7)', border: 'none', color: 'white', borderRadius: '50%', width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}>
+                      <X size={11} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* New files preview */}
+        {newFiles.length > 0 && (
+          <div style={{ marginBottom: '1.25rem' }}>
+            <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '10px' }}>New photos to upload ({newFiles.length})</p>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              {newFilePreviews.map((src, idx) => (
+                <div key={idx} style={{ position: 'relative', width: '90px', height: '90px', flexShrink: 0, borderRadius: '6px', overflow: 'hidden', border: '2px solid var(--success)' }}>
+                  <img src={src} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  <button onClick={() => removeNew(idx)} style={{ position: 'absolute', top: '4px', right: '4px', background: 'rgba(0,0,0,0.7)', border: 'none', color: 'white', borderRadius: '50%', width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}>
+                    <X size={11} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Drop zone for adding new images */}
+        <div
+          onClick={() => fileInputRef.current?.click()}
+          onDragOver={e => { e.preventDefault(); setIsDraggingFiles(true); }}
+          onDragLeave={() => setIsDraggingFiles(false)}
+          onDrop={e => { e.preventDefault(); setIsDraggingFiles(false); addFiles(e.dataTransfer.files); }}
+          style={{ border: `2px dashed ${isDraggingFiles ? 'var(--accent-color)' : 'var(--border-color)'}`, borderRadius: '8px', padding: '1.5rem', textAlign: 'center', cursor: 'pointer', background: isDraggingFiles ? 'var(--accent-light)' : 'rgba(0,0,0,0.2)', transition: 'all 0.2s', marginBottom: '1.5rem' }}
+        >
+          <UploadCloud size={28} style={{ color: isDraggingFiles ? 'var(--accent-color)' : 'var(--text-secondary)', marginBottom: '8px' }} />
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: 0 }}>Drop photos here or click to browse</p>
+          <input type="file" multiple accept="image/*" ref={fileInputRef} onChange={e => addFiles(e.target.files)} style={{ display: 'none' }} />
+        </div>
+
+        <div style={{ display: 'flex', gap: '0.75rem' }}>
+          <button className="btn-secondary" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
+          <button className="btn-primary" style={{ flex: 2 }} onClick={handleSave} disabled={isSaving}>
+            {isSaving ? 'Uploading & Saving...' : `Save Images (${images.length + newFiles.length} total)`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function StagedListingsView({ listings, onUpdate, onDelete, onBulkDelete, onMoveToListed, isEbayConnected, appPassword = '' }: StagedListingsProps) {
   const { toast } = useToast();
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -52,6 +215,9 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
   const [compsId, setCompsId] = useState<string | null>(null);
   const [compsData, setCompsData] = useState<{ title: string; price: string; currency: string; condition: string; url: string }[]>([]);
   const [compsLoading, setCompsLoading] = useState(false);
+
+  // Image editing
+  const [imageEditId, setImageEditId] = useState<string | null>(null);
 
   if (listings.length === 0) {
     return (
@@ -197,8 +363,9 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
         <ResultsEditor
           data={{ title: l.title, description: l.description, condition: l.condition, category: l.category, priceRecommendation: l.priceRecommendation, shippingEstimate: l.shippingEstimate, itemSpecifics: l.itemSpecifics, sku: l.sku, sellerNotes: l.sellerNotes }}
           images={[]}
+          existingImageUrls={l.images || []}
           appPassword={appPassword}
-          onStage={(updatedData) => { onUpdate({ ...l, ...updatedData, images: l.images }); setEditingId(null); toast('Listing saved.', 'success'); }}
+          onStage={(updatedData) => { onUpdate({ ...l, ...updatedData, updatedAt: Date.now() }); setEditingId(null); toast('Listing saved.', 'success'); }}
           onCancel={() => setEditingId(null)}
         />
       </div>
@@ -223,6 +390,9 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
       </button>
       <button className="btn-icon" title="Copy HTML Description" onClick={() => handleCopyHtml(listing.id, listing.description)}>
         {copiedId === listing.id ? <Check size={18} color="var(--success)" /> : <Copy size={18} />}
+      </button>
+      <button className="btn-icon" onClick={() => setImageEditId(listing.id)} title="Edit / Add Images">
+        <ImagePlus size={18} />
       </button>
       <button className="btn-icon" onClick={() => setEditingId(listing.id)} title="Edit Listing">
         <Edit2 size={18} />
@@ -264,6 +434,8 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
     );
   };
 
+  const imageEditListing = imageEditId ? listings.find(l => l.id === imageEditId) : null;
+
   return (
     <div>
       {/* Lightbox */}
@@ -299,6 +471,20 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
           </div>
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
+      )}
+
+      {/* Image edit modal */}
+      {imageEditListing && (
+        <ImageEditModal
+          listing={imageEditListing}
+          appPassword={appPassword}
+          onSave={(newImages) => {
+            onUpdate({ ...imageEditListing, images: newImages, updatedAt: Date.now() });
+            setImageEditId(null);
+            toast('Images updated.', 'success');
+          }}
+          onClose={() => setImageEditId(null)}
+        />
       )}
 
       {/* Toolbar */}
@@ -349,6 +535,14 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
                   <div onClick={() => toggleSelect(listing.id)} style={{ position: 'absolute', top: '8px', left: '8px', zIndex: 3, cursor: 'pointer', width: '22px', height: '22px', borderRadius: '5px', background: isSelected ? 'var(--accent-color)' : 'rgba(0,0,0,0.6)', border: `2px solid ${isSelected ? 'var(--accent-color)' : 'rgba(255,255,255,0.4)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s' }}>
                     {isSelected && <Check size={13} color="white" />}
                   </div>
+                  {/* Edit images button — overlay on image area */}
+                  <button
+                    onClick={() => setImageEditId(listing.id)}
+                    title="Edit / Add Images"
+                    style={{ position: 'absolute', bottom: '8px', right: '8px', zIndex: 3, background: 'rgba(0,0,0,0.65)', border: '1px solid rgba(255,255,255,0.2)', color: 'white', borderRadius: '6px', padding: '4px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.72rem', backdropFilter: 'blur(4px)' }}
+                  >
+                    <ImagePlus size={13} /> Edit
+                  </button>
                   {listing.images && listing.images.length > 0 ? (
                     <>
                       <div style={{ flex: 2, height: '100%', position: 'relative', cursor: 'pointer' }} onClick={() => { setLightboxImages(listing.images); setLightboxIndex(0); }}>
@@ -394,7 +588,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
                       📝 {listing.sellerNotes}
                     </p>
                   )}
-                  <div style={{ marginTop: 'auto', display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', alignItems: 'center', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)' }}>
+                  <div style={{ marginTop: 'auto', display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', alignItems: 'center', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)', flexWrap: 'wrap' }}>
                     <span style={{ marginRight: 'auto' }} />
                     <ActionButtons listing={listing} />
                   </div>
