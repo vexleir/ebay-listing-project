@@ -4,18 +4,19 @@ import { CheckCircle2, XCircle, Info, X } from 'lucide-react';
 
 type ToastType = 'success' | 'error' | 'info';
 
-interface Toast { id: string; message: string; type: ToastType; }
-interface ToastContextValue { toast: (message: string, type?: ToastType) => void; }
+interface ToastAction { label: string; onClick: () => void; }
+interface Toast { id: string; message: string; type: ToastType; action?: ToastAction; }
+interface ToastContextValue { toast: (message: string, type?: ToastType, action?: ToastAction) => void; }
 
 const ToastContext = createContext<ToastContextValue>({ toast: () => {} });
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const toast = useCallback((message: string, type: ToastType = 'info') => {
+  const toast = useCallback((message: string, type: ToastType = 'info', action?: ToastAction) => {
     const id = crypto.randomUUID();
-    setToasts(prev => [...prev, { id, message, type }]);
-    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4500);
+    setToasts(prev => [...prev, { id, message, type, action }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000);
   }, []);
 
   const dismiss = (id: string) => setToasts(prev => prev.filter(t => t.id !== id));
@@ -35,6 +36,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               {t.type === 'info' && <Info size={17} />}
             </span>
             <span style={{ flex: 1 }}>{t.message}</span>
+            {t.action && (
+              <button
+                onClick={() => { t.action!.onClick(); dismiss(t.id); }}
+                style={{ flexShrink: 0, background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)', color: 'var(--text-primary)', borderRadius: '5px', padding: '3px 10px', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600 }}
+              >
+                {t.action.label}
+              </button>
+            )}
             <button onClick={() => dismiss(t.id)} className="btn-icon" style={{ padding: '2px', flexShrink: 0 }}>
               <X size={14} />
             </button>

@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { PlusCircle, List, Check, AlertTriangle } from 'lucide-react';
+import { PlusCircle, List, Check, AlertTriangle, BarChart2 } from 'lucide-react';
 import './index.css';
 
 import Uploader from './components/Uploader';
 import ResultsEditor from './components/ResultsEditor';
 import StagedListings from './components/StagedListings';
 import ListedProducts from './components/ListedProducts';
+import Analytics from './components/Analytics';
 import LoginScreen from './components/LoginScreen';
 import { generateListing } from './services/ai';
 import type { StagedListing } from './types';
@@ -36,9 +37,23 @@ function App() {
   });
 
   const [stagedListings, setStagedListings] = useState<StagedListing[]>([]);
-  const [activeTab, setActiveTab] = useState<'new' | 'staged' | 'listed'>('new');
+  const [activeTab, setActiveTab] = useState<'new' | 'staged' | 'listed' | 'analytics'>('new');
   const [listedProducts, setListedProducts] = useState<StagedListing[]>([]);
   const [isLoadingListings, setIsLoadingListings] = useState(false);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.key === 'n' || e.key === 'N') setActiveTab('new');
+      else if (e.key === 's' || e.key === 'S') setActiveTab('staged');
+      else if (e.key === 'l' || e.key === 'L') setActiveTab('listed');
+      else if (e.key === 'a' || e.key === 'A') setActiveTab('analytics');
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   // Draft autosave
   useEffect(() => { sessionStorage.setItem(DRAFT_INSTRUCTIONS_KEY, instructions); }, [instructions]);
@@ -193,16 +208,37 @@ function App() {
     await fetch(`/api/listings/${updatedListing.id}`, { method: 'PUT', headers: apiHeaders(appPassword), body: JSON.stringify({ updates: withTimestamp }) });
   };
 
-  const handleDeleteStagedListing = async (id: string) => {
-    removeImages(id);
+  const handleDeleteStagedListing = (id: string) => {
+    const listing = stagedListings.find(l => l.id === id);
+    if (!listing) return;
     setStagedListings(prev => prev.filter(l => l.id !== id));
-    await fetch(`/api/listings/${id}`, { method: 'DELETE', headers: { 'x-app-password': appPassword } });
+    const timer = setTimeout(async () => {
+      removeImages(id);
+      await fetch(`/api/listings/${id}`, { method: 'DELETE', headers: { 'x-app-password': appPassword } });
+    }, 5000);
+    toast(`"${listing.title.substring(0, 35)}..." deleted.`, 'info', {
+      label: 'Undo',
+      onClick: () => {
+        clearTimeout(timer);
+        setStagedListings(prev => [listing, ...prev]);
+      }
+    });
   };
 
-  const handleBulkDelete = async (ids: string[]) => {
-    ids.forEach(removeImages);
+  const handleBulkDelete = (ids: string[]) => {
+    const removed = stagedListings.filter(l => ids.includes(l.id));
     setStagedListings(prev => prev.filter(l => !ids.includes(l.id)));
-    await Promise.all(ids.map(id => fetch(`/api/listings/${id}`, { method: 'DELETE', headers: { 'x-app-password': appPassword } })));
+    const timer = setTimeout(async () => {
+      removed.forEach(l => removeImages(l.id));
+      await Promise.all(ids.map(id => fetch(`/api/listings/${id}`, { method: 'DELETE', headers: { 'x-app-password': appPassword } })));
+    }, 5000);
+    toast(`${ids.length} listing${ids.length > 1 ? 's' : ''} deleted.`, 'info', {
+      label: 'Undo',
+      onClick: () => {
+        clearTimeout(timer);
+        setStagedListings(prev => [...removed, ...prev]);
+      }
+    });
   };
 
   const handleMoveToListed = async (listing: StagedListing, draftId: string) => {
@@ -216,10 +252,51 @@ function App() {
     ]);
   };
 
-  const handleDeleteListedListing = async (id: string) => {
-    removeImages(id);
+  const handleDeleteListedListing = (id: string) => {
+    const listing = listedProducts.find(l => l.id === id);
+    if (!listing) return;
     setListedProducts(prev => prev.filter(l => l.id !== id));
-    await fetch(`/api/listings/${id}`, { method: 'DELETE', headers: { 'x-app-password': appPassword } });
+    const timer = setTimeout(async () => {
+      removeImages(id);
+      await fetch(`/api/listings/${id}`, { method: 'DELETE', headers: { 'x-app-password': appPassword } });
+    }, 5000);
+    toast(`"${listing.title.substring(0, 35)}..." deleted.`, 'info', {
+      label: 'Undo',
+      onClick: () => {
+        clearTimeout(timer);
+        setListedProducts(prev => [listing, ...prev]);
+      }
+    });
+  };
+
+  const handleSyncSold = async () => {
+    if (!isEbayConnected) { toast('Connect to eBay first.', 'error'); return; }
+    try {
+      const resp = await fetch('/api/ebay/sold-items', { headers: { 'x-app-password': appPassword } });
+      const data = await resp.json();
+      if (data.error) { toast('Sync failed: ' + data.error, 'error'); return; }
+      const soldItems: { itemId: string; soldPrice: string; soldDate: string }[] = data.items || [];
+      if (soldItems.length === 0) { toast('No sold items found in the last 30 days.', 'info'); return; }
+      let count = 0;
+      setListedProducts(prev => prev.map(l => {
+        const match = soldItems.find(s => s.itemId && l.ebayDraftId && s.itemId === l.ebayDraftId);
+        if (match && !l.soldAt) {
+          count++;
+          return { ...l, archived: true, soldAt: Date.now(), soldPrice: match.soldPrice, updatedAt: Date.now() };
+        }
+        return l;
+      }));
+      // Persist all changes
+      const updated = listedProducts.filter(l => soldItems.some(s => s.itemId === l.ebayDraftId && !l.soldAt));
+      await Promise.all(updated.map(l => {
+        const match = soldItems.find(s => s.itemId === l.ebayDraftId)!;
+        return fetch(`/api/listings/${l.id}`, { method: 'PUT', headers: apiHeaders(appPassword), body: JSON.stringify({ updates: { archived: true, soldAt: Date.now(), soldPrice: match.soldPrice, updatedAt: Date.now() } }) });
+      }));
+      if (count > 0) toast(`${count} listing${count > 1 ? 's' : ''} marked as sold!`, 'success');
+      else toast('All listings already up to date.', 'info');
+    } catch (e: any) {
+      toast('Sync error: ' + e.message, 'error');
+    }
   };
 
   const handleArchiveListedListing = async (id: string) => {
@@ -278,6 +355,7 @@ function App() {
           <button style={tabBtnStyle('new')} onClick={() => setActiveTab('new')}><PlusCircle size={18} /> New Listing</button>
           <button style={tabBtnStyle('staged')} onClick={() => setActiveTab('staged')}><List size={18} /> Staged ({stagedListings.length})</button>
           <button style={tabBtnStyle('listed')} onClick={() => setActiveTab('listed')}><Check size={18} /> Listed ({listedProducts.length})</button>
+          <button style={tabBtnStyle('analytics')} onClick={() => setActiveTab('analytics')}><BarChart2 size={18} /> Analytics</button>
         </div>
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
           {isEbayConnected ? (
@@ -313,6 +391,7 @@ function App() {
                 images={images} setImages={setImages}
                 instructions={instructions} setInstructions={setInstructions}
                 onGenerate={handleGenerate} isGenerating={isGenerating} disabled={false}
+                appPassword={appPassword}
               />
             </div>
             {generatedData && (
@@ -337,13 +416,19 @@ function App() {
               appPassword={appPassword}
             />
           </div>
-        ) : (
+        ) : activeTab === 'listed' ? (
           <div className="animate-fade-in">
             <ListedProducts
               listings={listedProducts}
               onDelete={handleDeleteListedListing}
               onArchive={handleArchiveListedListing}
+              onSyncSold={handleSyncSold}
+              isEbayConnected={isEbayConnected}
             />
+          </div>
+        ) : (
+          <div className="animate-fade-in">
+            <Analytics staged={stagedListings} listed={listedProducts} />
           </div>
         )}
       </main>

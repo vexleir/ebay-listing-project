@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { UploadCloud, X, Image as ImageIcon, Sparkles, CheckCircle2, Circle, GripVertical } from 'lucide-react';
+import { UploadCloud, X, Image as ImageIcon, Sparkles, CheckCircle2, Circle, GripVertical, Barcode, Scissors } from 'lucide-react';
 
 interface UploaderProps {
   images: File[];
@@ -9,10 +9,11 @@ interface UploaderProps {
   onGenerate: (images: File[], instructions: string) => void;
   isGenerating: boolean;
   disabled: boolean;
+  appPassword?: string;
 }
 
 export default function Uploader({
-  images, setImages, instructions, setInstructions, onGenerate, isGenerating, disabled
+  images, setImages, instructions, setInstructions, onGenerate, isGenerating, disabled, appPassword = ''
 }: UploaderProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -78,6 +79,68 @@ export default function Uploader({
       next.delete(fileToRemove);
       return next;
     });
+  };
+
+  const [removingBgIdx, setRemovingBgIdx] = useState<number | null>(null);
+
+  const removeBackground = async (index: number) => {
+    setRemovingBgIdx(index);
+    try {
+      const file = images[index];
+      const base64 = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(',')[1]);
+        reader.readAsDataURL(file);
+      });
+      const resp = await fetch('/api/images/remove-bg', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-app-password': appPassword },
+        body: JSON.stringify({ imageBase64: base64 })
+      });
+      const data = await resp.json();
+      if (data.error) { alert('Background removal failed: ' + data.error); return; }
+      // Convert data URL back to File
+      const res = await fetch(data.imageBase64);
+      const blob = await res.blob();
+      const newFile = new File([blob], file.name.replace(/\.[^.]+$/, '.png'), { type: 'image/png' });
+      setImages(prev => {
+        const arr = [...prev];
+        arr[index] = newFile;
+        return arr;
+      });
+      setSelectedFiles(prev => {
+        const next = new Set(prev);
+        if (next.has(file)) { next.delete(file); next.add(newFile); }
+        return next;
+      });
+    } catch (e: any) {
+      alert('Background removal failed: ' + e.message);
+    } finally {
+      setRemovingBgIdx(null);
+    }
+  };
+
+  const [barcodeInput, setBarcodeInput] = useState('');
+  const [barcodeLoading, setBarcodeLoading] = useState(false);
+  const [barcodeResult, setBarcodeResult] = useState<{ title: string; brand: string; category: string; description: string } | null>(null);
+
+  const lookupBarcode = async () => {
+    const upc = barcodeInput.trim();
+    if (!upc) return;
+    setBarcodeLoading(true);
+    setBarcodeResult(null);
+    try {
+      const resp = await fetch(`/api/barcode?upc=${encodeURIComponent(upc)}`, { headers: { 'x-app-password': appPassword } });
+      const data = await resp.json();
+      if (data.error) { setBarcodeResult(null); return; }
+      setBarcodeResult(data);
+      if (data.title) {
+        const parts = [data.title, data.brand, data.description].filter(Boolean);
+        setInstructions(parts.join('\n'));
+      }
+    } catch { /* ignore */ } finally {
+      setBarcodeLoading(false);
+    }
   };
 
   const toggleSelection = (file: File) => {
@@ -216,15 +279,17 @@ export default function Uploader({
                   </div>
                   <button
                     onClick={(e) => { e.stopPropagation(); removeImage(index); }}
-                    style={{
-                      position: 'absolute', top: '8px', right: '8px',
-                      background: 'rgba(0,0,0,0.7)', border: 'none', color: 'white',
-                      borderRadius: '50%', width: '24px', height: '24px',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      cursor: 'pointer', padding: 0
-                    }}
+                    style={{ position: 'absolute', top: '8px', right: '8px', background: 'rgba(0,0,0,0.7)', border: 'none', color: 'white', borderRadius: '50%', width: '24px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
                   >
                     <X size={14} />
+                  </button>
+                  <button
+                    title="Remove background"
+                    onClick={(e) => { e.stopPropagation(); removeBackground(index); }}
+                    disabled={removingBgIdx === index}
+                    style={{ position: 'absolute', bottom: '8px', right: '8px', background: 'rgba(99,102,241,0.85)', border: 'none', color: 'white', borderRadius: '50%', width: '24px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
+                  >
+                    {removingBgIdx === index ? <span style={{ fontSize: '9px' }}>...</span> : <Scissors size={12} />}
                   </button>
                 </div>
               );
@@ -232,6 +297,33 @@ export default function Uploader({
           </div>
         </div>
       )}
+
+      {/* Barcode Lookup */}
+      <div style={{ marginBottom: '1.5rem' }}>
+        <h3 style={{ marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '6px' }}><Barcode size={18} /> Barcode Lookup <span style={{ fontSize: '0.8rem', fontWeight: 400, color: 'var(--text-secondary)', marginLeft: '4px' }}>optional</span></h3>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <input
+            type="text"
+            className="input-base"
+            placeholder="Scan or type UPC / EAN barcode..."
+            value={barcodeInput}
+            onChange={e => setBarcodeInput(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && lookupBarcode()}
+            style={{ flex: 1 }}
+          />
+          <button onClick={lookupBarcode} disabled={barcodeLoading || !barcodeInput.trim()} className="btn-secondary" style={{ flexShrink: 0, padding: '10px 16px' }}>
+            {barcodeLoading ? 'Looking up...' : 'Lookup'}
+          </button>
+        </div>
+        {barcodeResult && (
+          <div style={{ marginTop: '8px', padding: '10px 14px', background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: '8px', fontSize: '0.85rem' }}>
+            <p style={{ margin: 0, fontWeight: 600 }}>{barcodeResult.title}</p>
+            {barcodeResult.brand && <p style={{ margin: '2px 0 0', color: 'var(--text-secondary)' }}>Brand: {barcodeResult.brand}</p>}
+            {barcodeResult.category && <p style={{ margin: '2px 0 0', color: 'var(--text-secondary)' }}>Category: {barcodeResult.category}</p>}
+            <p style={{ margin: '6px 0 0', color: 'var(--success)', fontSize: '0.78rem' }}>✓ Details added to instructions below</p>
+          </div>
+        )}
+      </div>
 
       <div style={{ marginBottom: '2rem' }}>
         <h3 style={{ marginBottom: '1rem' }}>Additional Instructions / Details</h3>

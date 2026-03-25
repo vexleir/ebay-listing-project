@@ -314,6 +314,88 @@ app.get('/api/ebay/settings', async (req, res) => {
   }
 });
 
+// GET /api/ebay/listing-stats?itemId=  — fetch view count and watcher count via GetItem Trading API
+app.get('/api/ebay/listing-stats', async (req, res) => {
+  const { itemId } = req.query;
+  if (!itemId) return res.status(400).json({ error: 'itemId required' });
+  try {
+    const token = await getValidAccessToken();
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <ItemID>${itemId}</ItemID>
+  <IncludeWatchCount>true</IncludeWatchCount>
+  <DetailLevel>ReturnAll</DetailLevel>
+</GetItemRequest>`;
+    const resp = await axios.post('https://api.ebay.com/ws/api.dll', xml, {
+      headers: {
+        'X-EBAY-API-COMPATIBILITY-LEVEL': '1331',
+        'X-EBAY-API-CALL-NAME': 'GetItem',
+        'X-EBAY-API-SITEID': '0',
+        'X-EBAY-API-IAF-TOKEN': token,
+        'Content-Type': 'text/xml'
+      }
+    });
+    const body = resp.data;
+    const get = (tag) => { const r = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`); const x = r.exec(body); return x ? x[1].trim() : null; };
+    res.json({
+      watchCount: get('WatchCount') || '0',
+      hitCount: get('HitCount') || '0',
+      viewCount: get('ViewItemURLForNaturalSearch') ? get('HitCount') : '0',
+      timeLeft: get('TimeLeft') || '',
+      quantity: get('Quantity') || '',
+      quantitySold: get('QuantitySold') || '0',
+    });
+  } catch (e) {
+    console.error('[listing-stats] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/ebay/sold-items  — fetch recently sold items from GetMyeBaySelling Trading API
+app.get('/api/ebay/sold-items', async (req, res) => {
+  try {
+    const token = await getValidAccessToken();
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <SoldList>
+    <Include>true</Include>
+    <DurationInDays>30</DurationInDays>
+    <Pagination><EntriesPerPage>50</EntriesPerPage><PageNumber>1</PageNumber></Pagination>
+  </SoldList>
+  <HideVariations>true</HideVariations>
+</GetMyeBaySellingRequest>`;
+    const resp = await axios.post('https://api.ebay.com/ws/api.dll', xml, {
+      headers: {
+        'X-EBAY-API-COMPATIBILITY-LEVEL': '1331',
+        'X-EBAY-API-CALL-NAME': 'GetMyeBaySelling',
+        'X-EBAY-API-SITEID': '0',
+        'X-EBAY-API-IAF-TOKEN': token,
+        'Content-Type': 'text/xml'
+      }
+    });
+    const body = resp.data;
+    // Parse sold items from XML
+    const itemRegex = /<Item>([\s\S]*?)<\/Item>/g;
+    const items = [];
+    let m;
+    while ((m = itemRegex.exec(body)) !== null) {
+      const block = m[1];
+      const get = (tag) => { const r = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`); const x = r.exec(block); return x ? x[1].trim() : ''; };
+      items.push({
+        itemId: get('ItemID'),
+        title: get('Title'),
+        soldPrice: get('CurrentPrice') || get('SalePrice') || '',
+        soldDate: get('LastModifiedTime') || '',
+        quantitySold: get('QuantitySold') || '1',
+      });
+    }
+    res.json({ items });
+  } catch (e) {
+    console.error('[sold-items] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /api/ebay/draft
 // Rewritten for V4: Uses eBay XML Trading API to support EPS Image Uploads and Scheduled Drafts
 app.post('/api/ebay/draft', async (req, res) => {
@@ -512,6 +594,68 @@ app.post('/api/ebay/draft', async (req, res) => {
 app.get('*', (req, res) => {
   if (!req.path.startsWith('/api/')) {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  }
+});
+
+// POST /api/images/remove-bg  — remove background from a base64 image using remove.bg API
+app.post('/api/images/remove-bg', async (req, res) => {
+  const { imageBase64 } = req.body;
+  if (!imageBase64) return res.status(400).json({ error: 'imageBase64 required' });
+  const apiKey = process.env.REMOVEBG_API_KEY;
+  if (!apiKey) return res.status(501).json({ error: 'REMOVEBG_API_KEY not configured on server' });
+  try {
+    const FormData = require('form-data');
+    const form = new FormData();
+    form.append('image_file_b64', imageBase64);
+    form.append('size', 'auto');
+    const response = await axios.post('https://api.remove.bg/v1.0/removebg', form, {
+      headers: { ...form.getHeaders(), 'X-Api-Key': apiKey },
+      responseType: 'arraybuffer',
+      timeout: 30000
+    });
+    const resultBase64 = Buffer.from(response.data).toString('base64');
+    res.json({ imageBase64: `data:image/png;base64,${resultBase64}` });
+  } catch (e) {
+    const detail = e.response?.data ? Buffer.from(e.response.data).toString('utf8') : e.message;
+    console.error('[remove-bg] error:', detail);
+    res.status(500).json({ error: detail || e.message });
+  }
+});
+
+// GET /api/barcode?upc=  — look up product info by UPC/EAN barcode
+app.get('/api/barcode', async (req, res) => {
+  const { upc } = req.query;
+  if (!upc) return res.status(400).json({ error: 'upc query param required' });
+  console.log(`[barcode] looking up UPC: ${upc}`);
+  try {
+    // Try Open Food Facts first (free, no key)
+    const offResp = await axios.get(`https://world.openfoodfacts.org/api/v0/product/${upc}.json`, { timeout: 5000 });
+    if (offResp.data?.status === 1 && offResp.data?.product) {
+      const p = offResp.data.product;
+      return res.json({
+        title: p.product_name_en || p.product_name || '',
+        brand: p.brands || '',
+        category: p.categories_tags?.[0]?.replace('en:', '') || '',
+        description: p.generic_name_en || p.generic_name || '',
+        source: 'Open Food Facts'
+      });
+    }
+    // Fallback: UPC Item DB (free tier)
+    const upcResp = await axios.get(`https://api.upcitemdb.com/prod/trial/lookup?upc=${upc}`, { timeout: 5000 });
+    const item = upcResp.data?.items?.[0];
+    if (item) {
+      return res.json({
+        title: item.title || '',
+        brand: item.brand || '',
+        category: item.category || '',
+        description: item.description || '',
+        source: 'UPC Item DB'
+      });
+    }
+    res.json({ title: '', brand: '', category: '', description: '', source: null });
+  } catch (e) {
+    console.error('[barcode] error:', e.message);
+    res.status(500).json({ error: e.message });
   }
 });
 

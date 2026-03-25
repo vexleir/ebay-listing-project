@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ExternalLink, Calendar, CheckCircle, Trash2, Archive, ArchiveRestore, Search, ChevronDown, LayoutGrid, List, Download } from 'lucide-react';
+import { ExternalLink, Calendar, CheckCircle, Trash2, Archive, ArchiveRestore, Search, ChevronDown, LayoutGrid, List, Download, RefreshCw, Eye } from 'lucide-react';
 import type { StagedListing } from '../types';
 import ImageSearchButton from './ImageSearchButton';
 import Lightbox from './Lightbox';
@@ -10,6 +10,8 @@ interface ListedProductsProps {
   listings: StagedListing[];
   onDelete: (id: string) => void;
   onArchive: (id: string) => void;
+  onSyncSold?: () => void;
+  isEbayConnected?: boolean;
 }
 
 type SortOption = 'date-desc' | 'date-asc' | 'title-asc' | 'title-desc' | 'price-asc' | 'price-desc';
@@ -18,6 +20,22 @@ type ViewMode = 'grid' | 'list';
 function parsePrice(val: string): number {
   const m = val.replace(/[^0-9.]/g, '');
   return m ? parseFloat(m) : 0;
+}
+
+function ProfitBadge({ price, costBasis }: { price: string; costBasis?: string }) {
+  if (!costBasis) return null;
+  const sell = parsePrice(price);
+  const cost = parsePrice(costBasis);
+  if (!sell || !cost) return null;
+  const profit = sell - cost;
+  const pct = ((profit / cost) * 100).toFixed(0);
+  const color = profit >= 0 ? 'var(--success)' : '#ef4444';
+  const bg = profit >= 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)';
+  return (
+    <span style={{ fontSize: '0.78rem', background: bg, color, padding: '2px 8px', borderRadius: '4px', fontWeight: 600, whiteSpace: 'nowrap' }}>
+      {profit >= 0 ? '+' : ''}${profit.toFixed(2)} ({pct}%)
+    </span>
+  );
 }
 
 function timeAgo(ts: number): string {
@@ -52,7 +70,7 @@ function exportCsv(listings: StagedListing[]) {
   URL.revokeObjectURL(url);
 }
 
-export default function ListedProductsView({ listings, onDelete, onArchive }: ListedProductsProps) {
+export default function ListedProductsView({ listings, onDelete, onArchive, onSyncSold, isEbayConnected }: ListedProductsProps) {
   const { toast } = useToast();
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortOption>('date-desc');
@@ -60,13 +78,33 @@ export default function ListedProductsView({ listings, onDelete, onArchive }: Li
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [lightboxImages, setLightboxImages] = useState<string[] | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState(0);
+  const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [stats, setStats] = useState<Record<string, { watchCount: string; hitCount: string; quantitySold: string } | null>>({});
+  const [loadingStatsId, setLoadingStatsId] = useState<string | null>(null);
+
+  const fetchStats = async (listing: StagedListing) => {
+    if (!listing.ebayDraftId) return;
+    setLoadingStatsId(listing.id);
+    try {
+      const resp = await fetch(`/api/ebay/listing-stats?itemId=${encodeURIComponent(listing.ebayDraftId)}`);
+      const data = await resp.json();
+      if (data.error) { toast('Could not fetch stats: ' + data.error, 'error'); return; }
+      setStats(prev => ({ ...prev, [listing.id]: data }));
+    } catch (e: any) {
+      toast('Stats fetch failed: ' + e.message, 'error');
+    } finally {
+      setLoadingStatsId(null);
+    }
+  };
 
   const active = listings.filter(l => !l.archived);
   const archived = listings.filter(l => l.archived);
+  const allTags = Array.from(new Set(listings.flatMap(l => l.tags || [])));
 
   const applyFilter = (items: StagedListing[]) => {
     const q = search.toLowerCase();
     return items
+      .filter(l => !activeTag || l.tags?.includes(activeTag))
       .filter(l => !q || l.title.toLowerCase().includes(q) || (l.sku || '').toLowerCase().includes(q) || (l.category || '').toLowerCase().includes(q))
       .sort((a, b) => {
         switch (sort) {
@@ -95,7 +133,11 @@ export default function ListedProductsView({ listings, onDelete, onArchive }: Li
 
   const renderCard = (listing: StagedListing, isArchived: boolean) => (
     <div key={listing.id} className="glass-card" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', border: `1px solid ${isArchived ? 'var(--border-color)' : 'var(--success-light)'}`, opacity: isArchived ? 0.65 : 1 }}>
-      {!isArchived ? (
+      {listing.soldAt ? (
+        <div style={{ padding: '8px 12px', background: 'rgba(16,185,129,0.2)', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', fontWeight: 600 }}>
+          ✓ SOLD {listing.soldPrice ? `· $${listing.soldPrice}` : ''} <span style={{ marginLeft: 'auto', fontSize: '0.75rem', opacity: 0.7 }}>{new Date(listing.soldAt).toLocaleDateString()}</span>
+        </div>
+      ) : !isArchived ? (
         <div style={{ padding: '8px 12px', background: 'var(--success-light)', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', fontWeight: 600 }}>
           <CheckCircle size={16} /> Successfully Pushed
           {listing.ebayDraftId && <span style={{ marginLeft: 'auto', fontSize: '0.75rem', opacity: 0.8 }}>ID: {listing.ebayDraftId}</span>}
@@ -124,19 +166,32 @@ export default function ListedProductsView({ listings, onDelete, onArchive }: Li
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
           <span style={{ fontSize: '0.8rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px' }}>${listing.priceRecommendation}</span>
+          <ProfitBadge price={listing.priceRecommendation} costBasis={listing.costBasis} />
           <span style={{ fontSize: '0.8rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px' }}>{listing.category}</span>
           {listing.sku && <span style={{ fontSize: '0.8rem', background: 'rgba(99,102,241,0.25)', padding: '2px 8px', borderRadius: '4px', color: '#a5b4fc' }}>SKU: {listing.sku}</span>}
         </div>
         {listing.sellerNotes && <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', padding: '6px 8px', marginBottom: '0.75rem', fontStyle: 'italic' }}>📝 {listing.sellerNotes}</p>}
+        {stats[listing.id] && (
+          <div style={{ display: 'flex', gap: '12px', fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '0.75rem', padding: '6px 8px', background: 'rgba(255,255,255,0.04)', borderRadius: '6px' }}>
+            <span title="Views"><Eye size={12} style={{ marginRight: '3px', verticalAlign: 'middle' }} />{stats[listing.id]!.hitCount} views</span>
+            <span title="Watchers">👁 {stats[listing.id]!.watchCount} watchers</span>
+            {parseInt(stats[listing.id]!.quantitySold) > 0 && <span style={{ color: 'var(--success)' }}>✓ {stats[listing.id]!.quantitySold} sold</span>}
+          </div>
+        )}
         <div style={{ marginTop: 'auto', display: 'flex', gap: '0.5rem', alignItems: 'center', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
           <a className="btn-primary" href="https://www.ebay.com/mes/sellerhub" target="_blank" rel="noreferrer" style={{ textDecoration: 'none', flex: 1, fontSize: '0.85rem', padding: '6px 12px' }}>
             <ExternalLink size={16} /> View on eBay
           </a>
+          {listing.ebayDraftId && (
+            <button className="btn-icon" title="Fetch view/watcher stats from eBay" onClick={() => fetchStats(listing)} disabled={loadingStatsId === listing.id} style={{ color: stats[listing.id] ? 'var(--accent-color)' : undefined }}>
+              {loadingStatsId === listing.id ? <span style={{ fontSize: '10px' }}>...</span> : <Eye size={18} />}
+            </button>
+          )}
           <button className="btn-icon" title={isArchived ? 'Unarchive' : 'Archive'} onClick={() => { onArchive(listing.id); toast(isArchived ? 'Listing unarchived.' : 'Listing archived.', 'success'); }}>
             {isArchived ? <ArchiveRestore size={18} /> : <Archive size={18} />}
           </button>
           <button className="btn-icon" title="Delete" style={{ color: '#ef4444' }}
-            onClick={() => { if (confirm('Remove this listing from your records?')) { onDelete(listing.id); toast('Listing deleted.', 'success'); } }}>
+            onClick={() => onDelete(listing.id)}>
             <Trash2 size={18} />
           </button>
         </div>
@@ -166,6 +221,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive }: Li
       </div>
       <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
         <span style={{ fontSize: '0.78rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px', whiteSpace: 'nowrap' }}>${listing.priceRecommendation}</span>
+        <ProfitBadge price={listing.priceRecommendation} costBasis={listing.costBasis} />
         {listing.sku && <span style={{ fontSize: '0.78rem', background: 'rgba(99,102,241,0.25)', padding: '2px 8px', borderRadius: '4px', color: '#a5b4fc', whiteSpace: 'nowrap' }}>{listing.sku}</span>}
       </div>
       <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', flexShrink: 0, minWidth: '80px', textAlign: 'right' }}>{new Date(listing.createdAt).toLocaleDateString()}</span>
@@ -173,11 +229,16 @@ export default function ListedProductsView({ listings, onDelete, onArchive }: Li
         <a className="btn-primary" href="https://www.ebay.com/mes/sellerhub" target="_blank" rel="noreferrer" style={{ textDecoration: 'none', fontSize: '0.8rem', padding: '5px 10px', whiteSpace: 'nowrap' }}>
           <ExternalLink size={14} /> eBay
         </a>
+        {listing.ebayDraftId && (
+          <button className="btn-icon" title="Fetch view/watcher stats" onClick={() => fetchStats(listing)} disabled={loadingStatsId === listing.id} style={{ color: stats[listing.id] ? 'var(--accent-color)' : undefined }}>
+            {loadingStatsId === listing.id ? <span style={{ fontSize: '10px' }}>...</span> : <Eye size={18} />}
+          </button>
+        )}
         <button className="btn-icon" title={isArchived ? 'Unarchive' : 'Archive'} onClick={() => { onArchive(listing.id); toast(isArchived ? 'Listing unarchived.' : 'Listing archived.', 'success'); }}>
           {isArchived ? <ArchiveRestore size={18} /> : <Archive size={18} />}
         </button>
         <button className="btn-icon" title="Delete" style={{ color: '#ef4444' }}
-          onClick={() => { if (confirm('Remove this listing from your records?')) { onDelete(listing.id); toast('Listing deleted.', 'success'); } }}>
+          onClick={() => onDelete(listing.id)}>
           <Trash2 size={18} />
         </button>
       </div>
@@ -187,6 +248,20 @@ export default function ListedProductsView({ listings, onDelete, onArchive }: Li
   return (
     <div>
       {lightboxImages && createPortal(<Lightbox images={lightboxImages} index={lightboxIndex} onClose={() => setLightboxImages(null)} onNavigate={setLightboxIndex} />, document.body)}
+
+      {/* Tag filter bar */}
+      {allTags.length > 0 && (
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '1rem', alignItems: 'center' }}>
+          <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', opacity: 0.7 }}>Filter:</span>
+          {allTags.map(tag => (
+            <button key={tag} onClick={() => setActiveTag(activeTag === tag ? null : tag)}
+              style={{ fontSize: '0.78rem', padding: '3px 10px', borderRadius: '4px', border: '1px solid', cursor: 'pointer', background: activeTag === tag ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.05)', borderColor: activeTag === tag ? 'var(--accent-color)' : 'var(--border-color)', color: activeTag === tag ? '#a5b4fc' : 'var(--text-secondary)', transition: 'all 0.15s' }}>
+              {tag}
+            </button>
+          ))}
+          {activeTag && <button onClick={() => setActiveTag(null)} style={{ fontSize: '0.78rem', padding: '3px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer' }}>Clear</button>}
+        </div>
+      )}
 
       {/* Toolbar */}
       <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -205,6 +280,12 @@ export default function ListedProductsView({ listings, onDelete, onArchive }: Li
           </select>
           <ChevronDown size={14} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-secondary)' }} />
         </div>
+        {onSyncSold && (
+          <button className="btn-icon" title={isEbayConnected ? 'Sync sold items from eBay' : 'Connect to eBay to sync sold items'} style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '9px 12px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', color: isEbayConnected ? 'var(--success)' : 'var(--text-secondary)', opacity: isEbayConnected ? 1 : 0.5 }}
+            onClick={onSyncSold} disabled={!isEbayConnected}>
+            <RefreshCw size={16} /> Sync Sold
+          </button>
+        )}
         <button className="btn-icon" title="Export CSV" style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '9px 12px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', color: 'var(--text-secondary)' }}
           onClick={() => { exportCsv(listings); toast('CSV exported.', 'success'); }}>
           <Download size={16} /> CSV

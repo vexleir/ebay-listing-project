@@ -16,6 +16,10 @@ export interface StagedListing {
   archived?: boolean;
   status?: 'staged' | 'listed';
   updatedAt?: number;
+  costBasis?: string;
+  tags?: string[];
+  soldAt?: number;
+  soldPrice?: string;
 }
 
 export interface AppState {

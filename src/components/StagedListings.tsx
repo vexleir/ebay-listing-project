@@ -199,6 +199,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [pushingId, setPushingId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
+  const [activeTag, setActiveTag] = useState<string | null>(null);
 
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -285,11 +286,8 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
   };
 
   const handleBulkDelete = () => {
-    const count = selectedIds.size;
-    if (!confirm(`Delete ${count} selected listing${count > 1 ? 's' : ''}?`)) return;
     onBulkDelete(Array.from(selectedIds));
     setSelectedIds(new Set());
-    toast(`${count} listing${count > 1 ? 's' : ''} deleted.`, 'success');
   };
 
   const toggleSelect = (id: string) => {
@@ -363,7 +361,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
     return (
       <div style={{ maxWidth: '800px', margin: '0 auto', height: '80vh' }}>
         <ResultsEditor
-          data={{ title: l.title, description: l.description, condition: l.condition, category: l.category, priceRecommendation: l.priceRecommendation, shippingEstimate: l.shippingEstimate, itemSpecifics: l.itemSpecifics, sku: l.sku, sellerNotes: l.sellerNotes }}
+          data={{ title: l.title, description: l.description, condition: l.condition, category: l.category, priceRecommendation: l.priceRecommendation, shippingEstimate: l.shippingEstimate, itemSpecifics: l.itemSpecifics, sku: l.sku, sellerNotes: l.sellerNotes, costBasis: l.costBasis, tags: l.tags }}
           images={[]}
           existingImageUrls={l.images || []}
           appPassword={appPassword}
@@ -400,7 +398,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
         <Edit2 size={18} />
       </button>
       <button className="btn-icon" style={{ color: '#ef4444' }}
-        onClick={() => { if (confirm('Delete this staged listing?')) { onDelete(listing.id); toast('Listing deleted.', 'success'); } }}
+        onClick={() => onDelete(listing.id)}
         title="Delete Listing">
         <Trash2 size={18} />
       </button>
@@ -437,6 +435,8 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
   };
 
   const imageEditListing = imageEditId ? listings.find(l => l.id === imageEditId) : null;
+  const allTags = Array.from(new Set(listings.flatMap(l => l.tags || [])));
+  const visibleListings = activeTag ? listings.filter(l => l.tags?.includes(activeTag)) : listings;
 
   return (
     <div>
@@ -491,10 +491,24 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
         />
       )}
 
+      {/* Tag filter bar */}
+      {allTags.length > 0 && (
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '1rem', alignItems: 'center' }}>
+          <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', opacity: 0.7 }}>Filter:</span>
+          {allTags.map(tag => (
+            <button key={tag} onClick={() => setActiveTag(activeTag === tag ? null : tag)}
+              style={{ fontSize: '0.78rem', padding: '3px 10px', borderRadius: '4px', border: '1px solid', cursor: 'pointer', background: activeTag === tag ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.05)', borderColor: activeTag === tag ? 'var(--accent-color)' : 'var(--border-color)', color: activeTag === tag ? '#a5b4fc' : 'var(--text-secondary)', transition: 'all 0.15s' }}>
+              {tag}
+            </button>
+          ))}
+          {activeTag && <button onClick={() => setActiveTag(null)} style={{ fontSize: '0.78rem', padding: '3px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer' }}>Clear</button>}
+        </div>
+      )}
+
       {/* Toolbar */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', gap: '0.75rem', flexWrap: 'wrap' }}>
         <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-          {listings.length} listing{listings.length !== 1 ? 's' : ''}
+          {visibleListings.length}{activeTag ? ` of ${listings.length}` : ''} listing{visibleListings.length !== 1 ? 's' : ''}
         </span>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
           {selectedIds.size === 0 ? (
@@ -529,7 +543,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
       {/* Grid view */}
       {viewMode === 'grid' && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '1.5rem' }}>
-          {listings.map(listing => {
+          {visibleListings.map(listing => {
             const isSelected = selectedIds.has(listing.id);
             return (
               <div key={listing.id} className="glass-card" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', outline: isSelected ? '2px solid var(--accent-color)' : 'none', outlineOffset: '2px' }}>
@@ -592,6 +606,15 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
                       📝 {listing.sellerNotes}
                     </p>
                   )}
+                  {listing.tags && listing.tags.length > 0 && (
+                    <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+                      {listing.tags.map(tag => (
+                        <button key={tag} onClick={() => setActiveTag(activeTag === tag ? null : tag)} style={{ fontSize: '0.72rem', padding: '1px 7px', borderRadius: '4px', border: '1px solid', cursor: 'pointer', background: activeTag === tag ? 'rgba(99,102,241,0.25)' : 'rgba(99,102,241,0.1)', borderColor: 'rgba(99,102,241,0.35)', color: '#a5b4fc' }}>
+                          {tag}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <div style={{ marginTop: 'auto', display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', alignItems: 'center', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)', flexWrap: 'wrap' }}>
                     <span style={{ marginRight: 'auto' }} />
                     <ActionButtons listing={listing} />
@@ -608,7 +631,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
       {/* List view */}
       {viewMode === 'list' && (
         <div className="glass-panel" style={{ padding: 0, overflow: 'hidden' }}>
-          {listings.map((listing, idx) => {
+          {visibleListings.map((listing, idx) => {
             const isSelected = selectedIds.has(listing.id);
             return (
               <div key={listing.id}>
@@ -650,7 +673,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
                   </div>
                 </div>
                 {compsId === listing.id && (
-                  <div style={{ padding: '0 1.25rem', borderBottom: idx < listings.length - 1 ? '1px solid var(--border-color)' : 'none' }}>
+                  <div style={{ padding: '0 1.25rem', borderBottom: idx < visibleListings.length - 1 ? '1px solid var(--border-color)' : 'none' }}>
                     <CompsPanel listing={listing} />
                   </div>
                 )}

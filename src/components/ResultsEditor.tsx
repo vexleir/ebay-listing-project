@@ -8,7 +8,7 @@ interface ResultsEditorProps {
     title: string; description: string; condition: string;
     itemSpecifics: Record<string, string>; category: string;
     priceRecommendation: string; priceJustification?: string; shippingEstimate: string;
-    sku?: string; sellerNotes?: string;
+    sku?: string; sellerNotes?: string; costBasis?: string; tags?: string[];
   };
   images: File[];
   existingImageUrls?: string[];
@@ -29,6 +29,9 @@ export default function ResultsEditor({ data, images, existingImageUrls, onStage
   const [itemSpecifics, setItemSpecifics] = useState<Record<string, string>>(data.itemSpecifics);
   const [sku, setSku] = useState(data.sku || '');
   const [sellerNotes, setSellerNotes] = useState(data.sellerNotes || '');
+  const [costBasis, setCostBasis] = useState(data.costBasis || '');
+  const [tags, setTags] = useState<string[]>(data.tags || []);
+  const [tagInput, setTagInput] = useState('');
   const [previewMode, setPreviewMode] = useState<boolean>(true);
 
   // Category suggestions
@@ -204,6 +207,12 @@ export default function ResultsEditor({ data, images, existingImageUrls, onStage
             <label style={{ display: 'flex', marginBottom: '8px', color: 'var(--text-secondary)' }}>SKU / Custom Label <span style={{ fontSize: '0.75rem', opacity: 0.6, marginLeft: '4px' }}>(sent to eBay)</span></label>
             <input type="text" className="input-base" value={sku} onChange={e => setSku(e.target.value)} placeholder="e.g. ITEM-001" />
           </div>
+          <div>
+            <label style={{ display: 'flex', marginBottom: '8px', color: 'var(--text-secondary)' }}>
+              Cost Basis (USD) <span style={{ fontSize: '0.75rem', opacity: 0.6, marginLeft: '4px' }}>(internal — what you paid)</span>
+            </label>
+            <input type="text" className="input-base" value={costBasis} onChange={e => setCostBasis(e.target.value)} placeholder="e.g. 12.50" />
+          </div>
         </div>
 
         <div>
@@ -216,11 +225,58 @@ export default function ResultsEditor({ data, images, existingImageUrls, onStage
           <textarea className="input-base" value={sellerNotes} onChange={e => setSellerNotes(e.target.value)} rows={2} placeholder="Personal notes about this item..." style={{ resize: 'vertical' }} />
         </div>
 
+        <div>
+          <label style={{ display: 'flex', marginBottom: '8px', color: 'var(--text-secondary)' }}>Tags <span style={{ fontSize: '0.75rem', opacity: 0.6, marginLeft: '4px' }}>(press Enter or comma to add)</span></label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '8px', background: 'rgba(0,0,0,0.2)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', minHeight: '42px', alignItems: 'center' }}>
+            {tags.map(tag => (
+              <span key={tag} style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.4)', color: '#a5b4fc', borderRadius: '4px', padding: '2px 8px', fontSize: '0.82rem' }}>
+                {tag}
+                <button type="button" onClick={() => setTags(prev => prev.filter(t => t !== tag))} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, lineHeight: 1, opacity: 0.7 }}>×</button>
+              </span>
+            ))}
+            <input
+              type="text"
+              value={tagInput}
+              onChange={e => setTagInput(e.target.value)}
+              onKeyDown={e => {
+                if ((e.key === 'Enter' || e.key === ',') && tagInput.trim()) {
+                  e.preventDefault();
+                  const newTag = tagInput.trim().toLowerCase().replace(/,/g, '');
+                  if (newTag && !tags.includes(newTag)) setTags(prev => [...prev, newTag]);
+                  setTagInput('');
+                } else if (e.key === 'Backspace' && !tagInput && tags.length) {
+                  setTags(prev => prev.slice(0, -1));
+                }
+              }}
+              placeholder={tags.length === 0 ? 'e.g. vintage, fragile, lot...' : ''}
+              style={{ background: 'none', border: 'none', outline: 'none', color: 'var(--text-primary)', fontSize: '0.9rem', minWidth: '120px', flex: 1 }}
+            />
+          </div>
+        </div>
+
         {/* Condition */}
         <div>
           <label style={{ display: 'flex', marginBottom: '8px', color: 'var(--text-secondary)', alignItems: 'center', gap: '4px' }}>
             <Tag size={16} /> Condition Report
           </label>
+          <div style={{ display: 'flex', gap: '6px', marginBottom: '8px', flexWrap: 'wrap' }}>
+            {[
+              { label: 'Mint', text: 'Item is in mint condition. No signs of use or wear. All original packaging and accessories included.' },
+              { label: 'Excellent', text: 'Item is in excellent condition with minimal signs of use. No significant scratches, dents, or damage.' },
+              { label: 'Good', text: 'Item is in good working condition with normal signs of use. Minor cosmetic wear present but fully functional.' },
+              { label: 'Fair', text: 'Item shows noticeable wear and cosmetic imperfections but remains fully functional.' },
+              { label: 'Poor', text: 'Item is heavily worn or has significant cosmetic damage. Sold as-is for parts or repair.' },
+            ].map(({ label, text }) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => setCondition(text)}
+                style={{ fontSize: '0.78rem', padding: '4px 10px', background: condition === text ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.06)', border: `1px solid ${condition === text ? 'var(--accent-color)' : 'var(--border-color)'}`, color: condition === text ? 'var(--accent-color)' : 'var(--text-secondary)', borderRadius: '6px', cursor: 'pointer', transition: 'all 0.15s' }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <textarea className="input-base" value={condition} onChange={e => setCondition(e.target.value)} rows={2} />
         </div>
 
@@ -266,7 +322,7 @@ export default function ResultsEditor({ data, images, existingImageUrls, onStage
       <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
         <button className="btn-secondary" style={{ flex: 1 }} onClick={onCancel}><X size={18} /> Discard</button>
         <button className="btn-primary" style={{ flex: 2 }} disabled={title.length > 80}
-          onClick={() => onStage({ title, condition, description, category, priceRecommendation, priceJustification, shippingEstimate, itemSpecifics, images: allImages, sku, sellerNotes })}>
+          onClick={() => onStage({ title, condition, description, category, priceRecommendation, priceJustification, shippingEstimate, itemSpecifics, images: allImages, sku, sellerNotes, costBasis, tags })}>
           <Save size={18} /> Save & Stage Listing
         </button>
       </div>
