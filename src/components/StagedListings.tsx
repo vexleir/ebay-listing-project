@@ -174,10 +174,16 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
         headers: { 'x-app-password': appPassword }
       });
       const data = await resp.json();
-      setCompsData(data);
-      if (data.length === 0) toast('No recent sold comps found for this item.', 'info');
-    } catch {
-      toast('Failed to fetch sold comps.', 'error');
+      if (data.error) {
+        toast(`Sold comps error: ${data.error}`, 'error');
+        setCompsId(null);
+      } else {
+        setCompsData(data.items || []);
+        if ((data.items || []).length === 0) toast('No recent sold comps found for this search.', 'info');
+      }
+    } catch (e: any) {
+      toast('Failed to fetch sold comps: ' + e.message, 'error');
+      setCompsId(null);
     } finally {
       setCompsLoading(false);
     }

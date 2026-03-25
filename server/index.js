@@ -197,22 +197,54 @@ app.get('/api/ebay/categories', async (req, res) => {
 app.get('/api/ebay/sold-comps', async (req, res) => {
   try {
     const query = (req.query.query || '').trim();
-    if (!query) return res.json([]);
+    if (!query) return res.json({ items: [], error: null });
     const appId = process.env.EBAY_CLIENT_ID;
-    if (!appId) return res.json([]);
-    const url = `https://svcs.ebay.com/services/search/FindingService/v1?OPERATION-NAME=findCompletedItems&SERVICE-VERSION=1.0.0&SECURITY-APPNAME=${appId}&RESPONSE-DATA-FORMAT=JSON&keywords=${encodeURIComponent(query)}&itemFilter(0).name=SoldItemsOnly&itemFilter(0).value=true&sortOrder=EndTimeSoonest&paginationInput.entriesPerPage=6`;
+    if (!appId) return res.json({ items: [], error: 'EBAY_CLIENT_ID not configured on server.' });
+
+    console.log(`[sold-comps] query="${query}" appId=${appId.substring(0, 20)}...`);
+
+    // Use URLSearchParams to correctly encode all params including itemFilter(n).name
+    const params = new URLSearchParams({
+      'OPERATION-NAME': 'findCompletedItems',
+      'SERVICE-VERSION': '1.0.0',
+      'SECURITY-APPNAME': appId,
+      'RESPONSE-DATA-FORMAT': 'JSON',
+      'keywords': query,
+      'itemFilter(0).name': 'SoldItemsOnly',
+      'itemFilter(0).value': 'true',
+      'sortOrder': 'EndTimeSoonest',
+      'paginationInput.entriesPerPage': '6'
+    });
+    const url = `https://svcs.ebay.com/services/search/FindingService/v1?${params.toString()}`;
+
     const resp = await axios.get(url);
-    const items = resp.data?.findCompletedItemsResponse?.[0]?.searchResult?.[0]?.item || [];
-    res.json(items.map(item => ({
-      title: item.title?.[0] || '',
-      price: parseFloat(item.sellingStatus?.[0]?.currentPrice?.[0]?.__value__ || '0').toFixed(2),
-      currency: item.sellingStatus?.[0]?.currentPrice?.[0]?.['@currencyId'] || 'USD',
-      endDate: item.listingInfo?.[0]?.endTime?.[0] || '',
-      url: item.viewItemURL?.[0] || ''
-    })));
+    const findResp = resp.data?.findCompletedItemsResponse?.[0];
+    const ack = findResp?.ack?.[0];
+    const count = findResp?.searchResult?.[0]?.['@count'];
+    console.log(`[sold-comps] ack=${ack} count=${count}`);
+
+    if (ack !== 'Success' && ack !== 'Warning') {
+      const errMsg = findResp?.errorMessage?.[0]?.error?.[0]?.message?.[0] || `Unexpected ack: ${ack}`;
+      console.error('[sold-comps] API-level error:', errMsg);
+      return res.json({ items: [], error: errMsg });
+    }
+
+    const items = findResp?.searchResult?.[0]?.item || [];
+    res.json({
+      items: items.map(item => ({
+        title: item.title?.[0] || '',
+        price: parseFloat(item.sellingStatus?.[0]?.currentPrice?.[0]?.__value__ || '0').toFixed(2),
+        currency: item.sellingStatus?.[0]?.currentPrice?.[0]?.['@currencyId'] || 'USD',
+        endDate: item.listingInfo?.[0]?.endTime?.[0] || '',
+        url: item.viewItemURL?.[0] || ''
+      })),
+      error: null
+    });
   } catch (e) {
-    console.error('[sold-comps] error:', e.message);
-    res.json([]);
+    const detail = e.response ? ` (HTTP ${e.response.status})` : '';
+    console.error('[sold-comps] exception:', e.message + detail);
+    if (e.response?.data) console.error('[sold-comps] response body:', JSON.stringify(e.response.data).substring(0, 400));
+    res.json({ items: [], error: e.message + detail });
   }
 });
 
