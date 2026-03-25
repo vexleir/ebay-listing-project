@@ -50,7 +50,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
 
   // Sold comps
   const [compsId, setCompsId] = useState<string | null>(null);
-  const [compsData, setCompsData] = useState<{ title: string; price: string; currency: string; endDate: string; url: string }[]>([]);
+  const [compsData, setCompsData] = useState<{ title: string; price: string; currency: string; condition: string; url: string }[]>([]);
   const [compsLoading, setCompsLoading] = useState(false);
 
   if (listings.length === 0) {
@@ -240,18 +240,21 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
     return (
       <div style={{ padding: '0 1.25rem 1.25rem', borderTop: '1px solid var(--border-color)', marginTop: '0.5rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem', paddingTop: '0.75rem' }}>
-          <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--success)' }}>📊 Recent Sold Comps</span>
+          <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--success)' }}>📊 Active eBay Prices</span>
           <button onClick={() => setCompsId(null)} className="btn-icon" style={{ padding: '2px' }}><X size={14} /></button>
         </div>
         {compsLoading && <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Loading...</p>}
         {!compsLoading && compsData.length === 0 && <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>No results found.</p>}
         {!compsLoading && compsData.map((comp, i) => (
           <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '6px 0', borderBottom: i < compsData.length - 1 ? '1px solid var(--border-color)' : 'none', gap: '8px' }}>
-            <a href={comp.url} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: 'none' }}
-              onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-primary)')}
-              onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-secondary)')}>
-              {comp.title}
-            </a>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <a href={comp.url} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: 'none' }}
+                onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-primary)')}
+                onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-secondary)')}>
+                {comp.title}
+              </a>
+              {comp.condition && <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', opacity: 0.7 }}>{comp.condition}</span>}
+            </div>
             <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--success)', flexShrink: 0 }}>
               ${comp.price}
             </span>

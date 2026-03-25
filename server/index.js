@@ -193,57 +193,68 @@ app.get('/api/ebay/categories', async (req, res) => {
   }
 });
 
-// GET /api/ebay/sold-comps?query=  — eBay Finding API completed/sold items
+// In-memory cache for the application-level OAuth token (Client Credentials flow)
+let _appToken = null;
+let _appTokenExpiry = 0;
+
+async function getApplicationToken() {
+  if (_appToken && Date.now() < _appTokenExpiry) return _appToken;
+  const clientId = process.env.EBAY_CLIENT_ID;
+  const clientSecret = process.env.EBAY_CLIENT_SECRET;
+  if (!clientId || !clientSecret) throw new Error('EBAY_CLIENT_ID or EBAY_CLIENT_SECRET not set');
+  const authHeader = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+  const params = new URLSearchParams();
+  params.append('grant_type', 'client_credentials');
+  params.append('scope', 'https://api.ebay.com/oauth/api_scope');
+  const resp = await axios.post('https://api.ebay.com/identity/v1/oauth2/token', params.toString(), {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Authorization': `Basic ${authHeader}` }
+  });
+  _appToken = resp.data.access_token;
+  _appTokenExpiry = Date.now() + (resp.data.expires_in * 1000) - 60000; // 1 min buffer
+  console.log('[app-token] fetched new application token');
+  return _appToken;
+}
+
+// GET /api/ebay/sold-comps?query=  — eBay Browse API current listings for price research
+// (The deprecated Finding API was rate-limited; Browse API is the modern replacement)
 app.get('/api/ebay/sold-comps', async (req, res) => {
   try {
     const query = (req.query.query || '').trim();
     if (!query) return res.json({ items: [], error: null });
-    const appId = process.env.EBAY_CLIENT_ID;
-    if (!appId) return res.json({ items: [], error: 'EBAY_CLIENT_ID not configured on server.' });
 
-    console.log(`[sold-comps] query="${query}" appId=${appId.substring(0, 20)}...`);
+    console.log(`[sold-comps] Browse API query="${query}"`);
+    const token = await getApplicationToken();
 
-    // Use URLSearchParams to correctly encode all params including itemFilter(n).name
-    const params = new URLSearchParams({
-      'OPERATION-NAME': 'findCompletedItems',
-      'SERVICE-VERSION': '1.0.0',
-      'SECURITY-APPNAME': appId,
-      'RESPONSE-DATA-FORMAT': 'JSON',
-      'keywords': query,
-      'itemFilter(0).name': 'SoldItemsOnly',
-      'itemFilter(0).value': 'true',
-      'sortOrder': 'EndTimeSoonest',
-      'paginationInput.entriesPerPage': '6'
+    const resp = await axios.get('https://api.ebay.com/buy/browse/v1/item_summary/search', {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'X-EBAY-C-MARKETPLACE-ID': 'EBAY_US',
+        'Content-Type': 'application/json'
+      },
+      params: {
+        q: query,
+        limit: 6,
+        filter: 'buyingOptions:{FIXED_PRICE}',
+        sort: 'price'
+      }
     });
-    const url = `https://svcs.ebay.com/services/search/FindingService/v1?${params.toString()}`;
 
-    const resp = await axios.get(url);
-    const findResp = resp.data?.findCompletedItemsResponse?.[0];
-    const ack = findResp?.ack?.[0];
-    const count = findResp?.searchResult?.[0]?.['@count'];
-    console.log(`[sold-comps] ack=${ack} count=${count}`);
-
-    if (ack !== 'Success' && ack !== 'Warning') {
-      const errMsg = findResp?.errorMessage?.[0]?.error?.[0]?.message?.[0] || `Unexpected ack: ${ack}`;
-      console.error('[sold-comps] API-level error:', errMsg);
-      return res.json({ items: [], error: errMsg });
-    }
-
-    const items = findResp?.searchResult?.[0]?.item || [];
+    const summaries = resp.data?.itemSummaries || [];
+    console.log(`[sold-comps] Browse API returned ${summaries.length} items`);
     res.json({
-      items: items.map(item => ({
-        title: item.title?.[0] || '',
-        price: parseFloat(item.sellingStatus?.[0]?.currentPrice?.[0]?.__value__ || '0').toFixed(2),
-        currency: item.sellingStatus?.[0]?.currentPrice?.[0]?.['@currencyId'] || 'USD',
-        endDate: item.listingInfo?.[0]?.endTime?.[0] || '',
-        url: item.viewItemURL?.[0] || ''
+      items: summaries.map(item => ({
+        title: item.title || '',
+        price: parseFloat(item.price?.value || '0').toFixed(2),
+        currency: item.price?.currency || 'USD',
+        condition: item.condition || '',
+        url: item.itemWebUrl || ''
       })),
       error: null
     });
   } catch (e) {
     const detail = e.response ? ` (HTTP ${e.response.status})` : '';
-    console.error('[sold-comps] exception:', e.message + detail);
-    if (e.response?.data) console.error('[sold-comps] response body:', JSON.stringify(e.response.data).substring(0, 400));
+    console.error('[sold-comps] error:', e.message + detail);
+    if (e.response?.data) console.error('[sold-comps] body:', JSON.stringify(e.response.data).substring(0, 400));
     res.json({ items: [], error: e.message + detail });
   }
 });
