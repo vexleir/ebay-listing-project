@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Trash2, Edit2, Copy, Check, Calendar, LayoutGrid, List, Wand2, TrendingUp, X, RefreshCw, ImagePlus, GripVertical, UploadCloud } from 'lucide-react';
-import type { StagedListing } from '../types';
+import { Trash2, Edit2, Copy, Check, Calendar, LayoutGrid, List, Wand2, TrendingUp, X, RefreshCw, ImagePlus, GripVertical, UploadCloud, Search, ChevronDown, ShieldCheck, ShieldAlert, ShieldX } from 'lucide-react';
+import type { StagedListing, EbayPolicy } from '../types';
 import ResultsEditor from './ResultsEditor';
 import ImageSearchButton from './ImageSearchButton';
 import Lightbox from './Lightbox';
@@ -18,6 +18,73 @@ interface StagedListingsProps {
 }
 
 type ViewMode = 'grid' | 'list';
+type SortOption = 'date-desc' | 'date-asc' | 'price-asc' | 'price-desc' | 'title-asc' | 'health-asc';
+
+interface HealthScore { score: number; issues: string[]; }
+
+function computeHealthScore(listing: StagedListing): HealthScore {
+  const issues: string[] = [];
+  let score = 0;
+
+  const titleLen = listing.title?.length || 0;
+  if (titleLen >= 70) score += 20;
+  else if (titleLen >= 50) { score += 10; issues.push(`Title short: ${titleLen}/80 chars`); }
+  else { issues.push(`Title very short: ${titleLen}/80 chars`); }
+
+  const imgCount = (listing.images || []).length;
+  if (imgCount >= 3) score += 20;
+  else if (imgCount >= 1) { score += 10; issues.push(`Only ${imgCount} image — add 3+ for best visibility`); }
+  else { issues.push('No images attached'); }
+
+  const hasCloudImages = (listing.images || []).some(img => img.startsWith('http'));
+  if (hasCloudImages) score += 10;
+  else if (imgCount > 0) issues.push('Images not uploaded to cloud — push may fail');
+
+  const descLen = listing.description?.length || 0;
+  if (descLen > 300) score += 15;
+  else if (descLen > 80) { score += 8; issues.push('Description is short'); }
+  else { issues.push('Description missing or very short'); }
+
+  const cat = listing.category || '';
+  if (cat && cat !== 'Unknown') score += 15;
+  else issues.push('Category not set');
+
+  const price = parseFloat((listing.priceRecommendation || '').replace(/[^0-9.]/g, ''));
+  if (price > 0) score += 10;
+  else issues.push('Price not set');
+
+  const specificsCount = Object.keys(listing.itemSpecifics || {}).length;
+  if (specificsCount >= 5) score += 10;
+  else if (specificsCount >= 2) { score += 5; issues.push(`Only ${specificsCount} item specifics`); }
+  else { issues.push('Item specifics missing'); }
+
+  return { score, issues };
+}
+
+const EBAY_CONDITIONS = [
+  { id: '1000', label: 'New' },
+  { id: '1500', label: 'New Other (open box)' },
+  { id: '2000', label: 'Certified Refurbished' },
+  { id: '2500', label: 'Seller Refurbished' },
+  { id: '3000', label: 'Used' },
+  { id: '4000', label: 'Very Good' },
+  { id: '5000', label: 'Good' },
+  { id: '6000', label: 'Acceptable' },
+  { id: '7000', label: 'For Parts / Not Working' },
+];
+
+function autoConditionId(conditionStr: string): string {
+  const s = (conditionStr || '').toLowerCase();
+  if (s.includes('for parts') || s.includes('not working')) return '7000';
+  if (s.includes('acceptable') || s.includes('heavy wear')) return '6000';
+  if (s.includes('good') && !s.includes('very good') && !s.includes('like new')) return '5000';
+  if (s.includes('very good')) return '4000';
+  if (s.includes('like new') || s.includes('mint') || s.includes('open box')) return '2500';
+  if (s.includes('refurbished') || s.includes('refurb')) return '2500';
+  if (s.includes('new other')) return '1500';
+  if (s.includes('new') && !s.includes('like')) return '1000';
+  return '3000';
+}
 
 function timeAgo(ts: number): string {
   const diff = Date.now() - ts;
@@ -193,6 +260,15 @@ function ImageEditModal({ listing, appPassword, onSave, onClose }: {
   );
 }
 
+interface PushModal {
+  listing: StagedListing;
+  conditionId: string;
+  fulfillmentPolicyId: string;
+  categoryId: string;
+  fulfillmentPolicies: EbayPolicy[];
+  loading: boolean;
+}
+
 export default function StagedListingsView({ listings, onUpdate, onDelete, onBulkDelete, onMoveToListed, isEbayConnected, appPassword = '' }: StagedListingsProps) {
   const { toast } = useToast();
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -200,6 +276,10 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
   const [pushingId, setPushingId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState<SortOption>('date-desc');
+  const [pushModal, setPushModal] = useState<PushModal | null>(null);
+  const [expandedHealthId, setExpandedHealthId] = useState<string | null>(null);
 
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -222,11 +302,26 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
   // Image editing
   const [imageEditId, setImageEditId] = useState<string | null>(null);
 
+  const visibleListings = (() => {
+    const q = search.toLowerCase();
+    let result = activeTag ? listings.filter(l => l.tags?.includes(activeTag)) : listings;
+    if (q) result = result.filter(l => l.title.toLowerCase().includes(q) || (l.sku || '').toLowerCase().includes(q) || (l.category || '').toLowerCase().includes(q));
+    return result.slice().sort((a, b) => {
+      if (sortBy === 'date-asc') return a.createdAt - b.createdAt;
+      if (sortBy === 'date-desc') return b.createdAt - a.createdAt;
+      if (sortBy === 'price-asc') return parseFloat(a.priceRecommendation || '0') - parseFloat(b.priceRecommendation || '0');
+      if (sortBy === 'price-desc') return parseFloat(b.priceRecommendation || '0') - parseFloat(a.priceRecommendation || '0');
+      if (sortBy === 'title-asc') return a.title.localeCompare(b.title);
+      if (sortBy === 'health-asc') return computeHealthScore(a).score - computeHealthScore(b).score;
+      return 0;
+    });
+  })();
+
   if (listings.length === 0) {
     return (
       <div className="glass-panel" style={{ padding: '4rem 2rem', textAlign: 'center' }}>
         <h2 style={{ marginBottom: '1rem', color: 'var(--text-secondary)' }}>No Staged Listings</h2>
-        <p style={{ color: 'var(--text-secondary)' }}>Create a new listing to see it here.</p>
+        <p style={{ color: 'var(--text-secondary)' }}>Create a new listing on the New Listing tab to see it here.</p>
       </div>
     );
   }
@@ -238,14 +333,36 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
     toast('HTML description copied to clipboard.', 'success');
   };
 
-  const handlePushToEbay = async (listing: StagedListing) => {
+  const openPushModal = async (listing: StagedListing) => {
+    if (!isEbayConnected) { toast('Connect to eBay first.', 'error'); return; }
+    const pw = appPassword || localStorage.getItem('app_password') || '';
+    // Pre-load: settings for default policy, categories for suggested ID
+    setPushModal({ listing, conditionId: autoConditionId(listing.condition), fulfillmentPolicyId: '', categoryId: '', fulfillmentPolicies: [], loading: true });
+    try {
+      const [settingsResp, policiesResp, categoryResp] = await Promise.all([
+        fetch('/api/settings', { headers: { 'x-app-password': pw } }).then(r => r.json()).catch(() => ({})),
+        fetch('/api/ebay/policies', { headers: { 'x-app-password': pw } }).then(r => r.json()).catch(() => ({ fulfillmentPolicies: [] })),
+        fetch(`/api/ebay/categories?query=${encodeURIComponent(listing.category || listing.title.split(' ').slice(0, 4).join(' '))}`, { headers: { 'x-app-password': pw } }).then(r => r.json()).catch(() => []),
+      ]);
+      const defaultPolicyId = settingsResp.defaultFulfillmentPolicyId || '';
+      const suggestedCategoryId = Array.isArray(categoryResp) && categoryResp[0] ? categoryResp[0].id : '';
+      setPushModal(prev => prev ? { ...prev, loading: false, fulfillmentPolicyId: defaultPolicyId, categoryId: suggestedCategoryId, fulfillmentPolicies: policiesResp.fulfillmentPolicies || [] } : null);
+    } catch {
+      setPushModal(prev => prev ? { ...prev, loading: false } : null);
+    }
+  };
+
+  const confirmPushToEbay = async () => {
+    if (!pushModal) return;
+    const { listing, conditionId, fulfillmentPolicyId, categoryId } = pushModal;
     const pw = appPassword || localStorage.getItem('app_password') || '';
     setPushingId(listing.id);
+    setPushModal(null);
     try {
       const resp = await fetch('/api/ebay/draft', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-app-password': pw },
-        body: JSON.stringify({ listing })
+        body: JSON.stringify({ listing, overrideConditionId: conditionId, overrideFulfillmentPolicyId: fulfillmentPolicyId || undefined, overrideCategoryId: categoryId || undefined })
       });
       if (!resp.ok) throw new Error(await resp.text());
       const data = await resp.json();
@@ -264,25 +381,27 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
     const toListing = listings.filter(l => ids.includes(l.id));
     setBulkPushingIds(new Set(ids));
     let success = 0;
+    let fail = 0;
     for (const listing of toListing) {
       try {
         const pw = appPassword || localStorage.getItem('app_password') || '';
         const resp = await fetch('/api/ebay/draft', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-app-password': pw },
-          body: JSON.stringify({ listing })
+          body: JSON.stringify({ listing, overrideConditionId: autoConditionId(listing.condition) })
         });
         if (!resp.ok) throw new Error(await resp.text());
         const data = await resp.json();
         onMoveToListed(listing, data.draftId);
         success++;
       } catch (e: any) {
-        toast(`Failed to push "${listing.title.substring(0, 30)}...": ${e.message}`, 'error');
+        fail++;
+        toast(`Failed: "${listing.title.substring(0, 30)}...": ${e.message}`, 'error');
       }
     }
     setBulkPushingIds(new Set());
     setSelectedIds(new Set());
-    if (success > 0) toast(`${success} listing${success > 1 ? 's' : ''} pushed to eBay.`, 'success');
+    if (success > 0) toast(`${success} pushed${fail > 0 ? `, ${fail} failed` : ''}.`, success > 0 ? 'success' : 'error');
   };
 
   const handleBulkDelete = () => {
@@ -372,11 +491,36 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
     );
   }
 
+  const HealthBadge = ({ listing }: { listing: StagedListing }) => {
+    const { score, issues } = computeHealthScore(listing);
+    const color = score >= 80 ? 'var(--success)' : score >= 55 ? '#f59e0b' : '#ef4444';
+    const Icon = score >= 80 ? ShieldCheck : score >= 55 ? ShieldAlert : ShieldX;
+    const isExpanded = expandedHealthId === listing.id;
+    return (
+      <div style={{ position: 'relative' }}>
+        <button onClick={() => setExpandedHealthId(isExpanded ? null : listing.id)}
+          title={`Listing health: ${score}/100`}
+          style={{ display: 'flex', alignItems: 'center', gap: '3px', background: 'transparent', border: 'none', color, cursor: 'pointer', padding: '2px 4px', borderRadius: '4px', fontSize: '0.78rem', fontWeight: 600 }}>
+          <Icon size={15} /> {score}
+        </button>
+        {isExpanded && issues.length > 0 && createPortal(
+          <div onClick={() => setExpandedHealthId(null)} style={{ position: 'fixed', inset: 0, zIndex: 8500 }}>
+            <div onClick={e => e.stopPropagation()} style={{ position: 'fixed', bottom: '1.5rem', left: '50%', transform: 'translateX(-50%)', background: 'var(--glass-bg)', backdropFilter: 'blur(12px)', border: '1px solid var(--glass-border)', borderRadius: '10px', padding: '1rem 1.25rem', minWidth: '280px', maxWidth: '400px', zIndex: 8501, boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}>
+              <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.82rem', fontWeight: 600, color }}>Health: {score}/100 — {issues.length} issue{issues.length > 1 ? 's' : ''}</p>
+              {issues.map((issue, i) => <p key={i} style={{ margin: '3px 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>• {issue}</p>)}
+            </div>
+          </div>, document.body
+        )}
+      </div>
+    );
+  };
+
   const ActionButtons = ({ listing }: { listing: StagedListing }) => (
     <>
+      <HealthBadge listing={listing} />
       <button className="btn-primary"
         style={{ fontSize: '0.85rem', padding: '6px 12px', opacity: !isEbayConnected ? 0.5 : 1, whiteSpace: 'nowrap' }}
-        onClick={() => { if (!isEbayConnected) { toast('Connect to eBay first.', 'error'); return; } handlePushToEbay(listing); }}
+        onClick={() => openPushModal(listing)}
         disabled={pushingId === listing.id || bulkPushingIds.has(listing.id)}
         title={!isEbayConnected ? 'Connect to eBay first' : 'Push to eBay'}
       >
@@ -436,10 +580,58 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
 
   const imageEditListing = imageEditId ? listings.find(l => l.id === imageEditId) : null;
   const allTags = Array.from(new Set(listings.flatMap(l => l.tags || [])));
-  const visibleListings = activeTag ? listings.filter(l => l.tags?.includes(activeTag)) : listings;
 
   return (
     <div>
+      {/* Push confirmation modal */}
+      {pushModal && createPortal(
+        <div onClick={() => setPushModal(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+          <div className="glass-panel" onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '520px', padding: '2rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
+              <h3 style={{ margin: 0, fontSize: '1.1rem' }}>Confirm Push to eBay</h3>
+              <button onClick={() => setPushModal(null)} className="btn-icon"><X size={18} /></button>
+            </div>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1.25rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {pushModal.listing.title}
+            </p>
+            {pushModal.loading ? (
+              <div style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+                <RefreshCw size={18} style={{ animation: 'spin 1s linear infinite', marginRight: '8px', verticalAlign: 'middle' }} />Loading policies & category...
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>eBay Condition</label>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0 0 6px 0' }}>AI assessed: "{pushModal.listing.condition?.substring(0, 80)}"</p>
+                  <select className="input-base" value={pushModal.conditionId} onChange={e => setPushModal(prev => prev ? { ...prev, conditionId: e.target.value } : null)}>
+                    {EBAY_CONDITIONS.map(c => <option key={c.id} value={c.id}>{c.id} — {c.label}</option>)}
+                  </select>
+                </div>
+                {pushModal.fulfillmentPolicies.length > 0 && (
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>Shipping Policy</label>
+                    <select className="input-base" value={pushModal.fulfillmentPolicyId} onChange={e => setPushModal(prev => prev ? { ...prev, fulfillmentPolicyId: e.target.value } : null)}>
+                      <option value="">— Use server default —</option>
+                      {pushModal.fulfillmentPolicies.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>
+                )}
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>eBay Category ID</label>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0 0 6px 0' }}>AI category: "{pushModal.listing.category}"</p>
+                  <input className="input-base" value={pushModal.categoryId} onChange={e => setPushModal(prev => prev ? { ...prev, categoryId: e.target.value } : null)} placeholder="Leave blank to use server default" />
+                </div>
+                <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '0.5rem' }}>
+                  <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setPushModal(null)}>Cancel</button>
+                  <button className="btn-primary" style={{ flex: 2 }} onClick={confirmPushToEbay}>Push to eBay</button>
+                </div>
+              </div>
+            )}
+          </div>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>, document.body
+      )}
+
       {/* Lightbox — portalled to avoid transform ancestor issues */}
       {lightboxImages && createPortal(
         <Lightbox images={lightboxImages} index={lightboxIndex} onClose={() => setLightboxImages(null)} onNavigate={setLightboxIndex} />,
@@ -491,6 +683,25 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
         />
       )}
 
+      {/* Search + Sort controls */}
+      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ position: 'relative', flex: 1, minWidth: '200px' }}>
+          <Search size={15} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)', pointerEvents: 'none' }} />
+          <input type="text" className="input-base" placeholder="Search title, SKU, category..." value={search} onChange={e => setSearch(e.target.value)} style={{ paddingLeft: '32px' }} />
+        </div>
+        <div style={{ position: 'relative' }}>
+          <select className="input-base" value={sortBy} onChange={e => setSortBy(e.target.value as SortOption)} style={{ paddingRight: '2rem', appearance: 'none', cursor: 'pointer', minWidth: '180px' }}>
+            <option value="date-desc">Date: Newest First</option>
+            <option value="date-asc">Date: Oldest First</option>
+            <option value="price-desc">Price: High → Low</option>
+            <option value="price-asc">Price: Low → High</option>
+            <option value="title-asc">Title: A → Z</option>
+            <option value="health-asc">Health Score: Lowest First</option>
+          </select>
+          <ChevronDown size={13} style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-secondary)' }} />
+        </div>
+      </div>
+
       {/* Tag filter bar */}
       {allTags.length > 0 && (
         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '1rem', alignItems: 'center' }}>
@@ -508,7 +719,8 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
       {/* Toolbar */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', gap: '0.75rem', flexWrap: 'wrap' }}>
         <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-          {visibleListings.length}{activeTag ? ` of ${listings.length}` : ''} listing{visibleListings.length !== 1 ? 's' : ''}
+          {visibleListings.length}{(activeTag || search) ? ` of ${listings.length}` : ''} listing{visibleListings.length !== 1 ? 's' : ''}
+          {search && <span style={{ opacity: 0.6 }}> matching "{search}"</span>}
         </span>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
           {selectedIds.size === 0 ? (

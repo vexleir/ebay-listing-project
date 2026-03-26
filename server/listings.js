@@ -52,4 +52,40 @@ async function deleteListing(id) {
   await database.collection('listings').deleteOne({ id });
 }
 
-module.exports = { getListings, createListing, updateListing, deleteListing, getAllListingsMeta };
+async function getSettings() {
+  const database = await getDb();
+  const doc = await database.collection('config').findOne({ _id: 'user_settings' });
+  const { _id, ...rest } = doc || {};
+  return rest;
+}
+
+async function saveSettings(updates) {
+  const database = await getDb();
+  const { _id, ...safeUpdates } = updates;
+  await database.collection('config').updateOne(
+    { _id: 'user_settings' },
+    { $set: safeUpdates },
+    { upsert: true }
+  );
+}
+
+async function incrementTokenUsage(promptTokens, completionTokens) {
+  const database = await getDb();
+  const p = promptTokens || 0;
+  const c = completionTokens || 0;
+  await database.collection('config').updateOne(
+    { _id: 'token_usage' },
+    { $inc: { promptTokens: p, completionTokens: c, totalTokens: p + c, callCount: 1 } },
+    { upsert: true }
+  );
+}
+
+async function getTokenUsage() {
+  const database = await getDb();
+  const doc = await database.collection('config').findOne({ _id: 'token_usage' });
+  if (!doc) return { promptTokens: 0, completionTokens: 0, totalTokens: 0, callCount: 0 };
+  const { _id, ...rest } = doc;
+  return rest;
+}
+
+module.exports = { getListings, createListing, updateListing, deleteListing, getAllListingsMeta, getSettings, saveSettings, incrementTokenUsage, getTokenUsage };

@@ -28,3 +28,26 @@ export interface AppState {
   activeTab: 'new' | 'staged' | 'listed';
   isSettingsOpen: boolean;
 }
+
+export interface UserSettings {
+  storeName?: string;
+  sellerZip?: string;
+  sellerLocation?: string;
+  geminiModel?: 'flash' | 'pro';
+  descriptionHeader?: string;
+  descriptionFooter?: string;
+  defaultFulfillmentPolicyId?: string;
+  defaultPaymentPolicyId?: string;
+  defaultReturnPolicyId?: string;
+}
+
+export interface EbayPolicy {
+  id: string;
+  name: string;
+}
+
+export interface EbayPolicies {
+  fulfillmentPolicies: EbayPolicy[];
+  paymentPolicies: EbayPolicy[];
+  returnPolicies: EbayPolicy[];
+}

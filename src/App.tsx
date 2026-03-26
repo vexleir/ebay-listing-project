@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { PlusCircle, List, Check, AlertTriangle, BarChart2 } from 'lucide-react';
+import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings } from 'lucide-react';
 import './index.css';
 
 import Uploader from './components/Uploader';
@@ -7,6 +7,7 @@ import ResultsEditor from './components/ResultsEditor';
 import StagedListings from './components/StagedListings';
 import ListedProducts from './components/ListedProducts';
 import Analytics from './components/Analytics';
+import SettingsPanel from './components/SettingsPanel';
 import LoginScreen from './components/LoginScreen';
 import { generateListing } from './services/ai';
 import type { StagedListing } from './types';
@@ -37,7 +38,7 @@ function App() {
   });
 
   const [stagedListings, setStagedListings] = useState<StagedListing[]>([]);
-  const [activeTab, setActiveTab] = useState<'new' | 'staged' | 'listed' | 'analytics'>('new');
+  const [activeTab, setActiveTab] = useState<'new' | 'staged' | 'listed' | 'analytics' | 'settings'>('new');
   const [listedProducts, setListedProducts] = useState<StagedListing[]>([]);
   const [isLoadingListings, setIsLoadingListings] = useState(false);
 
@@ -50,6 +51,7 @@ function App() {
       else if (e.key === 's' || e.key === 'S') setActiveTab('staged');
       else if (e.key === 'l' || e.key === 'L') setActiveTab('listed');
       else if (e.key === 'a' || e.key === 'A') setActiveTab('analytics');
+      else if (e.key === 'g' || e.key === 'G') setActiveTab('settings');
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -299,6 +301,30 @@ function App() {
     }
   };
 
+  const handleRelistListing = async (listing: StagedListing) => {
+    const id = crypto.randomUUID();
+    const now = Date.now();
+    const reListing: StagedListing = {
+      ...listing,
+      id,
+      status: 'staged',
+      createdAt: now,
+      updatedAt: now,
+      ebayDraftId: undefined,
+      archived: false,
+      soldAt: undefined,
+      soldPrice: undefined,
+    };
+    setStagedListings(prev => [reListing, ...prev]);
+    setActiveTab('staged');
+    const resp = await fetch('/api/listings', {
+      method: 'POST', headers: apiHeaders(appPassword),
+      body: JSON.stringify({ listing: reListing })
+    });
+    if (!resp.ok) console.error('Failed to save relisted listing:', await resp.text());
+    toast(`"${listing.title.substring(0, 35)}..." re-staged for relisting.`, 'success');
+  };
+
   const handleArchiveListedListing = async (id: string) => {
     const listing = listedProducts.find(l => l.id === id);
     if (!listing) return;
@@ -356,6 +382,7 @@ function App() {
           <button style={tabBtnStyle('staged')} onClick={() => setActiveTab('staged')}><List size={18} /> Staged ({stagedListings.length})</button>
           <button style={tabBtnStyle('listed')} onClick={() => setActiveTab('listed')}><Check size={18} /> Listed ({listedProducts.length})</button>
           <button style={tabBtnStyle('analytics')} onClick={() => setActiveTab('analytics')}><BarChart2 size={18} /> Analytics</button>
+          <button style={tabBtnStyle('settings')} onClick={() => setActiveTab('settings')}><Settings size={18} /> Settings</button>
         </div>
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
           {isEbayConnected ? (
@@ -423,12 +450,23 @@ function App() {
               onDelete={handleDeleteListedListing}
               onArchive={handleArchiveListedListing}
               onSyncSold={handleSyncSold}
+              onRelist={handleRelistListing}
               isEbayConnected={isEbayConnected}
+              appPassword={appPassword}
             />
+          </div>
+        ) : activeTab === 'analytics' ? (
+          <div className="animate-fade-in">
+            <Analytics staged={stagedListings} listed={listedProducts} appPassword={appPassword} />
           </div>
         ) : (
           <div className="animate-fade-in">
-            <Analytics staged={stagedListings} listed={listedProducts} appPassword={appPassword} />
+            <SettingsPanel
+              appPassword={appPassword}
+              isEbayConnected={isEbayConnected}
+              staged={stagedListings}
+              listed={listedProducts}
+            />
           </div>
         )}
       </main>

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { StagedListing } from '../types';
-import { TrendingUp, Package, Tag, DollarSign, BarChart2, Clock, Zap } from 'lucide-react';
+import { TrendingUp, Package, Tag, DollarSign, BarChart2, Clock, Zap, Download, Calendar } from 'lucide-react';
 
 interface AnalyticsProps {
   staged: StagedListing[];
@@ -101,16 +101,53 @@ export default function Analytics({ staged, listed, appPassword }: AnalyticsProp
   const recentSold = soldItems.filter(l => l.soldAt! >= thirtyDaysAgo);
   const recentSoldValue = recentSold.reduce((sum, l) => sum + parsePrice(l.soldPrice), 0);
 
+  // Days to sell
+  const soldWithDates = soldItems.filter(l => l.soldAt && l.createdAt);
+  const avgDaysToSell = soldWithDates.length > 0
+    ? Math.round(soldWithDates.reduce((sum, l) => sum + (l.soldAt! - l.createdAt) / 86400000, 0) / soldWithDates.length)
+    : null;
+
+  // Monthly revenue (last 6 months)
+  const monthlyData = Array.from({ length: 6 }, (_, i) => {
+    const d = new Date();
+    d.setDate(1);
+    d.setMonth(d.getMonth() - (5 - i));
+    const y = d.getFullYear(), m = d.getMonth();
+    const items = soldItems.filter(l => {
+      if (!l.soldAt) return false;
+      const sd = new Date(l.soldAt);
+      return sd.getFullYear() === y && sd.getMonth() === m;
+    });
+    return { label: d.toLocaleString('default', { month: 'short' }), revenue: items.reduce((sum, l) => sum + parsePrice(l.soldPrice), 0), count: items.length };
+  });
+  const maxMonthlyRevenue = Math.max(...monthlyData.map(m => m.revenue), 1);
+
   // Gemini cost estimate (approx Gemini 1.5 Flash rates)
   const estimatedCost = tokenStats
     ? (tokenStats.promptTokens / 1_000_000) * 0.075 + (tokenStats.completionTokens / 1_000_000) * 0.30
     : 0;
 
+  const handleExportData = () => {
+    const data = { exportedAt: new Date().toISOString(), staged, listed };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `listingstager-export-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <BarChart2 size={24} className="text-gradient" /> Analytics
-      </h2>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
+        <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <BarChart2 size={24} className="text-gradient" /> Analytics
+        </h2>
+        <button className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem' }} onClick={handleExportData}>
+          <Download size={16} /> Export Data
+        </button>
+      </div>
 
       {/* Key stats grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '1rem' }}>
@@ -133,6 +170,9 @@ export default function Analytics({ staged, listed, appPassword }: AnalyticsProp
         )}
         {avgPriceDiffPct !== null && (
           <StatCard icon={<TrendingUp size={18} />} label="Avg Sale vs Listed" value={`${avgPriceDiffPct >= 0 ? '+' : ''}${avgPriceDiffPct.toFixed(1)}%`} sub={`across ${soldWithBoth.length} sold item${soldWithBoth.length > 1 ? 's' : ''}`} color={avgPriceDiffPct >= 0 ? 'var(--success)' : '#f59e0b'} />
+        )}
+        {avgDaysToSell !== null && (
+          <StatCard icon={<Calendar size={18} />} label="Avg Days to Sell" value={String(avgDaysToSell)} sub={`across ${soldWithDates.length} sold item${soldWithDates.length > 1 ? 's' : ''}`} color={avgDaysToSell > 30 ? '#f59e0b' : 'var(--success)'} />
         )}
         {tokenStats && tokenStats.callCount > 0 && (
           <StatCard icon={<Zap size={18} />} label="AI Token Usage" value={tokenStats.totalTokens.toLocaleString()} sub={`${tokenStats.callCount} calls · ~$${estimatedCost.toFixed(4)} est. cost`} color="#a855f7" />
@@ -235,6 +275,23 @@ export default function Analytics({ staged, listed, appPassword }: AnalyticsProp
                 {avgPriceDiffPct !== null && <span style={{ color: 'var(--text-secondary)' }}>Avg diff: <strong style={{ color: avgPriceDiffPct >= 0 ? 'var(--success)' : '#f59e0b' }}>{avgPriceDiffPct >= 0 ? '+' : ''}{avgPriceDiffPct.toFixed(1)}%</strong></span>}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Monthly revenue chart */}
+        {soldItems.length > 0 && (
+          <div className="glass-panel" style={{ padding: '1.5rem' }}>
+            <h3 style={{ marginBottom: '1.25rem', fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '6px' }}><BarChart2 size={16} /> Monthly Revenue (last 6 months)</h3>
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px', height: '120px' }}>
+              {monthlyData.map(m => (
+                <div key={m.label} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', height: '100%', justifyContent: 'flex-end' }}>
+                  {m.revenue > 0 && <span style={{ fontSize: '0.68rem', color: 'var(--success)', textAlign: 'center', whiteSpace: 'nowrap' }}>${m.revenue >= 1000 ? (m.revenue / 1000).toFixed(1) + 'k' : m.revenue.toFixed(0)}</span>}
+                  {m.count > 0 && <span style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', opacity: 0.7 }}>{m.count}</span>}
+                  <div style={{ width: '100%', height: `${Math.max((m.revenue / maxMonthlyRevenue) * 72, m.revenue > 0 ? 8 : 3)}px`, background: m.revenue > 0 ? 'var(--success)' : 'rgba(255,255,255,0.06)', borderRadius: '3px 3px 0 0', transition: 'height 0.3s ease', minHeight: '3px' }} />
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>{m.label}</span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

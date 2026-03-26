@@ -5,7 +5,7 @@ const axios = require('axios');
 const path = require('path');
 const { generateListing, generateListingFromUrls } = require('./ai');
 const { getAuthUrl, exchangeCodeForToken, getValidAccessToken, hasValidSession, getTokenExpiry } = require('./ebayAuth');
-const { getListings, createListing, updateListing, deleteListing, getAllListingsMeta } = require('./listings');
+const { getListings, createListing, updateListing, deleteListing, getAllListingsMeta, getSettings, saveSettings, incrementTokenUsage, getTokenUsage } = require('./listings');
 const { uploadImage } = require('./cloudinary');
 
 const app = express();
@@ -32,12 +32,108 @@ app.use((req, res, next) => {
 const PORT = process.env.PORT || 3001;
 const EBAY_API_BASE = 'https://api.ebay.com';
 
-// In-memory Gemini token usage accumulator
-let _tokenStats = { promptTokens: 0, completionTokens: 0, totalTokens: 0, callCount: 0 };
+// GET /api/token-usage — reads from persistent MongoDB storage
+app.get('/api/token-usage', async (req, res) => {
+  try {
+    res.json(await getTokenUsage());
+  } catch (e) {
+    res.json({ promptTokens: 0, completionTokens: 0, totalTokens: 0, callCount: 0 });
+  }
+});
 
-// GET /api/token-usage
-app.get('/api/token-usage', (req, res) => {
-  res.json(_tokenStats);
+// GET /api/settings
+app.get('/api/settings', async (req, res) => {
+  try {
+    res.json(await getSettings());
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/settings
+app.post('/api/settings', async (req, res) => {
+  try {
+    await saveSettings(req.body);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/ebay/policies — return all available fulfillment/payment/return policies with names
+app.get('/api/ebay/policies', async (req, res) => {
+  try {
+    const token = await getValidAccessToken();
+    const headers = { 'Authorization': `Bearer ${token}`, 'Content-Language': 'en-US' };
+    const [fulfillRes, payRes, retRes] = await Promise.all([
+      axios.get(`${EBAY_API_BASE}/sell/account/v1/fulfillment_policy`, { headers }).catch(e => ({ data: {} })),
+      axios.get(`${EBAY_API_BASE}/sell/account/v1/payment_policy`, { headers }).catch(e => ({ data: {} })),
+      axios.get(`${EBAY_API_BASE}/sell/account/v1/return_policy`, { headers }).catch(e => ({ data: {} })),
+    ]);
+    res.json({
+      fulfillmentPolicies: (fulfillRes.data?.fulfillmentPolicies || []).map(p => ({ id: p.fulfillmentPolicyId, name: p.name })),
+      paymentPolicies: (payRes.data?.paymentPolicies || []).map(p => ({ id: p.paymentPolicyId, name: p.name })),
+      returnPolicies: (retRes.data?.returnPolicies || []).map(p => ({ id: p.returnPolicyId, name: p.name })),
+    });
+  } catch (e) {
+    console.error('[policies] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/ebay/revise — update price and/or title of an existing live eBay listing
+app.post('/api/ebay/revise', async (req, res) => {
+  const { itemId, newPrice, newTitle } = req.body;
+  if (!itemId) return res.status(400).json({ error: 'itemId required' });
+  try {
+    const token = await getValidAccessToken();
+    const priceXml = newPrice ? `<StartPrice currencyID="USD">${parseFloat(newPrice).toFixed(2)}</StartPrice>` : '';
+    const titleXml = newTitle ? `<Title><![CDATA[${String(newTitle).substring(0, 80)}]]></Title>` : '';
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <Item>
+    <ItemID>${itemId}</ItemID>
+    ${titleXml}
+    ${priceXml}
+  </Item>
+</ReviseFixedPriceItemRequest>`;
+    const resp = await axios.post('https://api.ebay.com/ws/api.dll', xml, {
+      headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1331', 'X-EBAY-API-CALL-NAME': 'ReviseFixedPriceItem', 'X-EBAY-API-SITEID': '0', 'X-EBAY-API-IAF-TOKEN': token, 'Content-Type': 'text/xml' }
+    });
+    if (resp.data.includes('<Ack>Failure</Ack>')) {
+      const err = resp.data.match(/<LongMessage>(.*?)<\/LongMessage>/)?.[1] || 'Unknown error';
+      return res.status(400).json({ error: err });
+    }
+    res.json({ success: true });
+  } catch (e) {
+    console.error('[revise] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/ebay/end-listing — end a live eBay listing
+app.post('/api/ebay/end-listing', async (req, res) => {
+  const { itemId, reason } = req.body;
+  if (!itemId) return res.status(400).json({ error: 'itemId required' });
+  try {
+    const token = await getValidAccessToken();
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<EndFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <ItemID>${itemId}</ItemID>
+  <EndingReason>${reason || 'NotAvailable'}</EndingReason>
+</EndFixedPriceItemRequest>`;
+    const resp = await axios.post('https://api.ebay.com/ws/api.dll', xml, {
+      headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1331', 'X-EBAY-API-CALL-NAME': 'EndFixedPriceItem', 'X-EBAY-API-SITEID': '0', 'X-EBAY-API-IAF-TOKEN': token, 'Content-Type': 'text/xml' }
+    });
+    if (resp.data.includes('<Ack>Failure</Ack>')) {
+      const err = resp.data.match(/<LongMessage>(.*?)<\/LongMessage>/)?.[1] || 'Unknown error';
+      return res.status(400).json({ error: err });
+    }
+    res.json({ success: true });
+  } catch (e) {
+    console.error('[end-listing] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // GET /api/verify-password
@@ -177,10 +273,7 @@ app.post('/api/generate-from-urls', async (req, res) => {
     if (!process.env.GEMINI_API_KEY) return res.status(500).json({ error: 'Server missing GEMINI_API_KEY' });
     const result = await generateListingFromUrls(imageUrls || [], instructions || '', process.env.GEMINI_API_KEY);
     if (result.tokenUsage) {
-      _tokenStats.promptTokens += result.tokenUsage.promptTokens || 0;
-      _tokenStats.completionTokens += result.tokenUsage.completionTokens || 0;
-      _tokenStats.totalTokens += result.tokenUsage.totalTokens || 0;
-      _tokenStats.callCount += 1;
+      incrementTokenUsage(result.tokenUsage.promptTokens, result.tokenUsage.completionTokens).catch(() => {});
     }
     res.json(result);
   } catch (e) {
@@ -282,10 +375,7 @@ app.post('/api/generate', async (req, res) => {
     }
     const result = await generateListing(imageParts, instructions, process.env.GEMINI_API_KEY);
     if (result.tokenUsage) {
-      _tokenStats.promptTokens += result.tokenUsage.promptTokens || 0;
-      _tokenStats.completionTokens += result.tokenUsage.completionTokens || 0;
-      _tokenStats.totalTokens += result.tokenUsage.totalTokens || 0;
-      _tokenStats.callCount += 1;
+      incrementTokenUsage(result.tokenUsage.promptTokens, result.tokenUsage.completionTokens).catch(() => {});
     }
     res.json(result);
   } catch (error) {
@@ -416,16 +506,36 @@ app.get('/api/ebay/sold-items', async (req, res) => {
   }
 });
 
+// Maps AI-generated condition text to eBay condition IDs
+function getConditionId(conditionStr) {
+  const s = (conditionStr || '').toLowerCase();
+  if (s.includes('for parts') || s.includes('not working') || s.includes('parts only')) return '7000';
+  if (s.includes('acceptable') || s.includes('heavily worn') || s.includes('heavy wear')) return '6000';
+  if (s.includes('good') && !s.includes('very good') && !s.includes('like new')) return '5000';
+  if (s.includes('very good')) return '4000';
+  if (s.includes('like new') || s.includes('mint') || s.includes('open box') || s.includes('open-box')) return '2500';
+  if (s.includes('seller refurbished') || s.includes('refurbished') || s.includes('refurb')) return '2500';
+  if (s.includes('certified refurbished') || s.includes('manufacturer refurbished')) return '2000';
+  if (s.includes('new other')) return '1500';
+  if (s.includes('new') && !s.includes('like')) return '1000';
+  return '3000'; // Default: Used
+}
+
 // POST /api/ebay/draft
 // Rewritten for V4: Uses eBay XML Trading API to support EPS Image Uploads and Scheduled Drafts
 app.post('/api/ebay/draft', async (req, res) => {
-  const { listing } = req.body;
+  const { listing, overrideCategoryId, overrideConditionId, overrideFulfillmentPolicyId } = req.body;
+
+  // Load user settings for location, policies, and description templates
+  const userSettings = await getSettings().catch(() => ({}));
 
   const config = {
-    fulfillmentPolicy: process.env.EBAY_FULFILLMENT_POLICY_ID,
-    paymentPolicy: process.env.EBAY_PAYMENT_POLICY_ID,
-    returnPolicy: process.env.EBAY_RETURN_POLICY_ID,
-    categoryId: process.env.EBAY_DEFAULT_CATEGORY_ID || "261068"
+    fulfillmentPolicy: overrideFulfillmentPolicyId || userSettings.defaultFulfillmentPolicyId || process.env.EBAY_FULFILLMENT_POLICY_ID,
+    paymentPolicy: userSettings.defaultPaymentPolicyId || process.env.EBAY_PAYMENT_POLICY_ID,
+    returnPolicy: userSettings.defaultReturnPolicyId || process.env.EBAY_RETURN_POLICY_ID,
+    categoryId: overrideCategoryId || process.env.EBAY_DEFAULT_CATEGORY_ID || "261068",
+    sellerZip: userSettings.sellerZip || process.env.SELLER_ZIP || '10001',
+    sellerLocation: userSettings.sellerLocation || process.env.SELLER_LOCATION || 'United States',
   };
 
   try {
@@ -510,9 +620,8 @@ app.post('/api/ebay/draft', async (req, res) => {
     const rawPrice = (listing.priceRecommendation || '').replace(/[^0-9.]/g, '');
     const validPrice = rawPrice && !isNaN(parseFloat(rawPrice)) ? parseFloat(rawPrice).toFixed(2) : "50.00";
     
-    // Condition mapping: Assume 3000 (Used) unless condition string specifically indicates New exclusively
-    const isNew = listing.condition.toLowerCase().includes('new') && !listing.condition.toLowerCase().includes('like new');
-    const conditionId = isNew ? "1000" : "3000";
+    // Condition mapping: use override from push modal, or auto-detect from AI condition text
+    const conditionId = overrideConditionId || getConditionId(listing.condition);
 
     // Set ScheduleTime 21 days in the future to keep it as an editable draft
     const scheduleDate = new Date();
@@ -540,6 +649,11 @@ app.post('/api/ebay/draft', async (req, res) => {
     }
 
     // 2. Create the Scheduled Listing (Draft)
+    // Apply description header/footer templates from user settings
+    const descHeader = userSettings.descriptionHeader || '';
+    const descFooter = userSettings.descriptionFooter || '';
+    const wrappedDescription = descHeader + listing.description + descFooter;
+
     console.log('Pushing AddFixedPriceItem Schedule payload...');
     const addItemXml = `<?xml version="1.0" encoding="utf-8"?>
 <AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -548,7 +662,7 @@ app.post('/api/ebay/draft', async (req, res) => {
   <Item>
     <Title><![CDATA[${listing.title.substring(0, 80)}]]></Title>
     ${listing.sku ? `<SKU><![CDATA[${listing.sku}]]></SKU>` : ''}
-    <Description><![CDATA[${listing.description}]]></Description>
+    <Description><![CDATA[${wrappedDescription}]]></Description>
     <PrimaryCategory>
       <CategoryID>${config.categoryId}</CategoryID>
     </PrimaryCategory>
@@ -561,8 +675,8 @@ app.post('/api/ebay/draft', async (req, res) => {
     <ListingType>FixedPriceItem</ListingType>
     ${pictureDetailsXml}
     ${itemSpecificsXml}
-    <PostalCode>90210</PostalCode>
-    <Location><![CDATA[United States]]></Location>
+    <PostalCode>${config.sellerZip}</PostalCode>
+    <Location><![CDATA[${config.sellerLocation}]]></Location>
     <SellerProfiles>
       <SellerPaymentProfile>
         <PaymentProfileID>${config.paymentPolicy}</PaymentProfileID>

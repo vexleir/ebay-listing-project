@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ExternalLink, Calendar, CheckCircle, Trash2, Archive, ArchiveRestore, Search, ChevronDown, LayoutGrid, List, Download, RefreshCw, Eye } from 'lucide-react';
+import { ExternalLink, Calendar, CheckCircle, Trash2, Archive, ArchiveRestore, Search, ChevronDown, LayoutGrid, List, Download, RefreshCw, Eye, RotateCcw, Pencil, CircleSlash, X } from 'lucide-react';
 import type { StagedListing } from '../types';
 import ImageSearchButton from './ImageSearchButton';
 import Lightbox from './Lightbox';
@@ -11,7 +11,9 @@ interface ListedProductsProps {
   onDelete: (id: string) => void;
   onArchive: (id: string) => void;
   onSyncSold?: () => void;
+  onRelist?: (listing: StagedListing) => void;
   isEbayConnected?: boolean;
+  appPassword?: string;
 }
 
 type SortOption = 'date-desc' | 'date-asc' | 'title-asc' | 'title-desc' | 'price-asc' | 'price-desc';
@@ -70,7 +72,7 @@ function exportCsv(listings: StagedListing[]) {
   URL.revokeObjectURL(url);
 }
 
-export default function ListedProductsView({ listings, onDelete, onArchive, onSyncSold, isEbayConnected }: ListedProductsProps) {
+export default function ListedProductsView({ listings, onDelete, onArchive, onSyncSold, onRelist, isEbayConnected, appPassword = '' }: ListedProductsProps) {
   const { toast } = useToast();
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortOption>('date-desc');
@@ -81,6 +83,56 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [stats, setStats] = useState<Record<string, { watchCount: string; hitCount: string; quantitySold: string } | null>>({});
   const [loadingStatsId, setLoadingStatsId] = useState<string | null>(null);
+
+  // Revise price modal
+  const [reviseModal, setReviseModal] = useState<{ listing: StagedListing; price: string; title: string } | null>(null);
+  const [revising, setRevising] = useState(false);
+  // End listing confirm
+  const [endConfirmId, setEndConfirmId] = useState<string | null>(null);
+  const [ending, setEnding] = useState(false);
+
+  const pw = appPassword || localStorage.getItem('app_password') || '';
+
+  const handleRevise = async () => {
+    if (!reviseModal) return;
+    setRevising(true);
+    try {
+      const resp = await fetch('/api/ebay/revise', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-app-password': pw },
+        body: JSON.stringify({ itemId: reviseModal.listing.ebayDraftId, newPrice: reviseModal.price, newTitle: reviseModal.title })
+      });
+      const data = await resp.json();
+      if (!resp.ok || data.error) throw new Error(data.error || 'Revise failed');
+      onArchive(reviseModal.listing.id); // trigger re-fetch via archive toggle as update mechanism
+      toast('eBay listing updated.', 'success');
+      setReviseModal(null);
+    } catch (e: any) {
+      toast('Revise failed: ' + e.message, 'error');
+    } finally {
+      setRevising(false);
+    }
+  };
+
+  const handleEndListing = async (listing: StagedListing) => {
+    setEnding(true);
+    try {
+      const resp = await fetch('/api/ebay/end-listing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-app-password': pw },
+        body: JSON.stringify({ itemId: listing.ebayDraftId })
+      });
+      const data = await resp.json();
+      if (!resp.ok || data.error) throw new Error(data.error || 'End listing failed');
+      onArchive(listing.id);
+      toast('eBay listing ended and archived.', 'success');
+    } catch (e: any) {
+      toast('End listing failed: ' + e.message, 'error');
+    } finally {
+      setEnding(false);
+      setEndConfirmId(null);
+    }
+  };
 
   const fetchStats = async (listing: StagedListing) => {
     if (!listing.ebayDraftId) return;
@@ -180,10 +232,25 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
             {parseInt(stats[listing.id]!.quantitySold) > 0 && <span style={{ color: 'var(--success)' }}>✓ {stats[listing.id]!.quantitySold} sold</span>}
           </div>
         )}
-        <div style={{ marginTop: 'auto', display: 'flex', gap: '0.5rem', alignItems: 'center', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
-          <a className="btn-primary" href="https://www.ebay.com/mes/sellerhub" target="_blank" rel="noreferrer" style={{ textDecoration: 'none', flex: 1, fontSize: '0.85rem', padding: '6px 12px' }}>
-            <ExternalLink size={16} /> View on eBay
+        <div style={{ marginTop: 'auto', display: 'flex', gap: '0.5rem', alignItems: 'center', paddingTop: '1rem', borderTop: '1px solid var(--border-color)', flexWrap: 'wrap' }}>
+          <a className="btn-primary" href="https://www.ebay.com/mes/sellerhub" target="_blank" rel="noreferrer" style={{ textDecoration: 'none', flex: 1, fontSize: '0.85rem', padding: '6px 12px', minWidth: '90px' }}>
+            <ExternalLink size={16} /> eBay
           </a>
+          {onRelist && (isArchived || listing.soldAt) && (
+            <button className="btn-icon" title="Re-stage for relisting" onClick={() => onRelist(listing)} style={{ color: 'var(--accent-color)' }}>
+              <RotateCcw size={18} />
+            </button>
+          )}
+          {listing.ebayDraftId && !isArchived && (
+            <button className="btn-icon" title="Edit price/title on eBay" onClick={() => setReviseModal({ listing, price: listing.priceRecommendation || '', title: listing.title || '' })}>
+              <Pencil size={18} />
+            </button>
+          )}
+          {listing.ebayDraftId && !isArchived && (
+            <button className="btn-icon" title="End listing on eBay" style={{ color: '#ef4444' }} onClick={() => setEndConfirmId(listing.id)}>
+              <CircleSlash size={18} />
+            </button>
+          )}
           {listing.ebayDraftId && (
             <button className="btn-icon" title="Fetch view/watcher stats from eBay" onClick={() => fetchStats(listing)} disabled={loadingStatsId === listing.id} style={{ color: stats[listing.id] ? 'var(--accent-color)' : undefined }}>
               {loadingStatsId === listing.id ? <span style={{ fontSize: '10px' }}>...</span> : <Eye size={18} />}
@@ -192,8 +259,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
           <button className="btn-icon" title={isArchived ? 'Unarchive' : 'Archive'} onClick={() => { onArchive(listing.id); toast(isArchived ? 'Listing unarchived.' : 'Listing archived.', 'success'); }}>
             {isArchived ? <ArchiveRestore size={18} /> : <Archive size={18} />}
           </button>
-          <button className="btn-icon" title="Delete" style={{ color: '#ef4444' }}
-            onClick={() => onDelete(listing.id)}>
+          <button className="btn-icon" title="Delete" style={{ color: '#ef4444' }} onClick={() => onDelete(listing.id)}>
             <Trash2 size={18} />
           </button>
         </div>
@@ -250,6 +316,51 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
   return (
     <div>
       {lightboxImages && createPortal(<Lightbox images={lightboxImages} index={lightboxIndex} onClose={() => setLightboxImages(null)} onNavigate={setLightboxIndex} />, document.body)}
+
+      {/* Revise price modal */}
+      {reviseModal && createPortal(
+        <div onClick={() => setReviseModal(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+          <div className="glass-panel" onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '460px', padding: '2rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
+              <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}><Pencil size={18} /> Edit eBay Listing</h3>
+              <button onClick={() => setReviseModal(null)} className="btn-icon"><X size={18} /></button>
+            </div>
+            <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>Updates title and/or price on the live eBay listing. Images and description require eBay Seller Hub.</p>
+            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>Title (max 80 chars)</label>
+            <input className="input-base" value={reviseModal.title} maxLength={80}
+              onChange={e => setReviseModal(prev => prev ? { ...prev, title: e.target.value } : null)}
+              style={{ marginBottom: '1rem' }} />
+            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>New Price ($)</label>
+            <input className="input-base" type="number" step="0.01" min="0.01" value={reviseModal.price}
+              onChange={e => setReviseModal(prev => prev ? { ...prev, price: e.target.value } : null)}
+              style={{ marginBottom: '1.5rem' }} />
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setReviseModal(null)}>Cancel</button>
+              <button className="btn-primary" style={{ flex: 2 }} onClick={handleRevise} disabled={revising}>
+                {revising ? 'Updating...' : 'Update on eBay'}
+              </button>
+            </div>
+          </div>
+        </div>, document.body
+      )}
+
+      {/* End listing confirm modal */}
+      {endConfirmId && createPortal(
+        <div onClick={() => setEndConfirmId(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+          <div className="glass-panel" onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '400px', padding: '2rem' }}>
+            <h3 style={{ margin: '0 0 0.75rem 0', display: 'flex', alignItems: 'center', gap: '8px' }}><CircleSlash size={18} style={{ color: '#ef4444' }} /> End eBay Listing?</h3>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>This will permanently end the live eBay listing. The item will be archived in ListingStager. This action cannot be undone.</p>
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setEndConfirmId(null)}>Cancel</button>
+              <button style={{ flex: 2, background: 'rgba(239,68,68,0.2)', border: '1px solid rgba(239,68,68,0.4)', color: '#ef4444', borderRadius: '8px', padding: '8px 16px', cursor: 'pointer', fontWeight: 600 }}
+                onClick={() => { const l = listings.find(x => x.id === endConfirmId); if (l) handleEndListing(l); }}
+                disabled={ending}>
+                {ending ? 'Ending...' : 'End Listing on eBay'}
+              </button>
+            </div>
+          </div>
+        </div>, document.body
+      )}
 
       {/* Tag filter bar */}
       {allTags.length > 0 && (
