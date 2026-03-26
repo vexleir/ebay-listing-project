@@ -24,10 +24,15 @@ async function generateListing(imageParts, instructions, apiKey) {
       }
     `;
 
+    let totalPromptTokens = 0;
+    let totalCompletionTokens = 0;
+
     let result = await model.generateContent([analysisPrompt, ...imageParts]);
+    const usage1 = result.response.usageMetadata;
+    if (usage1) { totalPromptTokens += usage1.promptTokenCount || 0; totalCompletionTokens += usage1.candidatesTokenCount || 0; }
     let text = result.response.text();
     text = text.replace(/```json/g, '').replace(/```/g, '').trim();
-    
+
     let analysis;
     try {
       analysis = JSON.parse(text);
@@ -49,12 +54,14 @@ async function generateListing(imageParts, instructions, apiKey) {
         Return ONLY the new title as plain text, nothing else. If you can't add any good keywords, just return the exact same title.
       `;
       const enrichResult = await model.generateContent([enrichPrompt]);
+      const usage2 = enrichResult.response.usageMetadata;
+      if (usage2) { totalPromptTokens += usage2.promptTokenCount || 0; totalCompletionTokens += usage2.candidatesTokenCount || 0; }
       const newTitle = enrichResult.response.text().trim().replace(/^["']|["']$/g, '');
       if (newTitle.length <= 80 && newTitle.length > title.length) {
         title = newTitle;
       }
     }
-    
+
     if (title.length > 80) {
       title = title.substring(0, 80).trim();
     }
@@ -80,6 +87,8 @@ async function generateListing(imageParts, instructions, apiKey) {
     `;
 
     const finalResult = await model.generateContent([descConditionPrompt, ...imageParts]);
+    const usage3 = finalResult.response.usageMetadata;
+    if (usage3) { totalPromptTokens += usage3.promptTokenCount || 0; totalCompletionTokens += usage3.candidatesTokenCount || 0; }
     let finalText = finalResult.response.text();
     finalText = finalText.replace(/```json/g, '').replace(/```html/g, '').replace(/```/g, '').trim();
     
@@ -110,7 +119,8 @@ async function generateListing(imageParts, instructions, apiKey) {
       category: parsedFinal.category || "Unknown",
       priceRecommendation: parsedFinal.priceRecommendation || "0.00",
       priceJustification: parsedFinal.priceJustification || "",
-      shippingEstimate: finalShipping
+      shippingEstimate: finalShipping,
+      tokenUsage: { promptTokens: totalPromptTokens, completionTokens: totalCompletionTokens, totalTokens: totalPromptTokens + totalCompletionTokens, model: modelName }
     };
   };
 

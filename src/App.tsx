@@ -428,7 +428,7 @@ function App() {
           </div>
         ) : (
           <div className="animate-fade-in">
-            <Analytics staged={stagedListings} listed={listedProducts} />
+            <Analytics staged={stagedListings} listed={listedProducts} appPassword={appPassword} />
           </div>
         )}
       </main>

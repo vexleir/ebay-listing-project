@@ -32,6 +32,14 @@ app.use((req, res, next) => {
 const PORT = process.env.PORT || 3001;
 const EBAY_API_BASE = 'https://api.ebay.com';
 
+// In-memory Gemini token usage accumulator
+let _tokenStats = { promptTokens: 0, completionTokens: 0, totalTokens: 0, callCount: 0 };
+
+// GET /api/token-usage
+app.get('/api/token-usage', (req, res) => {
+  res.json(_tokenStats);
+});
+
 // GET /api/verify-password
 // Simple endpoint to let the frontend know if their password was valid under the global middleware
 app.get('/api/verify-password', (req, res) => {
@@ -168,6 +176,12 @@ app.post('/api/generate-from-urls', async (req, res) => {
     const { imageUrls, instructions } = req.body;
     if (!process.env.GEMINI_API_KEY) return res.status(500).json({ error: 'Server missing GEMINI_API_KEY' });
     const result = await generateListingFromUrls(imageUrls || [], instructions || '', process.env.GEMINI_API_KEY);
+    if (result.tokenUsage) {
+      _tokenStats.promptTokens += result.tokenUsage.promptTokens || 0;
+      _tokenStats.completionTokens += result.tokenUsage.completionTokens || 0;
+      _tokenStats.totalTokens += result.tokenUsage.totalTokens || 0;
+      _tokenStats.callCount += 1;
+    }
     res.json(result);
   } catch (e) {
     console.error('[generate-from-urls] error:', e.message);
@@ -267,6 +281,12 @@ app.post('/api/generate', async (req, res) => {
       return res.status(500).json({ error: "Server missing GEMINI_API_KEY. Please configure the .env file." });
     }
     const result = await generateListing(imageParts, instructions, process.env.GEMINI_API_KEY);
+    if (result.tokenUsage) {
+      _tokenStats.promptTokens += result.tokenUsage.promptTokens || 0;
+      _tokenStats.completionTokens += result.tokenUsage.completionTokens || 0;
+      _tokenStats.totalTokens += result.tokenUsage.totalTokens || 0;
+      _tokenStats.callCount += 1;
+    }
     res.json(result);
   } catch (error) {
     console.error("AI Generation Error:", error.message);

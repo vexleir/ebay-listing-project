@@ -135,7 +135,9 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
     <div key={listing.id} className="glass-card" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', border: `1px solid ${isArchived ? 'var(--border-color)' : 'var(--success-light)'}`, opacity: isArchived ? 0.65 : 1 }}>
       {listing.soldAt ? (
         <div style={{ padding: '8px 12px', background: 'rgba(16,185,129,0.2)', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', fontWeight: 600 }}>
-          ✓ SOLD {listing.soldPrice ? `· $${listing.soldPrice}` : ''} <span style={{ marginLeft: 'auto', fontSize: '0.75rem', opacity: 0.7 }}>{new Date(listing.soldAt).toLocaleDateString()}</span>
+          ✓ SOLD
+          {listing.soldPrice && <span style={{ fontSize: '0.82rem', fontWeight: 700 }}>· Listed ${listing.priceRecommendation} → Sold ${listing.soldPrice}</span>}
+          <span style={{ marginLeft: 'auto', fontSize: '0.75rem', opacity: 0.7 }}>{new Date(listing.soldAt).toLocaleDateString()}</span>
         </div>
       ) : !isArchived ? (
         <div style={{ padding: '8px 12px', background: 'var(--success-light)', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', fontWeight: 600 }}>
