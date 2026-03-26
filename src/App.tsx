@@ -42,20 +42,6 @@ function App() {
   const [listedProducts, setListedProducts] = useState<StagedListing[]>([]);
   const [isLoadingListings, setIsLoadingListings] = useState(false);
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement).tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      if (e.key === 'n' || e.key === 'N') setActiveTab('new');
-      else if (e.key === 's' || e.key === 'S') setActiveTab('staged');
-      else if (e.key === 'l' || e.key === 'L') setActiveTab('listed');
-      else if (e.key === 'a' || e.key === 'A') setActiveTab('analytics');
-      else if (e.key === 'g' || e.key === 'G') setActiveTab('settings');
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []);
 
   // Draft autosave
   useEffect(() => { sessionStorage.setItem(DRAFT_INSTRUCTIONS_KEY, instructions); }, [instructions]);
