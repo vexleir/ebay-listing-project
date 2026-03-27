@@ -1,7 +1,23 @@
 import { useState, useEffect } from 'react';
+import type React from 'react';
 import { Settings, Save, Download, RefreshCw, CheckCircle2, AlertTriangle, ExternalLink } from 'lucide-react';
 import type { UserSettings, EbayPolicies, StagedListing } from '../types';
 import { useToast } from '../context/ToastContext';
+
+const SectionHeader = ({ title, sub }: { title: string; sub?: string }) => (
+  <div style={{ marginBottom: '1.25rem', paddingBottom: '0.75rem', borderBottom: '1px solid var(--border-color)' }}>
+    <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>{title}</h3>
+    {sub && <p style={{ margin: '4px 0 0 0', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>{sub}</p>}
+  </div>
+);
+
+const Field = ({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) => (
+  <div style={{ marginBottom: '1rem' }}>
+    <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>{label}</label>
+    {children}
+    {hint && <p style={{ margin: '4px 0 0 0', fontSize: '0.75rem', color: 'var(--text-secondary)', opacity: 0.8 }}>{hint}</p>}
+  </div>
+);
 
 interface SettingsPanelProps {
   appPassword: string;
@@ -75,21 +91,6 @@ export default function SettingsPanelView({ appPassword, isEbayConnected, staged
   const set = (key: keyof UserSettings, value: string) => setSettings(prev => ({ ...prev, [key]: value }));
 
   if (loading) return <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading settings...</div>;
-
-  const SectionHeader = ({ title, sub }: { title: string; sub?: string }) => (
-    <div style={{ marginBottom: '1.25rem', paddingBottom: '0.75rem', borderBottom: '1px solid var(--border-color)' }}>
-      <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>{title}</h3>
-      {sub && <p style={{ margin: '4px 0 0 0', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>{sub}</p>}
-    </div>
-  );
-
-  const Field = ({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) => (
-    <div style={{ marginBottom: '1rem' }}>
-      <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>{label}</label>
-      {children}
-      {hint && <p style={{ margin: '4px 0 0 0', fontSize: '0.75rem', color: 'var(--text-secondary)', opacity: 0.8 }}>{hint}</p>}
-    </div>
-  );
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '800px' }}>
