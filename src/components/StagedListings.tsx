@@ -1,11 +1,12 @@
 import { useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Trash2, Edit2, Copy, Check, Calendar, LayoutGrid, List, Wand2, TrendingUp, X, RefreshCw, ImagePlus, GripVertical, UploadCloud, Search, ChevronDown, ShieldCheck, ShieldAlert, ShieldX } from 'lucide-react';
+import { Trash2, Edit2, Copy, Check, Calendar, LayoutGrid, List, Wand2, TrendingUp, X, RefreshCw, ImagePlus, GripVertical, UploadCloud, Search, ChevronDown, ShieldCheck, ShieldAlert, ShieldX, Share2 } from 'lucide-react';
 import type { StagedListing, EbayPolicy } from '../types';
 import ResultsEditor from './ResultsEditor';
 import ImageSearchButton from './ImageSearchButton';
 import Lightbox from './Lightbox';
 import { useToast } from '../context/ToastContext';
+import CrossPostModal from './CrossPostModal';
 
 interface StagedListingsProps {
   listings: StagedListing[];
@@ -301,6 +302,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
 
   // Image editing
   const [imageEditId, setImageEditId] = useState<string | null>(null);
+  const [crossPostListing, setCrossPostListing] = useState<StagedListing | null>(null);
 
   const visibleListings = (() => {
     const q = search.toLowerCase();
@@ -541,6 +543,9 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
       <button className="btn-icon" onClick={() => setEditingId(listing.id)} title="Edit Listing">
         <Edit2 size={18} />
       </button>
+      <button className="btn-icon" title="Cross-post to other platforms" onClick={() => setCrossPostListing(listing)}>
+        <Share2 size={18} />
+      </button>
       <button className="btn-icon" style={{ color: '#ef4444' }}
         onClick={() => onDelete(listing.id)}
         title="Delete Listing">
@@ -583,6 +588,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
 
   return (
     <div>
+      {crossPostListing && <CrossPostModal listing={crossPostListing} onClose={() => setCrossPostListing(null)} />}
       {/* Push confirmation modal */}
       {pushModal && createPortal(
         <div onClick={() => setPushModal(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>

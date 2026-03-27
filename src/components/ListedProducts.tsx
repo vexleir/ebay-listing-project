@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ExternalLink, Calendar, CheckCircle, Trash2, Archive, ArchiveRestore, Search, ChevronDown, LayoutGrid, List, Download, RefreshCw, Eye, RotateCcw, Pencil, CircleSlash, X } from 'lucide-react';
+import { ExternalLink, Calendar, CheckCircle, Trash2, Archive, ArchiveRestore, Search, ChevronDown, LayoutGrid, List, Download, RefreshCw, Eye, RotateCcw, Pencil, CircleSlash, X, Share2 } from 'lucide-react';
 import type { StagedListing } from '../types';
 import ImageSearchButton from './ImageSearchButton';
 import Lightbox from './Lightbox';
 import { useToast } from '../context/ToastContext';
 import { calculateNetProfit } from '../utils/fees';
+import CrossPostModal from './CrossPostModal';
 
 interface ListedProductsProps {
   listings: StagedListing[];
@@ -85,6 +86,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
   const [loadingStatsId, setLoadingStatsId] = useState<string | null>(null);
 
   // Revise price modal
+  const [crossPostListing, setCrossPostListing] = useState<StagedListing | null>(null);
   const [reviseModal, setReviseModal] = useState<{ listing: StagedListing; price: string; title: string } | null>(null);
   const [revising, setRevising] = useState(false);
   // End listing confirm
@@ -256,6 +258,9 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
               {loadingStatsId === listing.id ? <span style={{ fontSize: '10px' }}>...</span> : <Eye size={18} />}
             </button>
           )}
+          <button className="btn-icon" title="Cross-post to other platforms" onClick={() => setCrossPostListing(listing)}>
+            <Share2 size={18} />
+          </button>
           <button className="btn-icon" title={isArchived ? 'Unarchive' : 'Archive'} onClick={() => { onArchive(listing.id); toast(isArchived ? 'Listing unarchived.' : 'Listing archived.', 'success'); }}>
             {isArchived ? <ArchiveRestore size={18} /> : <Archive size={18} />}
           </button>
@@ -302,6 +307,9 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
             {loadingStatsId === listing.id ? <span style={{ fontSize: '10px' }}>...</span> : <Eye size={18} />}
           </button>
         )}
+        <button className="btn-icon" title="Cross-post to other platforms" onClick={() => setCrossPostListing(listing)}>
+          <Share2 size={18} />
+        </button>
         <button className="btn-icon" title={isArchived ? 'Unarchive' : 'Archive'} onClick={() => { onArchive(listing.id); toast(isArchived ? 'Listing unarchived.' : 'Listing archived.', 'success'); }}>
           {isArchived ? <ArchiveRestore size={18} /> : <Archive size={18} />}
         </button>
@@ -316,6 +324,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
   return (
     <div>
       {lightboxImages && createPortal(<Lightbox images={lightboxImages} index={lightboxIndex} onClose={() => setLightboxImages(null)} onNavigate={setLightboxIndex} />, document.body)}
+      {crossPostListing && <CrossPostModal listing={crossPostListing} onClose={() => setCrossPostListing(null)} />}
 
       {/* Revise price modal */}
       {reviseModal && createPortal(
