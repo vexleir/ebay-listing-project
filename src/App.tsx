@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings } from 'lucide-react';
+import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, ShoppingBag } from 'lucide-react';
 import './index.css';
 
 import Uploader from './components/Uploader';
@@ -8,6 +8,7 @@ import StagedListings from './components/StagedListings';
 import ListedProducts from './components/ListedProducts';
 import Analytics from './components/Analytics';
 import SettingsPanel from './components/SettingsPanel';
+import SourcingTool from './components/SourcingTool';
 import LoginScreen from './components/LoginScreen';
 import { generateListing } from './services/ai';
 import type { StagedListing } from './types';
@@ -38,7 +39,7 @@ function App() {
   });
 
   const [stagedListings, setStagedListings] = useState<StagedListing[]>([]);
-  const [activeTab, setActiveTab] = useState<'new' | 'staged' | 'listed' | 'analytics' | 'settings'>('new');
+  const [activeTab, setActiveTab] = useState<'new' | 'staged' | 'listed' | 'analytics' | 'settings' | 'source'>('new');
   const [listedProducts, setListedProducts] = useState<StagedListing[]>([]);
   const [isLoadingListings, setIsLoadingListings] = useState(false);
 
@@ -368,6 +369,7 @@ function App() {
           <button style={tabBtnStyle('staged')} onClick={() => setActiveTab('staged')}><List size={18} /> Staged ({stagedListings.length})</button>
           <button style={tabBtnStyle('listed')} onClick={() => setActiveTab('listed')}><Check size={18} /> Listed ({listedProducts.length})</button>
           <button style={tabBtnStyle('analytics')} onClick={() => setActiveTab('analytics')}><BarChart2 size={18} /> Analytics</button>
+          <button style={tabBtnStyle('source')} onClick={() => setActiveTab('source')}><ShoppingBag size={18} /> Source</button>
           <button style={tabBtnStyle('settings')} onClick={() => setActiveTab('settings')}><Settings size={18} /> Settings</button>
         </div>
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
@@ -444,6 +446,10 @@ function App() {
         ) : activeTab === 'analytics' ? (
           <div className="animate-fade-in">
             <Analytics staged={stagedListings} listed={listedProducts} appPassword={appPassword} />
+          </div>
+        ) : activeTab === 'source' ? (
+          <div className="animate-fade-in">
+            <SourcingTool appPassword={appPassword} listed={listedProducts} />
           </div>
         ) : (
           <div className="animate-fade-in">

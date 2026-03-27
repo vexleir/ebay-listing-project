@@ -448,6 +448,88 @@ app.get('/api/reprice/suggestions', async (req, res) => {
   }
 });
 
+// GET /api/source/analyze?query=&askingPrice= — sourcing intelligence: should I buy this?
+app.get('/api/source/analyze', async (req, res) => {
+  try {
+    const query = (req.query.query || '').trim();
+    const askingPrice = parseFloat(req.query.askingPrice || '0');
+    if (!query) return res.status(400).json({ error: 'query required' });
+
+    const token = await getApplicationToken();
+    const resp = await axios.get('https://api.ebay.com/buy/browse/v1/item_summary/search', {
+      headers: { 'Authorization': `Bearer ${token}`, 'X-EBAY-C-MARKETPLACE-ID': 'EBAY_US' },
+      params: { q: query, limit: 12, filter: 'buyingOptions:{FIXED_PRICE}', sort: 'price' }
+    });
+
+    const summaries = resp.data?.itemSummaries || [];
+    const prices = summaries
+      .map(s => parseFloat(s.price?.value || '0'))
+      .filter(p => p > 0)
+      .sort((a, b) => a - b);
+
+    if (prices.length === 0) {
+      return res.json({ query, comps: [], stats: null, recommendation: null, reason: 'No active eBay listings found for this search. Try different keywords.', error: null });
+    }
+
+    const avg = prices.reduce((s, p) => s + p, 0) / prices.length;
+    const mid = Math.floor(prices.length / 2);
+    const median = prices.length % 2 === 0 ? (prices[mid - 1] + prices[mid]) / 2 : prices[mid];
+
+    // Conservative target sell price: 5% below median to ensure competitive listing
+    const targetSellPrice = median * 0.95;
+    // eBay fees: 13.25% FVF + $0.30 per-order fee (most categories)
+    const ebayFee = targetSellPrice * 0.1325 + 0.30;
+    const netProfit = askingPrice > 0 ? targetSellPrice - askingPrice - ebayFee : null;
+    const roi = (netProfit !== null && askingPrice > 0) ? (netProfit / askingPrice) * 100 : null;
+
+    let recommendation = null;
+    let reason = 'Enter an asking price to get a buy recommendation.';
+    if (netProfit !== null && roi !== null) {
+      if (roi >= 100 && netProfit >= 15) {
+        recommendation = 'buy';
+        reason = `Strong market at $${median.toFixed(2)} median. Est. net $${netProfit.toFixed(2)} after eBay fees — ${roi.toFixed(0)}% ROI. Buy with confidence.`;
+      } else if (roi >= 40 && netProfit >= 8) {
+        recommendation = 'consider';
+        reason = `Decent margin — est. net $${netProfit.toFixed(2)} (${roi.toFixed(0)}% ROI). Verify condition carefully before buying.`;
+      } else if (netProfit > 0) {
+        recommendation = 'pass';
+        reason = `Thin margin after eBay fees — est. net only $${netProfit.toFixed(2)} (${roi.toFixed(0)}% ROI) at this asking price. Negotiate down or skip.`;
+      } else {
+        recommendation = 'pass';
+        reason = `Asking price is too high — would lose $${Math.abs(netProfit).toFixed(2)} after eBay fees at current market prices.`;
+      }
+    }
+
+    res.json({
+      query,
+      comps: summaries.slice(0, 8).map(s => ({
+        title: s.title || '',
+        price: parseFloat(s.price?.value || '0').toFixed(2),
+        condition: s.condition || '',
+        url: s.itemWebUrl || '',
+      })),
+      stats: {
+        count: prices.length,
+        avg: parseFloat(avg.toFixed(2)),
+        median: parseFloat(median.toFixed(2)),
+        min: parseFloat(prices[0].toFixed(2)),
+        max: parseFloat(prices[prices.length - 1].toFixed(2)),
+      },
+      askingPrice,
+      targetSellPrice: parseFloat(targetSellPrice.toFixed(2)),
+      ebayFee: parseFloat(ebayFee.toFixed(2)),
+      netProfit: netProfit !== null ? parseFloat(netProfit.toFixed(2)) : null,
+      roi: roi !== null ? parseFloat(roi.toFixed(1)) : null,
+      recommendation,
+      reason,
+      error: null,
+    });
+  } catch (e) {
+    console.error('[source/analyze] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /api/generate (Moved from Frontend)
 app.post('/api/generate', async (req, res) => {
   try {
