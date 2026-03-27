@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import type { StagedListing } from '../types';
 import { TrendingUp, Package, Tag, DollarSign, BarChart2, Clock, Zap, Download, Calendar } from 'lucide-react';
 import RepricingAdvisor from './RepricingAdvisor';
+import { calculateNetProfit } from '../utils/fees';
 
 interface AnalyticsProps {
   staged: StagedListing[];
@@ -37,12 +38,17 @@ function StatCard({ icon, label, value, sub, color }: { icon: React.ReactNode; l
 
 export default function Analytics({ staged, listed, appPassword }: AnalyticsProps) {
   const [tokenStats, setTokenStats] = useState<TokenStats | null>(null);
+  const [promotedPct, setPromotedPct] = useState(0);
 
   useEffect(() => {
     if (!appPassword) return;
     fetch('/api/token-usage', { headers: { 'x-app-password': appPassword } })
       .then(r => r.json())
       .then(data => setTokenStats(data))
+      .catch(() => {});
+    fetch('/api/settings', { headers: { 'x-app-password': appPassword } })
+      .then(r => r.json())
+      .then(data => { if (data.promotedListingPct) setPromotedPct(data.promotedListingPct); })
       .catch(() => {});
   }, [appPassword]);
 
@@ -54,13 +60,18 @@ export default function Analytics({ staged, listed, appPassword }: AnalyticsProp
   const totalValue = stagedValue + listedValue;
 
   const listedWithCost = active.filter(l => l.costBasis && parsePrice(l.costBasis) > 0);
+  const netProfits = listedWithCost.map(l => calculateNetProfit(l.priceRecommendation, l.costBasis, l.category, l.shippingLabelCost, promotedPct));
+  const totalNetProfit = netProfits.reduce((sum, np) => sum + np.netProfit, 0);
   const totalProfit = listedWithCost.reduce((sum, l) => sum + (parsePrice(l.priceRecommendation) - parsePrice(l.costBasis)), 0);
-  const avgMarginPct = listedWithCost.length > 0
-    ? listedWithCost.reduce((sum, l) => {
-        const cost = parsePrice(l.costBasis);
-        return sum + (cost > 0 ? ((parsePrice(l.priceRecommendation) - cost) / cost) * 100 : 0);
-      }, 0) / listedWithCost.length
+  const avgMarginPct = netProfits.length > 0
+    ? netProfits.reduce((sum, np) => sum + (np.netMarginPct ?? 0), 0) / netProfits.length
     : null;
+
+  // Sold net P&L
+  const soldWithCost = listed.filter(l => l.soldAt && l.soldPrice && l.costBasis && parsePrice(l.costBasis) > 0);
+  const soldNetProfits = soldWithCost.map(l => calculateNetProfit(l.soldPrice, l.costBasis, l.category, l.shippingLabelCost, promotedPct));
+  const totalSoldNetProfit = soldNetProfits.reduce((sum, np) => sum + np.netProfit, 0);
+  const totalSoldFees = soldNetProfits.reduce((sum, np) => sum + np.totalFees, 0);
 
   const avgStagedPrice = staged.length > 0 ? stagedValue / staged.length : 0;
   const avgListedPrice = active.length > 0 ? listedValue / active.length : 0;
@@ -156,7 +167,7 @@ export default function Analytics({ staged, listed, appPassword }: AnalyticsProp
         <StatCard icon={<TrendingUp size={18} />} label="Active Listed" value={String(active.length)} sub={`$${listedValue.toFixed(2)} total value`} color="var(--success)" />
         <StatCard icon={<DollarSign size={18} />} label="Total Inventory Value" value={`$${totalValue.toFixed(2)}`} sub={`${staged.length + active.length} items`} color="var(--accent-color)" />
         {avgMarginPct !== null
-          ? <StatCard icon={<TrendingUp size={18} />} label="Avg Profit Margin" value={`${avgMarginPct.toFixed(0)}%`} sub={`$${totalProfit.toFixed(2)} total tracked profit`} color={totalProfit >= 0 ? 'var(--success)' : '#ef4444'} />
+          ? <StatCard icon={<TrendingUp size={18} />} label="Avg Net Margin (ROI)" value={`${avgMarginPct.toFixed(0)}%`} sub={`$${totalNetProfit.toFixed(2)} net · $${totalProfit.toFixed(2)} gross`} color={totalNetProfit >= 0 ? 'var(--success)' : '#ef4444'} />
           : <StatCard icon={<TrendingUp size={18} />} label="Profit Tracking" value="—" sub="Add cost basis to listings to track margin" color="var(--text-secondary)" />
         }
         <StatCard icon={<DollarSign size={18} />} label="Avg Staged Price" value={staged.length ? `$${avgStagedPrice.toFixed(2)}` : '—'} />
@@ -219,27 +230,71 @@ export default function Analytics({ staged, listed, appPassword }: AnalyticsProp
           </div>
         )}
 
-        {/* Profit breakdown table */}
+        {/* Net P&L breakdown table */}
         {listedWithCost.length > 0 && (
           <div className="glass-panel" style={{ padding: '1.5rem', gridColumn: 'span 2' }}>
-            <h3 style={{ marginBottom: '1rem', fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '6px' }}><DollarSign size={16} /> Profit Breakdown (top {Math.min(listedWithCost.length, 8)})</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <h3 style={{ marginBottom: '0.5rem', fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '6px' }}><DollarSign size={16} /> Net P&L Breakdown (top {Math.min(listedWithCost.length, 8)})</h3>
+            <p style={{ margin: '0 0 1rem 0', fontSize: '0.75rem', color: 'var(--text-secondary)', opacity: 0.7 }}>
+              After eBay fees{promotedPct > 0 ? `, ${promotedPct}% promoted listing` : ''}, and shipping costs. Hover net for gross comparison.
+            </p>
+            {/* Header */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto auto', gap: '0 0.75rem', fontSize: '0.72rem', color: 'var(--text-secondary)', paddingBottom: '6px', borderBottom: '1px solid var(--border-color)', marginBottom: '4px' }}>
+              <span>Item</span><span>Cost</span><span>Price</span><span>Fees</span><span>Net Profit</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
               {listedWithCost
-                .map(l => ({ l, profit: parsePrice(l.priceRecommendation) - parsePrice(l.costBasis) }))
-                .sort((a, b) => b.profit - a.profit)
+                .map((l, i) => ({ l, np: netProfits[i] }))
+                .sort((a, b) => b.np.netProfit - a.np.netProfit)
                 .slice(0, 8)
-                .map(({ l, profit }) => {
-                  const pct = parsePrice(l.costBasis) > 0 ? ((profit / parsePrice(l.costBasis)) * 100).toFixed(0) : '—';
-                  const color = profit >= 0 ? 'var(--success)' : '#ef4444';
+                .map(({ l, np }) => {
+                  const netColor = np.netProfit >= 0 ? 'var(--success)' : '#ef4444';
+                  const pct = np.netMarginPct !== null ? `${np.netMarginPct.toFixed(0)}%` : '—';
                   return (
-                    <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '6px 0', borderBottom: '1px solid var(--border-color)' }}>
-                      <p style={{ flex: 1, margin: 0, fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.title}</p>
-                      <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', flexShrink: 0 }}>cost ${parsePrice(l.costBasis).toFixed(2)}</span>
-                      <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', flexShrink: 0 }}>sell ${parsePrice(l.priceRecommendation).toFixed(2)}</span>
-                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color, flexShrink: 0 }}>{profit >= 0 ? '+' : ''}${profit.toFixed(2)} ({pct}%)</span>
+                    <div key={l.id} style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto auto', gap: '0 0.75rem', alignItems: 'center', padding: '5px 0', borderBottom: '1px solid var(--border-color)' }}>
+                      <p style={{ margin: 0, fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.title}</p>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', flexShrink: 0 }}>${np.costBasis.toFixed(2)}</span>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', flexShrink: 0 }}>${np.salePrice.toFixed(2)}</span>
+                      <span style={{ fontSize: '0.78rem', color: '#f59e0b', flexShrink: 0 }}>-${np.totalFees.toFixed(2)}</span>
+                      <span title={`Gross: $${np.grossProfit.toFixed(2)}`} style={{ fontSize: '0.85rem', fontWeight: 600, color: netColor, flexShrink: 0, cursor: 'help' }}>
+                        {np.netProfit >= 0 ? '+' : ''}${np.netProfit.toFixed(2)} ({pct})
+                      </span>
                     </div>
                   );
                 })}
+            </div>
+            {/* Totals */}
+            <div style={{ display: 'flex', gap: '2rem', marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)', fontSize: '0.82rem', flexWrap: 'wrap' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>Gross profit: <strong style={{ color: 'var(--text-primary)' }}>${totalProfit.toFixed(2)}</strong></span>
+              <span style={{ color: 'var(--text-secondary)' }}>Total fees: <strong style={{ color: '#f59e0b' }}>-${netProfits.reduce((s, np) => s + np.totalFees, 0).toFixed(2)}</strong></span>
+              <span style={{ color: 'var(--text-secondary)' }}>Net profit: <strong style={{ color: totalNetProfit >= 0 ? 'var(--success)' : '#ef4444' }}>${totalNetProfit.toFixed(2)}</strong></span>
+            </div>
+          </div>
+        )}
+
+        {/* Sold net P&L */}
+        {soldWithCost.length > 0 && (
+          <div className="glass-panel" style={{ padding: '1.5rem', gridColumn: 'span 2' }}>
+            <h3 style={{ marginBottom: '0.5rem', fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '6px' }}><TrendingUp size={16} /> Sold Items — Net P&L</h3>
+            <p style={{ margin: '0 0 1rem 0', fontSize: '0.75rem', color: 'var(--text-secondary)', opacity: 0.7 }}>Actual sold price minus all fees and costs.</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              {soldWithCost.map((l, i) => {
+                const np = soldNetProfits[i];
+                const netColor = np.netProfit >= 0 ? 'var(--success)' : '#ef4444';
+                return (
+                  <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '5px 0', borderBottom: '1px solid var(--border-color)' }}>
+                    <p style={{ flex: 1, margin: 0, fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.title}</p>
+                    <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', flexShrink: 0 }}>sold ${np.salePrice.toFixed(2)}</span>
+                    <span style={{ fontSize: '0.78rem', color: '#f59e0b', flexShrink: 0 }}>-${np.totalFees.toFixed(2)} fees</span>
+                    <span style={{ fontSize: '0.85rem', fontWeight: 600, color: netColor, flexShrink: 0 }}>
+                      net {np.netProfit >= 0 ? '+' : ''}${np.netProfit.toFixed(2)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ display: 'flex', gap: '2rem', marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)', fontSize: '0.82rem', flexWrap: 'wrap' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>Total fees paid: <strong style={{ color: '#f59e0b' }}>-${totalSoldFees.toFixed(2)}</strong></span>
+              <span style={{ color: 'var(--text-secondary)' }}>Total net earned: <strong style={{ color: totalSoldNetProfit >= 0 ? 'var(--success)' : '#ef4444' }}>${totalSoldNetProfit.toFixed(2)}</strong></span>
             </div>
           </div>
         )}

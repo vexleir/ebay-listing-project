@@ -20,6 +20,7 @@ export interface StagedListing {
   tags?: string[];
   soldAt?: number;
   soldPrice?: string;
+  shippingLabelCost?: string;
 }
 
 export interface AppState {
@@ -39,6 +40,7 @@ export interface UserSettings {
   defaultFulfillmentPolicyId?: string;
   defaultPaymentPolicyId?: string;
   defaultReturnPolicyId?: string;
+  promotedListingPct?: number;
 }
 
 export interface EbayPolicy {

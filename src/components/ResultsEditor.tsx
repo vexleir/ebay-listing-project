@@ -2,13 +2,14 @@ import { useState, useEffect, useRef } from 'react';
 import { Save, X, Eye, Code, Type, LayoutTemplate, Tag, Wand2, GripVertical } from 'lucide-react';
 import type { StagedListing } from '../types';
 import { useToast } from '../context/ToastContext';
+import { calculateNetProfit } from '../utils/fees';
 
 interface ResultsEditorProps {
   data: {
     title: string; description: string; condition: string;
     itemSpecifics: Record<string, string>; category: string;
     priceRecommendation: string; priceJustification?: string; shippingEstimate: string;
-    sku?: string; sellerNotes?: string; costBasis?: string; tags?: string[];
+    sku?: string; sellerNotes?: string; costBasis?: string; tags?: string[]; shippingLabelCost?: string;
   };
   images: File[];
   existingImageUrls?: string[];
@@ -30,6 +31,7 @@ export default function ResultsEditor({ data, images, existingImageUrls, onStage
   const [sku, setSku] = useState(data.sku || '');
   const [sellerNotes, setSellerNotes] = useState(data.sellerNotes || '');
   const [costBasis, setCostBasis] = useState(data.costBasis || '');
+  const [shippingLabelCost, setShippingLabelCost] = useState(data.shippingLabelCost || '');
   const [tags, setTags] = useState<string[]>(data.tags || []);
   const [tagInput, setTagInput] = useState('');
   const [previewMode, setPreviewMode] = useState<boolean>(true);
@@ -213,7 +215,32 @@ export default function ResultsEditor({ data, images, existingImageUrls, onStage
             </label>
             <input type="text" className="input-base" value={costBasis} onChange={e => setCostBasis(e.target.value)} placeholder="e.g. 12.50" />
           </div>
+          <div>
+            <label style={{ display: 'flex', marginBottom: '8px', color: 'var(--text-secondary)' }}>
+              Shipping Label Cost <span style={{ fontSize: '0.75rem', opacity: 0.6, marginLeft: '4px' }}>(your postage cost)</span>
+            </label>
+            <input type="text" className="input-base" value={shippingLabelCost} onChange={e => setShippingLabelCost(e.target.value)} placeholder="e.g. 5.50" />
+          </div>
         </div>
+
+        {/* Live net profit preview */}
+        {(() => {
+          if (!priceRecommendation || !costBasis) return null;
+          const np = calculateNetProfit(priceRecommendation, costBasis, category, shippingLabelCost);
+          if (!np.salePrice || !np.costBasis) return null;
+          const netColor = np.netProfit >= 0 ? 'var(--success)' : '#ef4444';
+          return (
+            <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: '8px', padding: '10px 14px', fontSize: '0.8rem', display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center', border: '1px solid var(--border-color)' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>eBay fee ({(np.feeRate * 100).toFixed(2)}%): <strong style={{ color: 'var(--text-primary)' }}>-${(np.ebayFee + np.transactionFee).toFixed(2)}</strong></span>
+              {np.shippingCost > 0 && <span style={{ color: 'var(--text-secondary)' }}>Shipping: <strong style={{ color: 'var(--text-primary)' }}>-${np.shippingCost.toFixed(2)}</strong></span>}
+              <span style={{ color: 'var(--text-secondary)' }}>Gross: <strong style={{ color: 'var(--text-primary)' }}>${np.grossProfit.toFixed(2)}</strong></span>
+              <span style={{ marginLeft: 'auto', fontWeight: 700, fontSize: '0.85rem', color: netColor }}>
+                Net: {np.netProfit >= 0 ? '+' : ''}${np.netProfit.toFixed(2)}
+                {np.netMarginPct !== null && ` (${np.netMarginPct.toFixed(0)}% ROI)`}
+              </span>
+            </div>
+          );
+        })()}
 
         <div>
           <label style={{ display: 'flex', marginBottom: '8px', color: 'var(--text-secondary)' }}>Shipping Estimate</label>
@@ -322,7 +349,7 @@ export default function ResultsEditor({ data, images, existingImageUrls, onStage
       <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
         <button className="btn-secondary" style={{ flex: 1 }} onClick={onCancel}><X size={18} /> Discard</button>
         <button className="btn-primary" style={{ flex: 2 }} disabled={title.length > 80}
-          onClick={() => onStage({ title, condition, description, category, priceRecommendation, priceJustification, shippingEstimate, itemSpecifics, images: allImages, sku, sellerNotes, costBasis, tags })}>
+          onClick={() => onStage({ title, condition, description, category, priceRecommendation, priceJustification, shippingEstimate, itemSpecifics, images: allImages, sku, sellerNotes, costBasis, shippingLabelCost, tags })}>
           <Save size={18} /> Save & Stage Listing
         </button>
       </div>

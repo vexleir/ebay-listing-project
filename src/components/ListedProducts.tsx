@@ -5,6 +5,7 @@ import type { StagedListing } from '../types';
 import ImageSearchButton from './ImageSearchButton';
 import Lightbox from './Lightbox';
 import { useToast } from '../context/ToastContext';
+import { calculateNetProfit } from '../utils/fees';
 
 interface ListedProductsProps {
   listings: StagedListing[];
@@ -24,18 +25,17 @@ function parsePrice(val: string): number {
   return m ? parseFloat(m) : 0;
 }
 
-function ProfitBadge({ price, costBasis }: { price: string; costBasis?: string }) {
+function ProfitBadge({ price, costBasis, category, shippingLabelCost }: { price: string; costBasis?: string; category?: string; shippingLabelCost?: string }) {
   if (!costBasis) return null;
-  const sell = parsePrice(price);
-  const cost = parsePrice(costBasis);
-  if (!sell || !cost) return null;
-  const profit = sell - cost;
-  const pct = ((profit / cost) * 100).toFixed(0);
-  const color = profit >= 0 ? 'var(--success)' : '#ef4444';
-  const bg = profit >= 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)';
+  const np = calculateNetProfit(price, costBasis, category || '', shippingLabelCost);
+  if (!np.salePrice || !np.costBasis) return null;
+  const color = np.netProfit >= 0 ? 'var(--success)' : '#ef4444';
+  const bg = np.netProfit >= 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)';
+  const pct = np.netMarginPct !== null ? `${np.netMarginPct.toFixed(0)}%` : '';
   return (
-    <span style={{ fontSize: '0.78rem', background: bg, color, padding: '2px 8px', borderRadius: '4px', fontWeight: 600, whiteSpace: 'nowrap' }}>
-      {profit >= 0 ? '+' : ''}${profit.toFixed(2)} ({pct}%)
+    <span title={`Gross: $${np.grossProfit.toFixed(2)} · eBay fees: $${(np.ebayFee + np.transactionFee).toFixed(2)}${np.shippingCost > 0 ? ` · Shipping: $${np.shippingCost.toFixed(2)}` : ''}`}
+      style={{ fontSize: '0.78rem', background: bg, color, padding: '2px 8px', borderRadius: '4px', fontWeight: 600, whiteSpace: 'nowrap', cursor: 'help' }}>
+      Net {np.netProfit >= 0 ? '+' : ''}${np.netProfit.toFixed(2)}{pct ? ` (${pct})` : ''}
     </span>
   );
 }
@@ -220,7 +220,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
           <span style={{ fontSize: '0.8rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px' }}>${listing.priceRecommendation}</span>
-          <ProfitBadge price={listing.priceRecommendation} costBasis={listing.costBasis} />
+          <ProfitBadge price={listing.priceRecommendation} costBasis={listing.costBasis} category={listing.category} shippingLabelCost={listing.shippingLabelCost} />
           <span style={{ fontSize: '0.8rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px' }}>{listing.category}</span>
           {listing.sku && <span style={{ fontSize: '0.8rem', background: 'rgba(99,102,241,0.25)', padding: '2px 8px', borderRadius: '4px', color: '#a5b4fc' }}>SKU: {listing.sku}</span>}
         </div>
@@ -289,7 +289,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
       </div>
       <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
         <span style={{ fontSize: '0.78rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px', whiteSpace: 'nowrap' }}>${listing.priceRecommendation}</span>
-        <ProfitBadge price={listing.priceRecommendation} costBasis={listing.costBasis} />
+        <ProfitBadge price={listing.priceRecommendation} costBasis={listing.costBasis} category={listing.category} shippingLabelCost={listing.shippingLabelCost} />
         {listing.sku && <span style={{ fontSize: '0.78rem', background: 'rgba(99,102,241,0.25)', padding: '2px 8px', borderRadius: '4px', color: '#a5b4fc', whiteSpace: 'nowrap' }}>{listing.sku}</span>}
       </div>
       <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', flexShrink: 0, minWidth: '80px', textAlign: 'right' }}>{new Date(listing.createdAt).toLocaleDateString()}</span>

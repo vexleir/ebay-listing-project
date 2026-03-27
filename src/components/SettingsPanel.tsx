@@ -174,6 +174,12 @@ export default function SettingsPanelView({ appPassword, isEbayConnected, staged
       {/* AI Settings */}
       <div className="glass-panel" style={{ padding: '1.5rem' }}>
         <SectionHeader title="AI Settings" sub="Controls which Gemini model is used for listing generation" />
+        <Field label="Promoted Listing %" hint="eBay ad rate applied to all listings. Used in net profit calculations on Analytics. Set to 0 if you don't use Promoted Listings.">
+          <input className="input-base" type="number" min="0" max="20" step="0.5"
+            value={settings.promotedListingPct ?? 0}
+            onChange={e => setSettings(prev => ({ ...prev, promotedListingPct: parseFloat(e.target.value) || 0 }))}
+            placeholder="e.g. 5" style={{ maxWidth: '160px' }} />
+        </Field>
         <Field label="Preferred Gemini Model" hint="Flash is faster and cheaper. Pro is more accurate for complex items.">
           <select className="input-base" value={settings.geminiModel || 'flash'} onChange={e => set('geminiModel', e.target.value as 'flash' | 'pro')} style={{ maxWidth: '320px' }}>
             <option value="flash">Gemini 1.5 Flash (recommended — fast, cost-efficient)</option>
