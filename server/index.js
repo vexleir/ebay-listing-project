@@ -65,10 +65,11 @@ app.get('/api/ebay/policies', async (req, res) => {
   try {
     const token = await getValidAccessToken();
     const headers = { 'Authorization': `Bearer ${token}`, 'Content-Language': 'en-US' };
+    const params = { marketplace_id: 'EBAY_US' };
     const [fulfillRes, payRes, retRes] = await Promise.all([
-      axios.get(`${EBAY_API_BASE}/sell/account/v1/fulfillment_policy`, { headers }).catch(e => ({ data: {} })),
-      axios.get(`${EBAY_API_BASE}/sell/account/v1/payment_policy`, { headers }).catch(e => ({ data: {} })),
-      axios.get(`${EBAY_API_BASE}/sell/account/v1/return_policy`, { headers }).catch(e => ({ data: {} })),
+      axios.get(`${EBAY_API_BASE}/sell/account/v1/fulfillment_policy`, { headers, params }).catch(e => { console.error('[policies] fulfillment:', e.response?.data || e.message); return { data: {} }; }),
+      axios.get(`${EBAY_API_BASE}/sell/account/v1/payment_policy`, { headers, params }).catch(e => { console.error('[policies] payment:', e.response?.data || e.message); return { data: {} }; }),
+      axios.get(`${EBAY_API_BASE}/sell/account/v1/return_policy`, { headers, params }).catch(e => { console.error('[policies] return:', e.response?.data || e.message); return { data: {} }; }),
     ]);
     res.json({
       fulfillmentPolicies: (fulfillRes.data?.fulfillmentPolicies || []).map(p => ({ id: p.fulfillmentPolicyId, name: p.name })),
