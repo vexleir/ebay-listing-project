@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { StagedListing } from '../types';
 import { TrendingUp, Package, Tag, DollarSign, BarChart2, Clock, Zap, Download, Calendar } from 'lucide-react';
+import RepricingAdvisor from './RepricingAdvisor';
 
 interface AnalyticsProps {
   staged: StagedListing[];
@@ -310,6 +311,11 @@ export default function Analytics({ staged, listed, appPassword }: AnalyticsProp
           </div>
         )}
       </div>
+
+      {/* Repricing Advisor */}
+      {appPassword && active.length > 0 && (
+        <RepricingAdvisor appPassword={appPassword} />
+      )}
 
       {staged.length === 0 && active.length === 0 && (
         <div className="glass-panel" style={{ padding: '4rem 2rem', textAlign: 'center' }}>

@@ -88,4 +88,13 @@ async function getTokenUsage() {
   return rest;
 }
 
-module.exports = { getListings, createListing, updateListing, deleteListing, getAllListingsMeta, getSettings, saveSettings, incrementTokenUsage, getTokenUsage };
+async function getActiveListings() {
+  const database = await getDb();
+  const all = await database.collection('listings').find(
+    { status: 'listed', archived: { $ne: true } },
+    { projection: { _id: 0, id: 1, ebayDraftId: 1, title: 1, priceRecommendation: 1, images: 1, createdAt: 1 } }
+  ).toArray();
+  return all;
+}
+
+module.exports = { getListings, createListing, updateListing, deleteListing, getAllListingsMeta, getActiveListings, getSettings, saveSettings, incrementTokenUsage, getTokenUsage };
