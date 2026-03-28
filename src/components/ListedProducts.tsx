@@ -467,6 +467,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
       {showImportModal && (
         <ImportModal
           appPassword={appPassword}
+          isEbayConnected={isEbayConnected}
           onClose={() => setShowImportModal(false)}
           onImportComplete={() => {
             setShowImportModal(false);
