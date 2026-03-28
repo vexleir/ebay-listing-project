@@ -229,7 +229,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
           </div>
         )}
         <div style={{ marginTop: 'auto', display: 'flex', gap: '0.5rem', alignItems: 'center', paddingTop: '1rem', borderTop: '1px solid var(--border-color)', flexWrap: 'wrap' }}>
-          <a className="btn-primary" href="https://www.ebay.com/mes/sellerhub" target="_blank" rel="noreferrer" style={{ textDecoration: 'none', flex: 1, fontSize: '0.85rem', padding: '6px 12px', minWidth: '90px' }}>
+          <a className="btn-primary" href={listing.ebayDraftId ? `https://www.ebay.com/itm/${listing.ebayDraftId}` : 'https://www.ebay.com/mes/sellerhub'} target="_blank" rel="noreferrer" style={{ textDecoration: 'none', flex: 1, fontSize: '0.85rem', padding: '6px 12px', minWidth: '90px' }}>
             <ExternalLink size={16} /> eBay
           </a>
           {onRelist && isArchived && (
@@ -297,7 +297,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
       </div>
       <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', flexShrink: 0, minWidth: '80px', textAlign: 'right' }}>{new Date(listing.createdAt).toLocaleDateString()}</span>
       <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0, alignItems: 'center' }}>
-        <a className="btn-primary" href="https://www.ebay.com/mes/sellerhub" target="_blank" rel="noreferrer" style={{ textDecoration: 'none', fontSize: '0.8rem', padding: '5px 10px', whiteSpace: 'nowrap' }}>
+        <a className="btn-primary" href={listing.ebayDraftId ? `https://www.ebay.com/itm/${listing.ebayDraftId}` : 'https://www.ebay.com/mes/sellerhub'} target="_blank" rel="noreferrer" style={{ textDecoration: 'none', fontSize: '0.8rem', padding: '5px 10px', whiteSpace: 'nowrap' }}>
           <ExternalLink size={14} /> eBay
         </a>
         {!isArchived && onMarkSold && (
