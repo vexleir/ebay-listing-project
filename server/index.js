@@ -1086,6 +1086,16 @@ async function bootstrap() {
       console.log('[bootstrap] Migrated admin_tokens →', `${company.id}_tokens`);
     }
 
+    // Migrate imported listings that ended up as 'staged' → 'listed'
+    // This fixes listings imported before the status-mapping bug was corrected.
+    const importedStagedResult = await db.collection('listings').updateMany(
+      { importedFromEbay: true, status: 'staged' },
+      { $set: { status: 'listed', updatedAt: Date.now() } }
+    );
+    if (importedStagedResult.modifiedCount > 0) {
+      console.log(`[bootstrap] Fixed ${importedStagedResult.modifiedCount} imported listings: staged → listed`);
+    }
+
     // Create superadmin user if not exists
     const adminEmail = process.env.ADMIN_EMAIL;
     const adminPassword = process.env.ADMIN_PASSWORD;
