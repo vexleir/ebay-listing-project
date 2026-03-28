@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ExternalLink, Calendar, CheckCircle, Trash2, Archive, ArchiveRestore, Search, ChevronDown, LayoutGrid, List, Download, RefreshCw, Eye, RotateCcw, Pencil, CircleSlash, X, Share2, Upload } from 'lucide-react';
+import { ExternalLink, Calendar, CheckCircle, Trash2, Archive, ArchiveRestore, Search, ChevronDown, LayoutGrid, List, Download, RefreshCw, Eye, RotateCcw, CircleSlash, Share2, Upload, DollarSign, Pencil } from 'lucide-react';
 import type { StagedListing } from '../types';
 import ImageSearchButton from './ImageSearchButton';
 import Lightbox from './Lightbox';
@@ -8,6 +8,7 @@ import { useToast } from '../context/ToastContext';
 import { calculateNetProfit } from '../utils/fees';
 import CrossPostModal from './CrossPostModal';
 import ImportModal from './ImportModal';
+import EditListingModal from './EditListingModal';
 
 interface ListedProductsProps {
   listings: StagedListing[];
@@ -16,13 +17,15 @@ interface ListedProductsProps {
   onSyncSold?: () => void;
   onRelist?: (listing: StagedListing) => void;
   onImportComplete?: () => void;
+  onMarkSold?: (id: string, soldPrice: string, soldAt: number) => void;
+  onUpdateListing?: (updated: StagedListing) => void;
   isEbayConnected?: boolean;
   appPassword?: string;
 }
 
 type SortOption = 'date-desc' | 'date-asc' | 'title-asc' | 'title-desc' | 'price-asc' | 'price-desc';
 type ViewMode = 'grid' | 'list';
-type StatusFilter = 'all' | 'active' | 'sold' | 'ended';
+type StatusFilter = 'all' | 'active' | 'ended';
 
 function parsePrice(val: string): number {
   const m = val.replace(/[^0-9.]/g, '');
@@ -76,49 +79,28 @@ function exportCsv(listings: StagedListing[]) {
   URL.revokeObjectURL(url);
 }
 
-export default function ListedProductsView({ listings, onDelete, onArchive, onSyncSold, onRelist, onImportComplete, isEbayConnected, appPassword = '' }: ListedProductsProps) {
+export default function ListedProductsView({ listings, onDelete, onArchive, onSyncSold, onRelist, onImportComplete, onMarkSold, onUpdateListing, isEbayConnected, appPassword = '' }: ListedProductsProps) {
   const { toast } = useToast();
   const [search, setSearch] = useState('');
   const [showImportModal, setShowImportModal] = useState(false);
   const [sort, setSort] = useState<SortOption>('date-desc');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
+  const [editListing, setEditListing] = useState<StagedListing | null>(null);
+  const [markSoldModal, setMarkSoldModal] = useState<{ listing: StagedListing; price: string; date: string } | null>(null);
+  const [markingSold, setMarkingSold] = useState(false);
   const [lightboxImages, setLightboxImages] = useState<string[] | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [stats, setStats] = useState<Record<string, { watchCount: string; hitCount: string; quantitySold: string } | null>>({});
   const [loadingStatsId, setLoadingStatsId] = useState<string | null>(null);
 
-  // Revise price modal
   const [crossPostListing, setCrossPostListing] = useState<StagedListing | null>(null);
-  const [reviseModal, setReviseModal] = useState<{ listing: StagedListing; price: string; title: string } | null>(null);
-  const [revising, setRevising] = useState(false);
   // End listing confirm
   const [endConfirmId, setEndConfirmId] = useState<string | null>(null);
   const [ending, setEnding] = useState(false);
 
   const pw = appPassword || localStorage.getItem('app_password') || '';
-
-  const handleRevise = async () => {
-    if (!reviseModal) return;
-    setRevising(true);
-    try {
-      const resp = await fetch('/api/ebay/revise', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pw}` },
-        body: JSON.stringify({ itemId: reviseModal.listing.ebayDraftId, newPrice: reviseModal.price, newTitle: reviseModal.title })
-      });
-      const data = await resp.json();
-      if (!resp.ok || data.error) throw new Error(data.error || 'Revise failed');
-      onArchive(reviseModal.listing.id); // trigger re-fetch via archive toggle as update mechanism
-      toast('eBay listing updated.', 'success');
-      setReviseModal(null);
-    } catch (e: any) {
-      toast('Revise failed: ' + e.message, 'error');
-    } finally {
-      setRevising(false);
-    }
-  };
 
   const handleEndListing = async (listing: StagedListing) => {
     setEnding(true);
@@ -155,20 +137,20 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
     }
   };
 
-  const allTags = Array.from(new Set(listings.flatMap(l => l.tags || [])));
+  // Sold items have their own tab — exclude them here
+  const nonSold = listings.filter(l => !l.soldAt);
+  const allTags = Array.from(new Set(nonSold.flatMap(l => l.tags || [])));
 
   const counts = {
-    all:    listings.length,
-    active: listings.filter(l => !l.archived).length,
-    sold:   listings.filter(l => l.archived && l.soldAt).length,
-    ended:  listings.filter(l => l.archived && !l.soldAt).length,
+    all:    nonSold.length,
+    active: nonSold.filter(l => !l.archived).length,
+    ended:  nonSold.filter(l => l.archived).length,
   };
 
-  const filteredListings = listings
+  const filteredListings = nonSold
     .filter(l => {
       if (statusFilter === 'active') return !l.archived;
-      if (statusFilter === 'sold')   return l.archived && l.soldAt;
-      if (statusFilter === 'ended')  return l.archived && !l.soldAt;
+      if (statusFilter === 'ended')  return l.archived;
       return true;
     })
     .filter(l => !activeTag || l.tags?.includes(activeTag))
@@ -188,7 +170,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
       }
     });
 
-  if (listings.length === 0) {
+  if (nonSold.length === 0) {
     return (
       <div className="glass-panel" style={{ padding: '4rem 2rem', textAlign: 'center' }}>
         <h2 style={{ marginBottom: '1rem', color: 'var(--text-secondary)' }}>No Listed Items</h2>
@@ -250,16 +232,20 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
           <a className="btn-primary" href="https://www.ebay.com/mes/sellerhub" target="_blank" rel="noreferrer" style={{ textDecoration: 'none', flex: 1, fontSize: '0.85rem', padding: '6px 12px', minWidth: '90px' }}>
             <ExternalLink size={16} /> eBay
           </a>
-          {onRelist && (isArchived || listing.soldAt) && (
-            <button className="btn-icon" title="Re-stage for relisting" onClick={() => onRelist(listing)} style={{ color: 'var(--accent-color)' }}>
+          {onRelist && isArchived && (
+            <button className="btn-icon" title="Re-stage for relisting" onClick={() => onRelist(listing)} style={{ color: 'var(--accent)' }}>
               <RotateCcw size={18} />
             </button>
           )}
-          {listing.ebayDraftId && !isArchived && (
-            <button className="btn-icon" title="Edit price/title on eBay" onClick={() => setReviseModal({ listing, price: listing.priceRecommendation || '', title: listing.title || '' })}>
-              <Pencil size={18} />
+          {!isArchived && onMarkSold && (
+            <button className="btn-icon" title="Mark as sold" onClick={() => setMarkSoldModal({ listing, price: listing.priceRecommendation || '', date: new Date().toISOString().split('T')[0] })}
+              style={{ color: 'var(--success)', fontSize: '0.75rem', gap: '4px' }}>
+              <DollarSign size={17} /> Sold
             </button>
           )}
+          <button className="btn-icon" title="Edit listing" onClick={() => setEditListing(listing)}>
+            <Pencil size={18} />
+          </button>
           {listing.ebayDraftId && !isArchived && (
             <button className="btn-icon" title="End listing on eBay" style={{ color: '#ef4444' }} onClick={() => setEndConfirmId(listing.id)}>
               <CircleSlash size={18} />
@@ -314,6 +300,15 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
         <a className="btn-primary" href="https://www.ebay.com/mes/sellerhub" target="_blank" rel="noreferrer" style={{ textDecoration: 'none', fontSize: '0.8rem', padding: '5px 10px', whiteSpace: 'nowrap' }}>
           <ExternalLink size={14} /> eBay
         </a>
+        {!isArchived && onMarkSold && (
+          <button className="btn-icon" title="Mark as sold" onClick={() => setMarkSoldModal({ listing, price: listing.priceRecommendation || '', date: new Date().toISOString().split('T')[0] })}
+            style={{ color: 'var(--success)' }}>
+            <DollarSign size={17} />
+          </button>
+        )}
+        <button className="btn-icon" title="Edit listing" onClick={() => setEditListing(listing)}>
+          <Pencil size={17} />
+        </button>
         {listing.ebayDraftId && (
           <button className="btn-icon" title="Fetch view/watcher stats" onClick={() => fetchStats(listing)} disabled={loadingStatsId === listing.id} style={{ color: stats[listing.id] ? 'var(--accent-color)' : undefined }}>
             {loadingStatsId === listing.id ? <span style={{ fontSize: '10px' }}>...</span> : <Eye size={18} />}
@@ -338,27 +333,45 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
       {lightboxImages && createPortal(<Lightbox images={lightboxImages} index={lightboxIndex} onClose={() => setLightboxImages(null)} onNavigate={setLightboxIndex} />, document.body)}
       {crossPostListing && <CrossPostModal listing={crossPostListing} onClose={() => setCrossPostListing(null)} />}
 
-      {/* Revise price modal */}
-      {reviseModal && createPortal(
-        <div onClick={() => setReviseModal(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
-          <div className="glass-panel" onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '460px', padding: '2rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
-              <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}><Pencil size={18} /> Edit eBay Listing</h3>
-              <button onClick={() => setReviseModal(null)} className="btn-icon"><X size={18} /></button>
-            </div>
-            <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>Updates title and/or price on the live eBay listing. Images and description require eBay Seller Hub.</p>
-            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>Title (max 80 chars)</label>
-            <input className="input-base" value={reviseModal.title} maxLength={80}
-              onChange={e => setReviseModal(prev => prev ? { ...prev, title: e.target.value } : null)}
+      {/* Edit listing modal */}
+      {editListing && (
+        <EditListingModal
+          listing={editListing}
+          appPassword={appPassword}
+          onClose={() => setEditListing(null)}
+          onSaved={updated => { setEditListing(null); onUpdateListing?.(updated); }}
+        />
+      )}
+
+      {/* Mark as Sold modal */}
+      {markSoldModal && createPortal(
+        <div onClick={() => setMarkSoldModal(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+          <div className="glass-panel" onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '400px', padding: '2rem' }}>
+            <h3 style={{ margin: '0 0 1.25rem 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <DollarSign size={18} style={{ color: 'var(--success)' }} /> Mark as Sold
+            </h3>
+            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>Sold Price ($)</label>
+            <input className="input-base" type="number" step="0.01" min="0" value={markSoldModal.price}
+              onChange={e => setMarkSoldModal(prev => prev ? { ...prev, price: e.target.value } : null)}
               style={{ marginBottom: '1rem' }} />
-            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>New Price ($)</label>
-            <input className="input-base" type="number" step="0.01" min="0.01" value={reviseModal.price}
-              onChange={e => setReviseModal(prev => prev ? { ...prev, price: e.target.value } : null)}
+            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>Sold Date</label>
+            <input className="input-base" type="date" value={markSoldModal.date}
+              onChange={e => setMarkSoldModal(prev => prev ? { ...prev, date: e.target.value } : null)}
               style={{ marginBottom: '1.5rem' }} />
             <div style={{ display: 'flex', gap: '0.75rem' }}>
-              <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setReviseModal(null)}>Cancel</button>
-              <button className="btn-primary" style={{ flex: 2 }} onClick={handleRevise} disabled={revising}>
-                {revising ? 'Updating...' : 'Update on eBay'}
+              <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setMarkSoldModal(null)}>Cancel</button>
+              <button className="btn-primary" style={{ flex: 2, background: 'rgba(16,185,129,0.25)', borderColor: 'rgba(16,185,129,0.5)', color: 'var(--success)' }}
+                disabled={markingSold}
+                onClick={async () => {
+                  setMarkingSold(true);
+                  const soldAt = markSoldModal.date ? new Date(markSoldModal.date).getTime() : Date.now();
+                  const soldPrice = markSoldModal.price ? `$${parseFloat(markSoldModal.price).toFixed(2)}` : '';
+                  onMarkSold?.(markSoldModal.listing.id, soldPrice, soldAt);
+                  setMarkSoldModal(null);
+                  setMarkingSold(false);
+                  toast('Listing marked as sold.', 'success');
+                }}>
+                {markingSold ? 'Saving...' : 'Mark as Sold'}
               </button>
             </div>
           </div>
@@ -385,16 +398,16 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
 
       {/* Status filter pills */}
       <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '1rem', alignItems: 'center' }}>
-        {(['all', 'active', 'sold', 'ended'] as StatusFilter[]).map(f => {
-          const labels: Record<StatusFilter, string> = { all: 'All', active: 'Active', sold: 'Sold', ended: 'Ended' };
-          const colors: Record<StatusFilter, string> = { all: 'var(--accent)', active: 'var(--success)', sold: '#34d399', ended: 'var(--text-secondary)' };
-          const active = statusFilter === f;
+        {(['all', 'active', 'ended'] as StatusFilter[]).map(f => {
+          const labels: Record<StatusFilter, string> = { all: 'All', active: 'Active', ended: 'Ended' };
+          const colors: Record<StatusFilter, string> = { all: 'var(--accent)', active: 'var(--success)', ended: 'var(--text-secondary)' };
+          const isActive = statusFilter === f;
           return (
             <button key={f} onClick={() => setStatusFilter(f)}
               style={{ fontSize: '0.82rem', padding: '4px 12px', borderRadius: '20px', border: '1px solid', cursor: 'pointer',
-                background: active ? `rgba(99,102,241,0.2)` : 'rgba(255,255,255,0.04)',
-                borderColor: active ? colors[f] : 'var(--border-color)',
-                color: active ? colors[f] : 'var(--text-secondary)', fontWeight: active ? 600 : 400, transition: 'all 0.15s' }}>
+                background: isActive ? `rgba(99,102,241,0.2)` : 'rgba(255,255,255,0.04)',
+                borderColor: isActive ? colors[f] : 'var(--border-color)',
+                color: isActive ? colors[f] : 'var(--text-secondary)', fontWeight: isActive ? 600 : 400, transition: 'all 0.15s' }}>
               {labels[f]} <span style={{ opacity: 0.7, fontSize: '0.75rem' }}>({counts[f]})</span>
             </button>
           );

@@ -121,18 +121,26 @@ app.get('/api/ebay/policies', async (req, res) => {
 });
 
 app.post('/api/ebay/revise', async (req, res) => {
-  const { itemId, newPrice, newTitle } = req.body;
+  const { itemId, newPrice, newTitle, description, conditionId, itemSpecifics } = req.body;
   if (!itemId) return res.status(400).json({ error: 'itemId required' });
   try {
     const token = await getValidAccessToken(req.companyId);
-    const priceXml = newPrice ? `<StartPrice currencyID="USD">${parseFloat(newPrice).toFixed(2)}</StartPrice>` : '';
-    const titleXml = newTitle ? `<Title><![CDATA[${String(newTitle).substring(0, 80)}]]></Title>` : '';
+    const priceXml      = newPrice     ? `<StartPrice currencyID="USD">${parseFloat(newPrice).toFixed(2)}</StartPrice>` : '';
+    const titleXml      = newTitle     ? `<Title><![CDATA[${String(newTitle).substring(0, 80)}]]></Title>` : '';
+    const descXml       = description  ? `<Description><![CDATA[${description}]]></Description>` : '';
+    const condXml       = conditionId  ? `<ConditionID>${conditionId}</ConditionID>` : '';
+    const specificsXml  = Array.isArray(itemSpecifics) && itemSpecifics.length
+      ? '<ItemSpecifics>' + itemSpecifics.map(s => `<NameValueList><Name><![CDATA[${s.name}]]></Name><Value><![CDATA[${s.value}]]></Value></NameValueList>`).join('') + '</ItemSpecifics>'
+      : '';
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <Item>
     <ItemID>${itemId}</ItemID>
     ${titleXml}
     ${priceXml}
+    ${descXml}
+    ${condXml}
+    ${specificsXml}
   </Item>
 </ReviseFixedPriceItemRequest>`;
     const resp = await axios.post('https://api.ebay.com/ws/api.dll', xml, {

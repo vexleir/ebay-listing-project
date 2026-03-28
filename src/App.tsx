@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, ShoppingBag, Shield } from 'lucide-react';
+import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, ShoppingBag, Shield, DollarSign } from 'lucide-react';
 import './index.css';
 
 import Uploader from './components/Uploader';
 import ResultsEditor from './components/ResultsEditor';
 import StagedListings from './components/StagedListings';
 import ListedProducts from './components/ListedProducts';
+import SoldListings from './components/SoldListings';
 import Analytics from './components/Analytics';
 import SettingsPanel from './components/SettingsPanel';
 import SourcingTool from './components/SourcingTool';
@@ -50,7 +51,7 @@ function App() {
   });
 
   const [stagedListings, setStagedListings] = useState<StagedListing[]>([]);
-  const [activeTab, setActiveTab] = useState<'new' | 'staged' | 'listed' | 'analytics' | 'settings' | 'source' | 'admin'>('new');
+  const [activeTab, setActiveTab] = useState<'new' | 'staged' | 'listed' | 'sold' | 'analytics' | 'settings' | 'source' | 'admin'>('new');
   const [listedProducts, setListedProducts] = useState<StagedListing[]>([]);
   const [isLoadingListings, setIsLoadingListings] = useState(false);
 
@@ -311,6 +312,22 @@ function App() {
     await fetch(`/api/listings/${id}`, { method: 'PUT', headers: apiHeaders(appPassword), body: JSON.stringify({ updates: { archived, updatedAt: Date.now() } }) });
   };
 
+  const handleMarkSold = async (id: string, soldPrice: string, soldAt: number) => {
+    const now = Date.now();
+    setListedProducts(prev => prev.map(l => l.id === id ? { ...l, archived: true, soldAt, soldPrice, updatedAt: now } : l));
+    await fetch(`/api/listings/${id}`, { method: 'PUT', headers: apiHeaders(appPassword), body: JSON.stringify({ updates: { archived: true, soldAt, soldPrice, updatedAt: now } }) });
+  };
+
+  const handleUnmarkSold = async (id: string) => {
+    const now = Date.now();
+    setListedProducts(prev => prev.map(l => l.id === id ? { ...l, archived: false, soldAt: undefined, soldPrice: undefined, updatedAt: now } : l));
+    await fetch(`/api/listings/${id}`, { method: 'PUT', headers: apiHeaders(appPassword), body: JSON.stringify({ updates: { archived: false, soldAt: null, soldPrice: null, updatedAt: now } }) });
+  };
+
+  const handleUpdateListing = (updated: StagedListing) => {
+    setListedProducts(prev => prev.map(l => l.id === updated.id ? updated : l));
+  };
+
   const handleGenerate = async (activeImages: File[], activeInstructions: string) => {
     if (activeImages.length === 0 && !activeInstructions.trim()) {
       toast('Please select at least one image or provide written instructions.', 'error');
@@ -355,7 +372,8 @@ function App() {
         <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
           <button style={tabBtnStyle('new')} onClick={() => setActiveTab('new')}><PlusCircle size={18} /> New Listing</button>
           <button style={tabBtnStyle('staged')} onClick={() => setActiveTab('staged')}><List size={18} /> Staged ({stagedListings.length})</button>
-          <button style={tabBtnStyle('listed')} onClick={() => setActiveTab('listed')}><Check size={18} /> Listed ({listedProducts.length})</button>
+          <button style={tabBtnStyle('listed')} onClick={() => setActiveTab('listed')}><Check size={18} /> Listed ({listedProducts.filter(l => !l.soldAt).length})</button>
+          <button style={tabBtnStyle('sold')} onClick={() => setActiveTab('sold')}><DollarSign size={18} /> Sold ({listedProducts.filter(l => !!l.soldAt).length})</button>
           <button style={tabBtnStyle('analytics')} onClick={() => setActiveTab('analytics')}><BarChart2 size={18} /> Analytics</button>
           <button style={tabBtnStyle('source')} onClick={() => setActiveTab('source')}><ShoppingBag size={18} /> Source</button>
           {currentUser?.role === 'superadmin' && (
@@ -408,7 +426,11 @@ function App() {
           </div>
         ) : activeTab === 'listed' ? (
           <div className="animate-fade-in">
-            <ListedProducts listings={listedProducts} onDelete={handleDeleteListedListing} onArchive={handleArchiveListedListing} onSyncSold={handleSyncSold} onRelist={handleRelistListing} onImportComplete={() => loadListings(appPassword)} isEbayConnected={isEbayConnected} appPassword={appPassword} />
+            <ListedProducts listings={listedProducts} onDelete={handleDeleteListedListing} onArchive={handleArchiveListedListing} onSyncSold={handleSyncSold} onRelist={handleRelistListing} onImportComplete={() => loadListings(appPassword)} onMarkSold={handleMarkSold} onUpdateListing={handleUpdateListing} isEbayConnected={isEbayConnected} appPassword={appPassword} />
+          </div>
+        ) : activeTab === 'sold' ? (
+          <div className="animate-fade-in">
+            <SoldListings listings={listedProducts.filter(l => !!l.soldAt)} onDelete={handleDeleteListedListing} onUnmarkSold={handleUnmarkSold} onRelist={handleRelistListing} />
           </div>
         ) : activeTab === 'analytics' ? (
           <div className="animate-fade-in">
