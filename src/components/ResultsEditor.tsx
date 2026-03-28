@@ -55,7 +55,7 @@ export default function ResultsEditor({ data, images, existingImageUrls, onStage
     setCatLoading(true);
     try {
       const resp = await fetch(`/api/ebay/categories?query=${encodeURIComponent(title)}`, {
-        headers: { 'x-app-password': appPassword }
+        headers: { 'Authorization': `Bearer ${appPassword}` }
       });
       const data = await resp.json();
       if (data.length === 0) toast('No category suggestions found. Make sure eBay is connected.', 'info');

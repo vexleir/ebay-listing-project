@@ -94,7 +94,7 @@ export default function Uploader({
       });
       const resp = await fetch('/api/images/remove-bg', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-app-password': appPassword },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${appPassword}` },
         body: JSON.stringify({ imageBase64: base64 })
       });
       const data = await resp.json();
@@ -130,7 +130,7 @@ export default function Uploader({
     setBarcodeLoading(true);
     setBarcodeResult(null);
     try {
-      const resp = await fetch(`/api/barcode?upc=${encodeURIComponent(upc)}`, { headers: { 'x-app-password': appPassword } });
+      const resp = await fetch(`/api/barcode?upc=${encodeURIComponent(upc)}`, { headers: { 'Authorization': `Bearer ${appPassword}` } });
       const data = await resp.json();
       if (data.error) { setBarcodeResult(null); return; }
       setBarcodeResult(data);

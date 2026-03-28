@@ -34,10 +34,10 @@ export default function SettingsPanelView({ appPassword, isEbayConnected, staged
   const [saving, setSaving] = useState(false);
   const [loadingPolicies, setLoadingPolicies] = useState(false);
 
-  const headers = { 'Content-Type': 'application/json', 'x-app-password': appPassword };
+  const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${appPassword}` };
 
   useEffect(() => {
-    fetch('/api/settings', { headers: { 'x-app-password': appPassword } })
+    fetch('/api/settings', { headers: { 'Authorization': `Bearer ${appPassword}` } })
       .then(r => r.json())
       .then(data => setSettings(data || {}))
       .catch(() => {})
@@ -48,7 +48,7 @@ export default function SettingsPanelView({ appPassword, isEbayConnected, staged
     if (!isEbayConnected) { toast('Connect to eBay first to load policies.', 'error'); return; }
     setLoadingPolicies(true);
     try {
-      const resp = await fetch('/api/ebay/policies', { headers: { 'x-app-password': appPassword } });
+      const resp = await fetch('/api/ebay/policies', { headers: { 'Authorization': `Bearer ${appPassword}` } });
       const data = await resp.json();
       if (data.error) throw new Error(data.error);
       setPolicies(data);

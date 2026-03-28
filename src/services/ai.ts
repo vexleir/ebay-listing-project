@@ -24,7 +24,7 @@ export async function generateListing(images: File[], instructions: string, appP
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-app-password': appPassword
+      'Authorization': `Bearer ${appPassword}`
     },
     body: JSON.stringify({ imageParts, instructions })
   });

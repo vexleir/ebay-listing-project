@@ -42,11 +42,11 @@ export default function Analytics({ staged, listed, appPassword }: AnalyticsProp
 
   useEffect(() => {
     if (!appPassword) return;
-    fetch('/api/token-usage', { headers: { 'x-app-password': appPassword } })
+    fetch('/api/token-usage', { headers: { 'Authorization': `Bearer ${appPassword}` } })
       .then(r => r.json())
       .then(data => setTokenStats(data))
       .catch(() => {});
-    fetch('/api/settings', { headers: { 'x-app-password': appPassword } })
+    fetch('/api/settings', { headers: { 'Authorization': `Bearer ${appPassword}` } })
       .then(r => r.json())
       .then(data => { if (data.promotedListingPct) setPromotedPct(data.promotedListingPct); })
       .catch(() => {});

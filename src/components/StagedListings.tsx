@@ -141,7 +141,7 @@ function ImageEditModal({ listing, appPassword, onSave, onClose }: {
         })));
         const resp = await fetch('/api/images/upload', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-app-password': appPassword },
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${appPassword}` },
           body: JSON.stringify({ images: base64Array })
         });
         if (!resp.ok) throw new Error(await resp.text());
@@ -342,9 +342,9 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
     setPushModal({ listing, conditionId: autoConditionId(listing.condition), fulfillmentPolicyId: '', categoryId: '', fulfillmentPolicies: [], loading: true });
     try {
       const [settingsResp, policiesResp, categoryResp] = await Promise.all([
-        fetch('/api/settings', { headers: { 'x-app-password': pw } }).then(r => r.json()).catch(() => ({})),
-        fetch('/api/ebay/policies', { headers: { 'x-app-password': pw } }).then(r => r.json()).catch(() => ({ fulfillmentPolicies: [] })),
-        fetch(`/api/ebay/categories?query=${encodeURIComponent(listing.category || listing.title.split(' ').slice(0, 4).join(' '))}`, { headers: { 'x-app-password': pw } }).then(r => r.json()).catch(() => []),
+        fetch('/api/settings', { headers: { 'Authorization': `Bearer ${pw}` } }).then(r => r.json()).catch(() => ({})),
+        fetch('/api/ebay/policies', { headers: { 'Authorization': `Bearer ${pw}` } }).then(r => r.json()).catch(() => ({ fulfillmentPolicies: [] })),
+        fetch(`/api/ebay/categories?query=${encodeURIComponent(listing.category || listing.title.split(' ').slice(0, 4).join(' '))}`, { headers: { 'Authorization': `Bearer ${pw}` } }).then(r => r.json()).catch(() => []),
       ]);
       const defaultPolicyId = settingsResp.defaultFulfillmentPolicyId || '';
       const suggestedCategoryId = Array.isArray(categoryResp) && categoryResp[0] ? categoryResp[0].id : '';
@@ -363,7 +363,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
     try {
       const resp = await fetch('/api/ebay/draft', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-app-password': pw },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pw}` },
         body: JSON.stringify({ listing, overrideConditionId: conditionId, overrideFulfillmentPolicyId: fulfillmentPolicyId || undefined, overrideCategoryId: categoryId || undefined })
       });
       if (!resp.ok) throw new Error(await resp.text());
@@ -389,7 +389,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
         const pw = appPassword || localStorage.getItem('app_password') || '';
         const resp = await fetch('/api/ebay/draft', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-app-password': pw },
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pw}` },
           body: JSON.stringify({ listing, overrideConditionId: autoConditionId(listing.condition) })
         });
         if (!resp.ok) throw new Error(await resp.text());
@@ -434,7 +434,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
     try {
       const resp = await fetch('/api/generate-from-urls', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-app-password': appPassword },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${appPassword}` },
         body: JSON.stringify({ imageUrls: urlImages, instructions: reanalyzeInstructions })
       });
       if (!resp.ok) throw new Error(await resp.text());
@@ -458,7 +458,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
     try {
       const query = listing.title.split(' ').slice(0, 5).join(' ');
       const resp = await fetch(`/api/ebay/sold-comps?query=${encodeURIComponent(query)}`, {
-        headers: { 'x-app-password': appPassword }
+        headers: { 'Authorization': `Bearer ${appPassword}` }
       });
       const data = await resp.json();
       if (data.error) {

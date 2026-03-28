@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, ShoppingBag } from 'lucide-react';
+import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, ShoppingBag, Shield } from 'lucide-react';
 import './index.css';
 
 import Uploader from './components/Uploader';
@@ -9,6 +9,7 @@ import ListedProducts from './components/ListedProducts';
 import Analytics from './components/Analytics';
 import SettingsPanel from './components/SettingsPanel';
 import SourcingTool from './components/SourcingTool';
+import AdminPanel from './components/AdminPanel';
 import LoginScreen from './components/LoginScreen';
 import { generateListing } from './services/ai';
 import type { StagedListing } from './types';
@@ -18,12 +19,22 @@ import './App.css';
 const DRAFT_INSTRUCTIONS_KEY = 'draft_instructions';
 const DRAFT_GENERATED_KEY = 'draft_generated';
 
+interface CurrentUser {
+  id: string;
+  companyId: string;
+  role: string;
+  email: string;
+  name: string;
+}
+
 function App() {
   const { toast } = useToast();
 
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isEbayConnected, setIsEbayConnected] = useState(false);
-  const [appPassword, setAppPassword] = useState(localStorage.getItem('app_password') || '');
+  // appPassword holds the JWT token; prop name kept for backward compat across all child components
+  const [appPassword, setAppPassword] = useState(localStorage.getItem('app_token') || '');
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [isVerifying, setIsVerifying] = useState(true);
   const [tokenExpiresAt, setTokenExpiresAt] = useState<number | null>(null);
 
@@ -39,10 +50,9 @@ function App() {
   });
 
   const [stagedListings, setStagedListings] = useState<StagedListing[]>([]);
-  const [activeTab, setActiveTab] = useState<'new' | 'staged' | 'listed' | 'analytics' | 'settings' | 'source'>('new');
+  const [activeTab, setActiveTab] = useState<'new' | 'staged' | 'listed' | 'analytics' | 'settings' | 'source' | 'admin'>('new');
   const [listedProducts, setListedProducts] = useState<StagedListing[]>([]);
   const [isLoadingListings, setIsLoadingListings] = useState(false);
-
 
   // Draft autosave
   useEffect(() => { sessionStorage.setItem(DRAFT_INSTRUCTIONS_KEY, instructions); }, [instructions]);
@@ -51,40 +61,77 @@ function App() {
     else sessionStorage.removeItem(DRAFT_GENERATED_KEY);
   }, [generatedData]);
 
-  // Auto-Login Verification
+  // Bearer auth header helper
+  const bearerHeaders = (token: string) => ({ 'Authorization': `Bearer ${token}` });
+  const apiHeaders = (token: string) => ({ 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` });
+
+  // Auto-Login: verify stored JWT on mount
   useEffect(() => {
     if (appPassword) {
-      fetch('/api/verify-password', { headers: { 'x-app-password': appPassword } })
+      fetch('/api/auth/me', { headers: bearerHeaders(appPassword) })
         .then(res => {
-          if (res.ok) {
-            setIsAuthenticated(true);
-            loadListings(appPassword);
-            fetch('/api/ebay/auth-status', { headers: { 'x-app-password': appPassword } })
-              .then(r => r.json())
-              .then(data => {
-                setIsEbayConnected(data.connected);
-                if (data.connected) {
-                  fetch('/api/ebay/token-info', { headers: { 'x-app-password': appPassword } })
-                    .then(r => r.json())
-                    .then(info => setTokenExpiresAt(info.refresh_token_expires_at || null))
-                    .catch(() => {});
-                }
-              })
-              .catch(e => console.error('Error checking eBay auth:', e));
-          } else {
-            setAppPassword('');
-          }
-          setIsVerifying(false);
+          if (res.ok) return res.json();
+          throw new Error('invalid token');
         })
-        .catch(() => setIsVerifying(false));
+        .then(data => {
+          setCurrentUser(data.user);
+          setIsAuthenticated(true);
+          loadListings(appPassword);
+          fetch('/api/ebay/auth-status', { headers: bearerHeaders(appPassword) })
+            .then(r => r.json())
+            .then(d => {
+              setIsEbayConnected(d.connected);
+              if (d.connected) {
+                fetch('/api/ebay/token-info', { headers: bearerHeaders(appPassword) })
+                  .then(r => r.json())
+                  .then(info => setTokenExpiresAt(info.refresh_token_expires_at || null))
+                  .catch(() => {});
+              }
+            })
+            .catch(() => {});
+        })
+        .catch(() => {
+          localStorage.removeItem('app_token');
+          setAppPassword('');
+        })
+        .finally(() => setIsVerifying(false));
     } else {
       setIsVerifying(false);
     }
-  }, [appPassword]);
+  }, []);
+
+  const handleLogin = (token: string, user: CurrentUser) => {
+    localStorage.setItem('app_token', token);
+    setAppPassword(token);
+    setCurrentUser(user);
+    setIsAuthenticated(true);
+    loadListings(token);
+    fetch('/api/ebay/auth-status', { headers: bearerHeaders(token) })
+      .then(r => r.json())
+      .then(d => {
+        setIsEbayConnected(d.connected);
+        if (d.connected) {
+          fetch('/api/ebay/token-info', { headers: bearerHeaders(token) })
+            .then(r => r.json())
+            .then(info => setTokenExpiresAt(info.refresh_token_expires_at || null))
+            .catch(() => {});
+        }
+      })
+      .catch(() => {});
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('app_token');
+    setAppPassword('');
+    setCurrentUser(null);
+    setIsAuthenticated(false);
+    setStagedListings([]);
+    setListedProducts([]);
+  };
 
   const handleEbayConnect = async () => {
     try {
-      const resp = await fetch('/api/ebay/auth-url', { headers: { 'x-app-password': appPassword } });
+      const resp = await fetch('/api/ebay/auth-url', { headers: bearerHeaders(appPassword) });
       const data = await resp.json();
       if (data.url) window.location.href = data.url;
       else if (data.error) toast('eBay Configuration Error: ' + data.error, 'error');
@@ -92,8 +139,6 @@ function App() {
       toast('Error getting eBay login URL. Is the server running?', 'error');
     }
   };
-
-  const apiHeaders = (pw: string) => ({ 'Content-Type': 'application/json', 'x-app-password': pw });
 
   const saveImages = (id: string, images: string[]) => {
     const store = JSON.parse(localStorage.getItem('listing_images') || '{}');
@@ -128,40 +173,12 @@ function App() {
     }
   };
 
-  const migrateFromLocalStorage = async (pw: string) => {
-    const localStaged: StagedListing[] = JSON.parse(localStorage.getItem('staged_ebay_listings') || '[]');
-    const localListed: StagedListing[] = JSON.parse(localStorage.getItem('listed_ebay_listings') || '[]');
-    if (localStaged.length === 0 && localListed.length === 0) return;
-
-    const [serverStaged, serverListed] = await Promise.all([
-      fetch('/api/listings?status=staged', { headers: { 'x-app-password': pw } }).then(r => r.json()),
-      fetch('/api/listings?status=listed', { headers: { 'x-app-password': pw } }).then(r => r.json()),
-    ]);
-    const serverIds = new Set([
-      ...(Array.isArray(serverStaged) ? serverStaged : []).map((l: StagedListing) => l.id),
-      ...(Array.isArray(serverListed) ? serverListed : []).map((l: StagedListing) => l.id),
-    ]);
-    const toUpload = [
-      ...localStaged.filter(l => !serverIds.has(l.id)).map(l => ({ ...l, status: 'staged' as const })),
-      ...localListed.filter(l => !serverIds.has(l.id)).map(l => ({ ...l, status: 'listed' as const })),
-    ];
-    if (toUpload.length > 0) {
-      toUpload.forEach(listing => { if (listing.images?.length) saveImages(listing.id, listing.images); });
-      await Promise.all(toUpload.map(listing =>
-        fetch('/api/listings', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-app-password': pw }, body: JSON.stringify({ listing }) })
-      ));
-      localStorage.removeItem('staged_ebay_listings');
-      localStorage.removeItem('listed_ebay_listings');
-    }
-  };
-
-  const loadListings = async (pw: string) => {
+  const loadListings = async (token: string) => {
     setIsLoadingListings(true);
     try {
-      await migrateFromLocalStorage(pw).catch(e => console.warn('Migration failed (non-fatal):', e));
       const [staged, listed] = await Promise.all([
-        fetch('/api/listings?status=staged', { headers: { 'x-app-password': pw } }).then(r => r.json()),
-        fetch('/api/listings?status=listed', { headers: { 'x-app-password': pw } }).then(r => r.json()),
+        fetch('/api/listings?status=staged', { headers: bearerHeaders(token) }).then(r => r.json()),
+        fetch('/api/listings?status=listed', { headers: bearerHeaders(token) }).then(r => r.json()),
       ]);
       setStagedListings(Array.isArray(staged) ? mergeImages(staged) : []);
       setListedProducts(Array.isArray(listed) ? mergeImages(listed) : []);
@@ -203,14 +220,11 @@ function App() {
     setStagedListings(prev => prev.filter(l => l.id !== id));
     const timer = setTimeout(async () => {
       removeImages(id);
-      await fetch(`/api/listings/${id}`, { method: 'DELETE', headers: { 'x-app-password': appPassword } });
+      await fetch(`/api/listings/${id}`, { method: 'DELETE', headers: bearerHeaders(appPassword) });
     }, 5000);
     toast(`"${listing.title.substring(0, 35)}..." deleted.`, 'info', {
       label: 'Undo',
-      onClick: () => {
-        clearTimeout(timer);
-        setStagedListings(prev => [listing, ...prev]);
-      }
+      onClick: () => { clearTimeout(timer); setStagedListings(prev => [listing, ...prev]); }
     });
   };
 
@@ -219,14 +233,11 @@ function App() {
     setStagedListings(prev => prev.filter(l => !ids.includes(l.id)));
     const timer = setTimeout(async () => {
       removed.forEach(l => removeImages(l.id));
-      await Promise.all(ids.map(id => fetch(`/api/listings/${id}`, { method: 'DELETE', headers: { 'x-app-password': appPassword } })));
+      await Promise.all(ids.map(id => fetch(`/api/listings/${id}`, { method: 'DELETE', headers: bearerHeaders(appPassword) })));
     }, 5000);
     toast(`${ids.length} listing${ids.length > 1 ? 's' : ''} deleted.`, 'info', {
       label: 'Undo',
-      onClick: () => {
-        clearTimeout(timer);
-        setStagedListings(prev => [...removed, ...prev]);
-      }
+      onClick: () => { clearTimeout(timer); setStagedListings(prev => [...removed, ...prev]); }
     });
   };
 
@@ -236,7 +247,7 @@ function App() {
     setListedProducts(prev => [listedListing, ...prev]);
     setActiveTab('listed');
     await Promise.all([
-      fetch(`/api/listings/${listing.id}`, { method: 'DELETE', headers: { 'x-app-password': appPassword } }),
+      fetch(`/api/listings/${listing.id}`, { method: 'DELETE', headers: bearerHeaders(appPassword) }),
       fetch('/api/listings', { method: 'POST', headers: apiHeaders(appPassword), body: JSON.stringify({ listing: listedListing }) }),
     ]);
   };
@@ -247,21 +258,18 @@ function App() {
     setListedProducts(prev => prev.filter(l => l.id !== id));
     const timer = setTimeout(async () => {
       removeImages(id);
-      await fetch(`/api/listings/${id}`, { method: 'DELETE', headers: { 'x-app-password': appPassword } });
+      await fetch(`/api/listings/${id}`, { method: 'DELETE', headers: bearerHeaders(appPassword) });
     }, 5000);
     toast(`"${listing.title.substring(0, 35)}..." deleted.`, 'info', {
       label: 'Undo',
-      onClick: () => {
-        clearTimeout(timer);
-        setListedProducts(prev => [listing, ...prev]);
-      }
+      onClick: () => { clearTimeout(timer); setListedProducts(prev => [listing, ...prev]); }
     });
   };
 
   const handleSyncSold = async () => {
     if (!isEbayConnected) { toast('Connect to eBay first.', 'error'); return; }
     try {
-      const resp = await fetch('/api/ebay/sold-items', { headers: { 'x-app-password': appPassword } });
+      const resp = await fetch('/api/ebay/sold-items', { headers: bearerHeaders(appPassword) });
       const data = await resp.json();
       if (data.error) { toast('Sync failed: ' + data.error, 'error'); return; }
       const soldItems: { itemId: string; soldPrice: string; soldDate: string }[] = data.items || [];
@@ -269,13 +277,9 @@ function App() {
       let count = 0;
       setListedProducts(prev => prev.map(l => {
         const match = soldItems.find(s => s.itemId && l.ebayDraftId && s.itemId === l.ebayDraftId);
-        if (match && !l.soldAt) {
-          count++;
-          return { ...l, archived: true, soldAt: Date.now(), soldPrice: match.soldPrice, updatedAt: Date.now() };
-        }
+        if (match && !l.soldAt) { count++; return { ...l, archived: true, soldAt: Date.now(), soldPrice: match.soldPrice, updatedAt: Date.now() }; }
         return l;
       }));
-      // Persist all changes
       const updated = listedProducts.filter(l => soldItems.some(s => s.itemId === l.ebayDraftId && !l.soldAt));
       await Promise.all(updated.map(l => {
         const match = soldItems.find(s => s.itemId === l.ebayDraftId)!;
@@ -291,23 +295,10 @@ function App() {
   const handleRelistListing = async (listing: StagedListing) => {
     const id = crypto.randomUUID();
     const now = Date.now();
-    const reListing: StagedListing = {
-      ...listing,
-      id,
-      status: 'staged',
-      createdAt: now,
-      updatedAt: now,
-      ebayDraftId: undefined,
-      archived: false,
-      soldAt: undefined,
-      soldPrice: undefined,
-    };
+    const reListing: StagedListing = { ...listing, id, status: 'staged', createdAt: now, updatedAt: now, ebayDraftId: undefined, archived: false, soldAt: undefined, soldPrice: undefined };
     setStagedListings(prev => [reListing, ...prev]);
     setActiveTab('staged');
-    const resp = await fetch('/api/listings', {
-      method: 'POST', headers: apiHeaders(appPassword),
-      body: JSON.stringify({ listing: reListing })
-    });
+    const resp = await fetch('/api/listings', { method: 'POST', headers: apiHeaders(appPassword), body: JSON.stringify({ listing: reListing }) });
     if (!resp.ok) console.error('Failed to save relisted listing:', await resp.text());
     toast(`"${listing.title.substring(0, 35)}..." re-staged for relisting.`, 'success');
   };
@@ -337,7 +328,6 @@ function App() {
     }
   };
 
-  // Token expiry display
   const tokenDaysLeft = tokenExpiresAt ? Math.ceil((tokenExpiresAt - Date.now()) / (1000 * 60 * 60 * 24)) : null;
   const tokenExpiryColor = tokenDaysLeft !== null
     ? (tokenDaysLeft <= 2 ? '#ef4444' : tokenDaysLeft <= 7 ? '#f59e0b' : 'var(--success)')
@@ -353,9 +343,7 @@ function App() {
   });
 
   if (isVerifying) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><p>Authenticating...</p></div>;
-  if (!isAuthenticated) {
-    return <LoginScreen setAuthenticated={(pw) => { localStorage.setItem('app_password', pw); setAppPassword(pw); setIsAuthenticated(true); }} />;
-  }
+  if (!isAuthenticated) return <LoginScreen onLogin={handleLogin} />;
 
   return (
     <div style={{ minHeight: '100vh', padding: '1rem' }}>
@@ -364,12 +352,15 @@ function App() {
           <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'linear-gradient(135deg, #a855f7, #6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '1.2rem' }}>eB</div>
           <h1 style={{ margin: 0, fontSize: '1.5rem' }}>Listing<span className="text-gradient">Stager</span></h1>
         </div>
-        <div style={{ display: 'flex', gap: '1rem' }}>
+        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
           <button style={tabBtnStyle('new')} onClick={() => setActiveTab('new')}><PlusCircle size={18} /> New Listing</button>
           <button style={tabBtnStyle('staged')} onClick={() => setActiveTab('staged')}><List size={18} /> Staged ({stagedListings.length})</button>
           <button style={tabBtnStyle('listed')} onClick={() => setActiveTab('listed')}><Check size={18} /> Listed ({listedProducts.length})</button>
           <button style={tabBtnStyle('analytics')} onClick={() => setActiveTab('analytics')}><BarChart2 size={18} /> Analytics</button>
           <button style={tabBtnStyle('source')} onClick={() => setActiveTab('source')}><ShoppingBag size={18} /> Source</button>
+          {currentUser?.role === 'superadmin' && (
+            <button style={tabBtnStyle('admin')} onClick={() => setActiveTab('admin')}><Shield size={18} /> Admin</button>
+          )}
           <button style={tabBtnStyle('settings')} onClick={() => setActiveTab('settings')}><Settings size={18} /> Settings</button>
         </div>
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
@@ -380,9 +371,7 @@ function App() {
                 <Check size={16} /> eBay: Connected
               </span>
               {tokenDaysLeft !== null && (
-                <span style={{ fontSize: '0.72rem', color: tokenExpiryColor, opacity: 0.85 }}>
-                  Token expires in {tokenDaysLeft}d
-                </span>
+                <span style={{ fontSize: '0.72rem', color: tokenExpiryColor, opacity: 0.85 }}>Token expires in {tokenDaysLeft}d</span>
               )}
             </div>
           ) : (
@@ -390,9 +379,12 @@ function App() {
               Connect to eBay
             </button>
           )}
-          <button className="btn-icon" onClick={() => { localStorage.removeItem('app_password'); setIsAuthenticated(false); }} title="Logout">
-            Logout
-          </button>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{currentUser?.name}</span>
+            <button className="btn-icon" onClick={handleLogout} title="Logout" style={{ fontSize: '0.75rem', padding: '3px 10px' }}>
+              Logout
+            </button>
+          </div>
         </div>
       </nav>
 
@@ -402,46 +394,21 @@ function App() {
         ) : activeTab === 'new' ? (
           <div className="animate-fade-in" style={{ display: 'grid', gap: '2rem', gridTemplateColumns: generatedData ? 'minmax(400px, 1fr) minmax(600px, 1.8fr)' : 'max-content', justifyContent: 'center' }}>
             <div style={{ width: generatedData ? '100%' : '600px', maxWidth: '100%', margin: generatedData ? '0' : '0 auto' }}>
-              <Uploader
-                images={images} setImages={setImages}
-                instructions={instructions} setInstructions={setInstructions}
-                onGenerate={handleGenerate} isGenerating={isGenerating} disabled={false}
-                appPassword={appPassword}
-              />
+              <Uploader images={images} setImages={setImages} instructions={instructions} setInstructions={setInstructions} onGenerate={handleGenerate} isGenerating={isGenerating} disabled={false} appPassword={appPassword} />
             </div>
             {generatedData && (
               <div className="animate-fade-in">
-                <ResultsEditor
-                  data={generatedData} images={images}
-                  onStage={handleStageListing} onCancel={() => setGeneratedData(null)}
-                  appPassword={appPassword}
-                />
+                <ResultsEditor data={generatedData} images={images} onStage={handleStageListing} onCancel={() => setGeneratedData(null)} appPassword={appPassword} />
               </div>
             )}
           </div>
         ) : activeTab === 'staged' ? (
           <div className="animate-fade-in">
-            <StagedListings
-              listings={stagedListings}
-              onUpdate={handleUpdateStagedListing}
-              onDelete={handleDeleteStagedListing}
-              onBulkDelete={handleBulkDelete}
-              onMoveToListed={handleMoveToListed}
-              isEbayConnected={isEbayConnected}
-              appPassword={appPassword}
-            />
+            <StagedListings listings={stagedListings} onUpdate={handleUpdateStagedListing} onDelete={handleDeleteStagedListing} onBulkDelete={handleBulkDelete} onMoveToListed={handleMoveToListed} isEbayConnected={isEbayConnected} appPassword={appPassword} />
           </div>
         ) : activeTab === 'listed' ? (
           <div className="animate-fade-in">
-            <ListedProducts
-              listings={listedProducts}
-              onDelete={handleDeleteListedListing}
-              onArchive={handleArchiveListedListing}
-              onSyncSold={handleSyncSold}
-              onRelist={handleRelistListing}
-              isEbayConnected={isEbayConnected}
-              appPassword={appPassword}
-            />
+            <ListedProducts listings={listedProducts} onDelete={handleDeleteListedListing} onArchive={handleArchiveListedListing} onSyncSold={handleSyncSold} onRelist={handleRelistListing} isEbayConnected={isEbayConnected} appPassword={appPassword} />
           </div>
         ) : activeTab === 'analytics' ? (
           <div className="animate-fade-in">
@@ -451,14 +418,13 @@ function App() {
           <div className="animate-fade-in">
             <SourcingTool appPassword={appPassword} listed={listedProducts} />
           </div>
+        ) : activeTab === 'admin' && currentUser?.role === 'superadmin' ? (
+          <div className="animate-fade-in">
+            <AdminPanel appPassword={appPassword} />
+          </div>
         ) : (
           <div className="animate-fade-in">
-            <SettingsPanel
-              appPassword={appPassword}
-              isEbayConnected={isEbayConnected}
-              staged={stagedListings}
-              listed={listedProducts}
-            />
+            <SettingsPanel appPassword={appPassword} isEbayConnected={isEbayConnected} staged={stagedListings} listed={listedProducts} />
           </div>
         )}
       </main>

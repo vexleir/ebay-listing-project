@@ -1,20 +1,5 @@
 const axios = require('axios');
-const { MongoClient } = require('mongodb');
-
-let client;
-let db;
-let tokenCollection;
-
-async function connectDb() {
-  const uri = process.env.MONGODB_URI;
-  if (!uri) return; // Fallback to memory or env if absolutely necessary, but expected to fail without DB
-  if (!client) {
-    client = new MongoClient(uri);
-    await client.connect();
-    db = client.db('ebay_lister');
-    tokenCollection = db.collection('tokens');
-  }
-}
+const { getDb } = require('./db');
 
 const SCOPES = [
   'https://api.ebay.com/oauth/api_scope',
@@ -23,58 +8,58 @@ const SCOPES = [
   'https://api.ebay.com/oauth/api_scope/sell.inventory'
 ].join(' ');
 
-async function getTokens() {
-  await connectDb();
-  if (tokenCollection) {
-    const doc = await tokenCollection.findOne({ _id: 'admin_tokens' });
-    return doc || null;
-  }
-  return null;
+function tokenDocId(companyId) {
+  return `${companyId}_tokens`;
 }
 
-async function saveTokens(tokens) {
-  // Add an expiration timestamp
+async function getTokens(companyId) {
+  const db = await getDb();
+  const doc = await db.collection('tokens').findOne({ _id: tokenDocId(companyId) });
+  return doc || null;
+}
+
+async function saveTokens(companyId, tokens) {
   if (tokens.expires_in) {
-    tokens.expires_at = Date.now() + (tokens.expires_in * 1000) - (5 * 60 * 1000); // 5 mins buffer
+    tokens.expires_at = Date.now() + (tokens.expires_in * 1000) - (5 * 60 * 1000);
   }
   if (tokens.refresh_token_expires_in) {
     tokens.refresh_token_expires_at = Date.now() + (tokens.refresh_token_expires_in * 1000);
   }
-  
-  await connectDb();
-  if (tokenCollection) {
-    const { _id, ...existing } = (await getTokens()) || {};
-    const updatedTokens = { ...existing, ...tokens };
-    console.log('[saveTokens] saving tokens, refresh_token_expires_at:', updatedTokens.refresh_token_expires_at);
-    await tokenCollection.updateOne(
-      { _id: 'admin_tokens' },
-      { $set: updatedTokens },
-      { upsert: true }
-    );
-    console.log('[saveTokens] saved successfully');
-  } else {
-    console.warn('[saveTokens] tokenCollection not available - tokens not persisted');
-  }
+
+  const db = await getDb();
+  const { _id, ...existing } = (await getTokens(companyId)) || {};
+  const updatedTokens = { ...existing, ...tokens };
+  console.log(`[saveTokens] company=${companyId} refresh_token_expires_at:`, updatedTokens.refresh_token_expires_at);
+  await db.collection('tokens').updateOne(
+    { _id: tokenDocId(companyId) },
+    { $set: updatedTokens },
+    { upsert: true }
+  );
+  console.log('[saveTokens] saved successfully');
 }
 
-function getAuthUrl() {
+function getAuthUrl(companyId) {
   const clientId = process.env.EBAY_CLIENT_ID;
   const ruName = process.env.EBAY_RU_NAME;
-  
+
   if (!clientId || !ruName) {
     throw new Error('EBAY_CLIENT_ID or EBAY_RU_NAME missing in .env');
   }
+
+  // Encode companyId in state param so the callback knows which company to store tokens for
+  const state = Buffer.from(companyId || 'default').toString('base64');
 
   const url = new URL('https://auth.ebay.com/oauth2/authorize');
   url.searchParams.append('client_id', clientId);
   url.searchParams.append('response_type', 'code');
   url.searchParams.append('redirect_uri', ruName);
   url.searchParams.append('scope', SCOPES);
-  
+  url.searchParams.append('state', state);
+
   return url.toString();
 }
 
-async function exchangeCodeForToken(code) {
+async function exchangeCodeForToken(code, companyId) {
   const clientId = process.env.EBAY_CLIENT_ID;
   const clientSecret = process.env.EBAY_CLIENT_SECRET;
   const ruName = process.env.EBAY_RU_NAME;
@@ -93,28 +78,26 @@ async function exchangeCodeForToken(code) {
     }
   });
 
-  await saveTokens(response.data);
+  await saveTokens(companyId, response.data);
   return response.data;
 }
 
-async function getValidAccessToken() {
-  let tokens = await getTokens();
-  
+async function getValidAccessToken(companyId) {
+  let tokens = await getTokens(companyId);
+
   if (!tokens || !tokens.refresh_token) {
-    // Fallback to manual token if available
+    // Fallback to env token (legacy / single-company setups)
     if (process.env.EBAY_OAUTH_TOKEN && process.env.EBAY_OAUTH_TOKEN !== 'YOUR_EBAY_TOKEN_HERE') {
       return process.env.EBAY_OAUTH_TOKEN;
     }
     throw new Error('Not connected to eBay. Please connect your account.');
   }
 
-  // Check if access token is still valid
   if (tokens.access_token && tokens.expires_at > Date.now()) {
     return tokens.access_token;
   }
 
-  // Refresh token
-  console.log('Access token expired. Refreshing token...');
+  console.log(`[ebayAuth] Access token expired for company=${companyId}. Refreshing...`);
   const clientId = process.env.EBAY_CLIENT_ID;
   const clientSecret = process.env.EBAY_CLIENT_SECRET;
   const authHeader = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
@@ -131,20 +114,20 @@ async function getValidAccessToken() {
     }
   });
 
-  await saveTokens(response.data);
+  await saveTokens(companyId, response.data);
   return response.data.access_token;
 }
 
-async function hasValidSession() {
-  const tokens = await getTokens();
+async function hasValidSession(companyId) {
+  const tokens = await getTokens(companyId);
   if (tokens && tokens.refresh_token && tokens.refresh_token_expires_at > Date.now()) {
     return true;
   }
   return !!(process.env.EBAY_OAUTH_TOKEN && process.env.EBAY_OAUTH_TOKEN !== 'YOUR_EBAY_TOKEN_HERE');
 }
 
-async function getTokenExpiry() {
-  const tokens = await getTokens();
+async function getTokenExpiry(companyId) {
+  const tokens = await getTokens(companyId);
   return {
     refresh_token_expires_at: tokens?.refresh_token_expires_at || null
   };
@@ -155,5 +138,5 @@ module.exports = {
   exchangeCodeForToken,
   getValidAccessToken,
   hasValidSession,
-  getTokenExpiry
+  getTokenExpiry,
 };

@@ -101,7 +101,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
     try {
       const resp = await fetch('/api/ebay/revise', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-app-password': pw },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pw}` },
         body: JSON.stringify({ itemId: reviseModal.listing.ebayDraftId, newPrice: reviseModal.price, newTitle: reviseModal.title })
       });
       const data = await resp.json();
@@ -121,7 +121,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
     try {
       const resp = await fetch('/api/ebay/end-listing', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-app-password': pw },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pw}` },
         body: JSON.stringify({ itemId: listing.ebayDraftId })
       });
       const data = await resp.json();

@@ -41,14 +41,14 @@ export default function RepricingAdvisor({ appPassword }: RepricingAdvisorProps)
   const [applying, setApplying] = useState<Record<string, boolean>>({});
   const [applied, setApplied] = useState<Record<string, number>>({});
 
-  const headers = { 'Content-Type': 'application/json', 'x-app-password': appPassword };
+  const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${appPassword}` };
 
   const runAnalysis = async () => {
     setLoading(true);
     setResult(null);
     setApplied({});
     try {
-      const resp = await fetch('/api/reprice/suggestions', { headers: { 'x-app-password': appPassword } });
+      const resp = await fetch('/api/reprice/suggestions', { headers: { 'Authorization': `Bearer ${appPassword}` } });
       const data = await resp.json();
       if (data.error) throw new Error(data.error);
       setResult(data);

@@ -61,7 +61,7 @@ export default function SourcingTool({ appPassword, listed }: SourcingToolProps)
   const [showComps, setShowComps] = useState(false);
   const [resolvedName, setResolvedName] = useState<string | null>(null);
 
-  const headers = { 'x-app-password': appPassword };
+  const headers = { 'Authorization': `Bearer ${appPassword}` };
 
   const isBarcode = (s: string) => /^\d{8,14}$/.test(s.trim());
 

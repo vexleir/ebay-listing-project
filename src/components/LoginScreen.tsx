@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 
 interface Props {
-  setAuthenticated: (pw: string) => void;
+  onLogin: (token: string, user: { id: string; companyId: string; role: string; email: string; name: string }) => void;
 }
 
-export default function LoginScreen({ setAuthenticated }: Props) {
-  const [pw, setPw] = useState('');
+export default function LoginScreen({ onLogin }: Props) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -14,15 +15,18 @@ export default function LoginScreen({ setAuthenticated }: Props) {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('/api/verify-password', {
-        headers: { 'x-app-password': pw }
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
       });
+      const data = await res.json();
       if (res.ok) {
-        setAuthenticated(pw);
+        onLogin(data.token, data.user);
       } else {
-        setError('Invalid password. Please check your .env file on the server.');
+        setError(data.error || 'Login failed.');
       }
-    } catch (err: any) {
+    } catch {
       setError('Failed to connect to the backend server. Is it running?');
     } finally {
       setLoading(false);
@@ -36,19 +40,29 @@ export default function LoginScreen({ setAuthenticated }: Props) {
           <img src="/vite.svg" alt="Logo" style={{ width: '32px', height: '32px' }} />
           <h2 style={{ margin: 0, color: 'var(--text-primary)' }}>FlipSide Login</h2>
         </div>
-        
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-          <input 
-            type="password" 
-            placeholder="Universal App Password" 
-            value={pw} 
-            onChange={e => setPw(e.target.value)} 
-            className="input-base" 
-            style={{ textAlign: 'center', letterSpacing: '0.1rem', fontSize: '1.1rem' }}
+
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <input
+            type="email"
+            placeholder="Email address"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            className="input-base"
+            autoComplete="email"
+            required
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            className="input-base"
+            autoComplete="current-password"
+            required
           />
           {error && <p style={{ color: '#ff6b6b', margin: 0, fontSize: '0.9rem' }}>{error}</p>}
           <button type="submit" className="button-primary" disabled={loading} style={{ width: '100%', justifyContent: 'center' }}>
-            {loading ? 'Authenticating...' : 'Access Dashboard'}
+            {loading ? 'Signing in...' : 'Sign In'}
           </button>
         </form>
       </div>
