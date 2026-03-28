@@ -22,6 +22,7 @@ interface ListedProductsProps {
 
 type SortOption = 'date-desc' | 'date-asc' | 'title-asc' | 'title-desc' | 'price-asc' | 'price-desc';
 type ViewMode = 'grid' | 'list';
+type StatusFilter = 'all' | 'active' | 'sold' | 'ended';
 
 function parsePrice(val: string): number {
   const m = val.replace(/[^0-9.]/g, '');
@@ -80,7 +81,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
   const [search, setSearch] = useState('');
   const [showImportModal, setShowImportModal] = useState(false);
   const [sort, setSort] = useState<SortOption>('date-desc');
-  const [showArchived, setShowArchived] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [lightboxImages, setLightboxImages] = useState<string[] | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState(0);
@@ -154,30 +155,38 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
     }
   };
 
-  const active = listings.filter(l => !l.archived);
-  const archived = listings.filter(l => l.archived);
   const allTags = Array.from(new Set(listings.flatMap(l => l.tags || [])));
 
-  const applyFilter = (items: StagedListing[]) => {
-    const q = search.toLowerCase();
-    return items
-      .filter(l => !activeTag || l.tags?.includes(activeTag))
-      .filter(l => !q || l.title.toLowerCase().includes(q) || (l.sku || '').toLowerCase().includes(q) || (l.category || '').toLowerCase().includes(q))
-      .sort((a, b) => {
-        switch (sort) {
-          case 'date-asc':   return a.createdAt - b.createdAt;
-          case 'date-desc':  return b.createdAt - a.createdAt;
-          case 'title-asc':  return a.title.localeCompare(b.title);
-          case 'title-desc': return b.title.localeCompare(a.title);
-          case 'price-asc':  return parsePrice(a.priceRecommendation) - parsePrice(b.priceRecommendation);
-          case 'price-desc': return parsePrice(b.priceRecommendation) - parsePrice(a.priceRecommendation);
-          default: return 0;
-        }
-      });
+  const counts = {
+    all:    listings.length,
+    active: listings.filter(l => !l.archived).length,
+    sold:   listings.filter(l => l.archived && l.soldAt).length,
+    ended:  listings.filter(l => l.archived && !l.soldAt).length,
   };
 
-  const filteredActive   = applyFilter(active);
-  const filteredArchived = applyFilter(archived);
+  const filteredListings = listings
+    .filter(l => {
+      if (statusFilter === 'active') return !l.archived;
+      if (statusFilter === 'sold')   return l.archived && l.soldAt;
+      if (statusFilter === 'ended')  return l.archived && !l.soldAt;
+      return true;
+    })
+    .filter(l => !activeTag || l.tags?.includes(activeTag))
+    .filter(l => {
+      const q = search.toLowerCase();
+      return !q || l.title.toLowerCase().includes(q) || (l.sku || '').toLowerCase().includes(q) || (l.category || '').toLowerCase().includes(q);
+    })
+    .sort((a, b) => {
+      switch (sort) {
+        case 'date-asc':   return a.createdAt - b.createdAt;
+        case 'date-desc':  return b.createdAt - a.createdAt;
+        case 'title-asc':  return a.title.localeCompare(b.title);
+        case 'title-desc': return b.title.localeCompare(a.title);
+        case 'price-asc':  return parsePrice(a.priceRecommendation) - parsePrice(b.priceRecommendation);
+        case 'price-desc': return parsePrice(b.priceRecommendation) - parsePrice(a.priceRecommendation);
+        default: return 0;
+      }
+    });
 
   if (listings.length === 0) {
     return (
@@ -374,10 +383,28 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
         </div>, document.body
       )}
 
+      {/* Status filter pills */}
+      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '1rem', alignItems: 'center' }}>
+        {(['all', 'active', 'sold', 'ended'] as StatusFilter[]).map(f => {
+          const labels: Record<StatusFilter, string> = { all: 'All', active: 'Active', sold: 'Sold', ended: 'Ended' };
+          const colors: Record<StatusFilter, string> = { all: 'var(--accent)', active: 'var(--success)', sold: '#34d399', ended: 'var(--text-secondary)' };
+          const active = statusFilter === f;
+          return (
+            <button key={f} onClick={() => setStatusFilter(f)}
+              style={{ fontSize: '0.82rem', padding: '4px 12px', borderRadius: '20px', border: '1px solid', cursor: 'pointer',
+                background: active ? `rgba(99,102,241,0.2)` : 'rgba(255,255,255,0.04)',
+                borderColor: active ? colors[f] : 'var(--border-color)',
+                color: active ? colors[f] : 'var(--text-secondary)', fontWeight: active ? 600 : 400, transition: 'all 0.15s' }}>
+              {labels[f]} <span style={{ opacity: 0.7, fontSize: '0.75rem' }}>({counts[f]})</span>
+            </button>
+          );
+        })}
+      </div>
+
       {/* Tag filter bar */}
       {allTags.length > 0 && (
         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '1rem', alignItems: 'center' }}>
-          <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', opacity: 0.7 }}>Filter:</span>
+          <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', opacity: 0.7 }}>Tags:</span>
           {allTags.map(tag => (
             <button key={tag} onClick={() => setActiveTag(activeTag === tag ? null : tag)}
               style={{ fontSize: '0.78rem', padding: '3px 10px', borderRadius: '4px', border: '1px solid', cursor: 'pointer', background: activeTag === tag ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.05)', borderColor: activeTag === tag ? 'var(--accent-color)' : 'var(--border-color)', color: activeTag === tag ? '#a5b4fc' : 'var(--text-secondary)', transition: 'all 0.15s' }}>
@@ -429,39 +456,23 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
         </div>
       </div>
 
-      {filteredActive.length === 0 && !search && <div className="glass-panel" style={{ padding: '3rem 2rem', textAlign: 'center', marginBottom: '1.5rem' }}><p style={{ color: 'var(--text-secondary)' }}>No active listed items.</p></div>}
-      {filteredActive.length === 0 && search && <div className="glass-panel" style={{ padding: '2rem', textAlign: 'center', marginBottom: '1.5rem' }}><p style={{ color: 'var(--text-secondary)' }}>No results for "{search}"</p></div>}
+      {filteredListings.length === 0 && (
+        <div className="glass-panel" style={{ padding: '3rem 2rem', textAlign: 'center', marginBottom: '1.5rem' }}>
+          <p style={{ color: 'var(--text-secondary)' }}>
+            {search ? `No results for "${search}"` : `No ${statusFilter === 'all' ? '' : statusFilter + ' '}items.`}
+          </p>
+        </div>
+      )}
 
-      {filteredActive.length > 0 && viewMode === 'grid' && (
+      {filteredListings.length > 0 && viewMode === 'grid' && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '1.5rem', marginBottom: '1.5rem' }}>
-          {filteredActive.map(l => renderCard(l, false))}
+          {filteredListings.map(l => renderCard(l, !!l.archived))}
         </div>
       )}
-      {filteredActive.length > 0 && viewMode === 'list' && (
+      {filteredListings.length > 0 && viewMode === 'list' && (
         <div className="glass-panel" style={{ padding: 0, overflow: 'hidden', marginBottom: '1.5rem' }}>
-          {filteredActive.map(l => renderListRow(l, false))}
+          {filteredListings.map(l => renderListRow(l, !!l.archived))}
           <div style={{ height: '1px' }} />
-        </div>
-      )}
-
-      {archived.length > 0 && (
-        <div>
-          <button onClick={() => setShowArchived(v => !v)} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.9rem', marginBottom: '1rem', padding: '4px 0' }}>
-            <ChevronDown size={16} style={{ transform: showArchived ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
-            Archived ({filteredArchived.length}{search ? ` of ${archived.length}` : ''})
-          </button>
-          {showArchived && filteredArchived.length > 0 && viewMode === 'grid' && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '1.5rem' }}>
-              {filteredArchived.map(l => renderCard(l, true))}
-            </div>
-          )}
-          {showArchived && filteredArchived.length > 0 && viewMode === 'list' && (
-            <div className="glass-panel" style={{ padding: 0, overflow: 'hidden' }}>
-              {filteredArchived.map(l => renderListRow(l, true))}
-              <div style={{ height: '1px' }} />
-            </div>
-          )}
-          {showArchived && filteredArchived.length === 0 && search && <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>No archived results for "{search}"</p>}
         </div>
       )}
       {showImportModal && (

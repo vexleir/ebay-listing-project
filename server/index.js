@@ -893,7 +893,8 @@ app.post('/api/ebay/import/execute', async (req, res) => {
           const soldAmt = parseFloat(item.price || '0');
           listing.soldPrice = soldAmt > 0 ? `$${soldAmt.toFixed(2)}` : '';
         } else if (item.status === 'ended') {
-          listing.status = 'staged';
+          listing.status = 'listed';
+          listing.archived = true;
         } else {
           listing.status = 'listed';
         }
