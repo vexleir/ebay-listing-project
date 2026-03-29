@@ -1,13 +1,12 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ExternalLink, Calendar, CheckCircle, Trash2, Archive, ArchiveRestore, Search, ChevronDown, LayoutGrid, List, Download, RefreshCw, Eye, RotateCcw, CircleSlash, Share2, Upload, DollarSign, Pencil } from 'lucide-react';
+import { ExternalLink, Calendar, CheckCircle, Trash2, Archive, ArchiveRestore, Search, ChevronDown, LayoutGrid, List, Download, RefreshCw, Eye, RotateCcw, CircleSlash, Share2, DollarSign, Pencil } from 'lucide-react';
 import type { StagedListing } from '../types';
 import ImageSearchButton from './ImageSearchButton';
 import Lightbox from './Lightbox';
 import { useToast } from '../context/ToastContext';
 import { calculateNetProfit } from '../utils/fees';
 import CrossPostModal from './CrossPostModal';
-import ImportModal from './ImportModal';
 import EditListingModal from './EditListingModal';
 
 interface ListedProductsProps {
@@ -16,7 +15,6 @@ interface ListedProductsProps {
   onArchive: (id: string) => void;
   onSyncSold?: () => void;
   onRelist?: (listing: StagedListing) => void;
-  onImportComplete?: () => void;
   onMarkSold?: (id: string, soldPrice: string, soldAt: number) => void;
   onUpdateListing?: (updated: StagedListing) => void;
   isEbayConnected?: boolean;
@@ -79,10 +77,9 @@ function exportCsv(listings: StagedListing[]) {
   URL.revokeObjectURL(url);
 }
 
-export default function ListedProductsView({ listings, onDelete, onArchive, onSyncSold, onRelist, onImportComplete, onMarkSold, onUpdateListing, isEbayConnected, appPassword = '' }: ListedProductsProps) {
+export default function ListedProductsView({ listings, onDelete, onArchive, onSyncSold, onRelist, onMarkSold, onUpdateListing, isEbayConnected, appPassword = '' }: ListedProductsProps) {
   const { toast } = useToast();
   const [search, setSearch] = useState('');
-  const [showImportModal, setShowImportModal] = useState(false);
   const [sort, setSort] = useState<SortOption>('date-desc');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
@@ -451,10 +448,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
             <RefreshCw size={16} /> Sync Sold
           </button>
         )}
-        <button className="btn-icon" title={isEbayConnected ? 'Import listings from eBay' : 'Connect to eBay to import listings'} style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '9px 12px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', color: isEbayConnected ? 'var(--accent)' : 'var(--text-secondary)', opacity: isEbayConnected ? 1 : 0.5 }}
-          onClick={() => setShowImportModal(true)} disabled={!isEbayConnected}>
-          <Upload size={16} /> Import
-        </button>
+
         <button className="btn-icon" title="Export CSV" style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '9px 12px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', color: 'var(--text-secondary)' }}
           onClick={() => { exportCsv(listings); toast('CSV exported.', 'success'); }}>
           <Download size={16} /> CSV
@@ -488,17 +482,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
           <div style={{ height: '1px' }} />
         </div>
       )}
-      {showImportModal && (
-        <ImportModal
-          appPassword={appPassword}
-          isEbayConnected={isEbayConnected}
-          onClose={() => setShowImportModal(false)}
-          onImportComplete={() => {
-            setShowImportModal(false);
-            onImportComplete?.();
-          }}
-        />
-      )}
+
     </div>
   );
 }
