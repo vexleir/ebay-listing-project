@@ -874,25 +874,10 @@ async function bootstrap() {
       console.log('[bootstrap] Migrated admin_tokens →', `${company.id}_tokens`);
     }
 
-    // Migrate imported listings that ended up as 'staged' → 'listed' + archived
-    // Only ended listings were imported as staged (active ones always went to 'listed').
-    const importedStagedResult = await db.collection('listings').updateMany(
-      { importedFromEbay: true, status: 'staged' },
-      { $set: { status: 'listed', archived: true, updatedAt: Date.now() } }
-    );
-    if (importedStagedResult.modifiedCount > 0) {
-      console.log(`[bootstrap] Fixed ${importedStagedResult.modifiedCount} imported staged → listed+archived`);
-    }
-
-    // Fix imported 'listed' items that are missing the archived flag entirely.
-    // These were ended listings migrated in a previous pass without archived:true.
-    // Rule: importedFromEbay + listed + no soldAt + archived not explicitly false → ended → set archived:true
-    const importedNoArchiveResult = await db.collection('listings').updateMany(
-      { importedFromEbay: true, status: 'listed', archived: { $exists: false }, soldAt: { $exists: false } },
-      { $set: { archived: true, updatedAt: Date.now() } }
-    );
-    if (importedNoArchiveResult.modifiedCount > 0) {
-      console.log(`[bootstrap] Fixed ${importedNoArchiveResult.modifiedCount} imported listed items: set archived=true`);
+    // Remove all eBay-imported listings — keeps only listings created natively in the app.
+    const purgeResult = await db.collection('listings').deleteMany({ importedFromEbay: true });
+    if (purgeResult.deletedCount > 0) {
+      console.log(`[bootstrap] Purged ${purgeResult.deletedCount} imported eBay listings`);
     }
 
     // Create superadmin user if not exists
