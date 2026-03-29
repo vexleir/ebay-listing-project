@@ -754,40 +754,22 @@ app.get('/api/ebay/import/scan', async (req, res) => {
     const getPictures = (block) =>
       [...block.matchAll(/<PictureURL>(.*?)<\/PictureURL>/g)].map(m => m[1]).filter(u => u.startsWith('http')).slice(0, 3);
 
-    // Declare all buckets up front so items can be reclassified
     const active = [], sold = [], ended = [];
 
-    // Parse active listings — verify ListingStatus since eBay sometimes returns
-    // recently-ended or misclassified items inside <ActiveList>
+    // Parse active listings — trust eBay's <ActiveList> section placement
     const activeSection = body.match(/<ActiveList>([\s\S]*?)<\/ActiveList>/)?.[1] || '';
     for (const m of activeSection.matchAll(/<Item>([\s\S]*?)<\/Item>/g)) {
       const b = m[1];
-      const listingStatus = getField(b, 'ListingStatus'); // e.g. 'Active', 'Completed', 'Ended'
-      const isActuallyActive = !listingStatus || listingStatus === 'Active' || listingStatus === 'Custom';
-      if (isActuallyActive) {
-        active.push({
-          itemId: getField(b, 'ItemID'),
-          title: getField(b, 'Title'),
-          price: getField(b, 'CurrentPrice') || getField(b, 'BuyItNowPrice'),
-          conditionId: getField(b, 'ConditionID') || '3000',
-          startTime: getField(b, 'StartTime'),
-          images: getPictures(b),
-          watchCount: getField(b, 'WatchCount') || '0',
-          status: 'active',
-        });
-      } else {
-        // Reclassify as ended so the user sees it in the correct tab
-        ended.push({
-          itemId: getField(b, 'ItemID'),
-          title: getField(b, 'Title'),
-          price: getField(b, 'CurrentPrice'),
-          conditionId: getField(b, 'ConditionID') || '3000',
-          endTime: getField(b, 'EndTime'),
-          images: getPictures(b),
-          status: 'ended',
-        });
-        console.log(`[import/scan] Reclassified itemId=${getField(b, 'ItemID')} from active → ended (ListingStatus=${listingStatus})`);
-      }
+      active.push({
+        itemId: getField(b, 'ItemID'),
+        title: getField(b, 'Title'),
+        price: getField(b, 'CurrentPrice') || getField(b, 'BuyItNowPrice'),
+        conditionId: getField(b, 'ConditionID') || '3000',
+        startTime: getField(b, 'StartTime'),
+        images: getPictures(b),
+        watchCount: getField(b, 'WatchCount') || '0',
+        status: 'active',
+      });
     }
 
     // Parse sold listings (nested inside <Transaction> blocks)
@@ -912,19 +894,14 @@ app.post('/api/ebay/import/execute', async (req, res) => {
           importedFromEbay: true,
         };
 
-        // Use GetItem's live ListingStatus as ground truth — overrides the scan's bucket
-        const liveStatus = get('ListingStatus'); // 'Active', 'Completed', 'Ended', 'Custom', ''
-        const isLiveActive = !liveStatus || liveStatus === 'Active' || liveStatus === 'Custom';
-        const effectiveStatus = item.status === 'sold' ? 'sold' : (isLiveActive ? 'active' : 'ended');
-        console.log(`[import/execute] itemId=${item.itemId} scan=${item.status} live=${liveStatus||'n/a'} → ${effectiveStatus}`);
-
-        if (effectiveStatus === 'sold') {
+        // Set status based on scan classification (eBay section placement is authoritative)
+        if (item.status === 'sold') {
           listing.status = 'listed';
           listing.archived = true;
           listing.soldAt = item.soldDate ? new Date(item.soldDate).getTime() : now;
           const soldAmt = parseFloat(item.price || '0');
           listing.soldPrice = soldAmt > 0 ? `$${soldAmt.toFixed(2)}` : '';
-        } else if (effectiveStatus === 'ended') {
+        } else if (item.status === 'ended') {
           listing.status = 'listed';
           listing.archived = true;
         } else {
