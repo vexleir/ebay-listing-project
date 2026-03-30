@@ -6,6 +6,7 @@ const path = require('path');
 const { generateListing, generateListingFromUrls } = require('./ai');
 const { getAuthUrl, exchangeCodeForToken, getValidAccessToken, hasValidSession, getTokenExpiry } = require('./ebayAuth');
 const { getListings, createListing, updateListing, deleteListing, getAllListingsMeta, getActiveListings, getSettings, saveSettings, incrementTokenUsage, getTokenUsage } = require('./listings');
+const { fetchListingForOptimizer, fetchSoldComps, aiOptimizeListing } = require('./optimizer');
 const { uploadImage } = require('./cloudinary');
 const { getDb } = require('./db');
 const { signToken, authMiddleware, requireSuperAdmin } = require('./auth');
@@ -730,6 +731,49 @@ app.get('/api/barcode', async (req, res) => {
     res.json({ title: '', brand: '', category: '', description: '', source: null });
   } catch (e) {
     console.error('[barcode] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Listing Optimizer ───────────────────────────────────────────────────────
+
+app.get('/api/optimizer/fetch', async (req, res) => {
+  const { itemId } = req.query;
+  if (!itemId) return res.status(400).json({ error: 'itemId required' });
+  try {
+    const data = await fetchListingForOptimizer(itemId.trim(), req.companyId);
+    res.json(data);
+  } catch (e) {
+    console.error('[optimizer/fetch] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/optimizer/comps', async (req, res) => {
+  const { query, categoryId } = req.query;
+  if (!query) return res.status(400).json({ error: 'query required' });
+  try {
+    const comps = await fetchSoldComps(query.trim(), categoryId || '');
+    res.json({ comps });
+  } catch (e) {
+    console.error('[optimizer/comps] error:', e.message);
+    // Return empty rather than error so UI degrades gracefully
+    res.json({ comps: [], error: e.message });
+  }
+});
+
+app.post('/api/optimizer/ai-optimize', async (req, res) => {
+  const { listingData } = req.body;
+  if (!listingData) return res.status(400).json({ error: 'listingData required' });
+  if (!process.env.GEMINI_API_KEY) return res.status(500).json({ error: 'Server missing GEMINI_API_KEY' });
+  try {
+    const result = await aiOptimizeListing(listingData, process.env.GEMINI_API_KEY);
+    if (result.tokenUsage) {
+      incrementTokenUsage(req.companyId, result.tokenUsage.promptTokens, result.tokenUsage.completionTokens).catch(() => {});
+    }
+    res.json(result);
+  } catch (e) {
+    console.error('[optimizer/ai-optimize] error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, ShoppingBag, Shield, DollarSign } from 'lucide-react';
+import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, ShoppingBag, Shield, DollarSign, Zap } from 'lucide-react';
 import './index.css';
 
 import Uploader from './components/Uploader';
@@ -10,6 +10,7 @@ import SoldListings from './components/SoldListings';
 import Analytics from './components/Analytics';
 import SettingsPanel from './components/SettingsPanel';
 import SourcingTool from './components/SourcingTool';
+import ListingOptimizer from './components/ListingOptimizer';
 import AdminPanel from './components/AdminPanel';
 import LoginScreen from './components/LoginScreen';
 import { generateListing } from './services/ai';
@@ -51,7 +52,7 @@ function App() {
   });
 
   const [stagedListings, setStagedListings] = useState<StagedListing[]>([]);
-  const [activeTab, setActiveTab] = useState<'new' | 'staged' | 'listed' | 'sold' | 'analytics' | 'settings' | 'source' | 'admin'>('new');
+  const [activeTab, setActiveTab] = useState<'new' | 'staged' | 'listed' | 'sold' | 'analytics' | 'settings' | 'source' | 'optimizer' | 'admin'>('new');
   const [listedProducts, setListedProducts] = useState<StagedListing[]>([]);
   const [isLoadingListings, setIsLoadingListings] = useState(false);
 
@@ -376,6 +377,7 @@ function App() {
           <button style={tabBtnStyle('sold')} onClick={() => setActiveTab('sold')}><DollarSign size={18} /> Sold ({listedProducts.filter(l => !!l.soldAt).length})</button>
           <button style={tabBtnStyle('analytics')} onClick={() => setActiveTab('analytics')}><BarChart2 size={18} /> Analytics</button>
           <button style={tabBtnStyle('source')} onClick={() => setActiveTab('source')}><ShoppingBag size={18} /> Source</button>
+          <button style={tabBtnStyle('optimizer')} onClick={() => setActiveTab('optimizer')}><Zap size={18} /> Optimizer</button>
           {currentUser?.role === 'superadmin' && (
             <button style={tabBtnStyle('admin')} onClick={() => setActiveTab('admin')}><Shield size={18} /> Admin</button>
           )}
@@ -439,6 +441,10 @@ function App() {
         ) : activeTab === 'source' ? (
           <div className="animate-fade-in">
             <SourcingTool appPassword={appPassword} listed={listedProducts} />
+          </div>
+        ) : activeTab === 'optimizer' ? (
+          <div className="animate-fade-in">
+            <ListingOptimizer appPassword={appPassword} />
           </div>
         ) : activeTab === 'admin' && currentUser?.role === 'superadmin' ? (
           <div className="animate-fade-in">
