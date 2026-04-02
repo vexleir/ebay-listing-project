@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Trash2, Edit2, Copy, Check, Calendar, LayoutGrid, List, Wand2, TrendingUp, X, RefreshCw, ImagePlus, GripVertical, UploadCloud, Search, ChevronDown, ShieldCheck, ShieldAlert, ShieldX, Share2 } from 'lucide-react';
+import { Trash2, Edit2, Copy, Check, Calendar, LayoutGrid, List, Wand2, TrendingUp, X, RefreshCw, ImagePlus, GripVertical, UploadCloud, Search, ChevronDown, ShieldCheck, ShieldAlert, ShieldX, Share2, AlertTriangle } from 'lucide-react';
 import type { StagedListing, EbayPolicy } from '../types';
 import ResultsEditor from './ResultsEditor';
 import ImageSearchButton from './ImageSearchButton';
@@ -280,6 +280,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<SortOption>('date-desc');
   const [pushModal, setPushModal] = useState<PushModal | null>(null);
+  const [pushExtraSpecifics, setPushExtraSpecifics] = useState<{ name: string; value: string }[]>([]);
   const [expandedHealthId, setExpandedHealthId] = useState<string | null>(null);
 
   // Bulk selection
@@ -338,6 +339,8 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
   const openPushModal = async (listing: StagedListing) => {
     if (!isEbayConnected) { toast('Connect to eBay first.', 'error'); return; }
     const pw = appPassword || localStorage.getItem('app_password') || '';
+    const hasType = Object.keys(listing.itemSpecifics || {}).some(k => k.toLowerCase() === 'type');
+    setPushExtraSpecifics(hasType ? [] : [{ name: 'Type', value: '' }]);
     // Pre-load: settings for default policy, categories for suggested ID
     setPushModal({ listing, conditionId: autoConditionId(listing.condition), fulfillmentPolicyId: '', categoryId: '', fulfillmentPolicies: [], loading: true });
     try {
@@ -361,13 +364,17 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
     setPushingId(listing.id);
     setPushModal(null);
     try {
+      const mergedSpecifics = {
+        ...listing.itemSpecifics,
+        ...Object.fromEntries(pushExtraSpecifics.filter(s => s.name && s.value).map(s => [s.name, s.value])),
+      };
       const resp = await fetch('/api/ebay/draft', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pw}` },
-        body: JSON.stringify({ listing, overrideConditionId: conditionId, overrideFulfillmentPolicyId: fulfillmentPolicyId || undefined, overrideCategoryId: categoryId || undefined })
+        body: JSON.stringify({ listing: { ...listing, itemSpecifics: mergedSpecifics }, overrideConditionId: conditionId, overrideFulfillmentPolicyId: fulfillmentPolicyId || undefined, overrideCategoryId: categoryId || undefined })
       });
-      if (!resp.ok) throw new Error(await resp.text());
       const data = await resp.json();
+      if (!resp.ok || data.error) throw new Error(data.error ?? 'Push failed');
       onMoveToListed(listing, data.draftId);
       toast(`"${listing.title.substring(0, 40)}..." pushed to eBay!`, 'success');
     } catch (e: any) {
@@ -626,6 +633,47 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
                   <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>eBay Category ID</label>
                   <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0 0 6px 0' }}>AI category: "{pushModal.listing.category}"</p>
                   <input className="input-base" value={pushModal.categoryId} onChange={e => setPushModal(prev => prev ? { ...prev, categoryId: e.target.value } : null)} placeholder="Leave blank to use server default" />
+                </div>
+                {/* Item Specifics quick-fix */}
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <label style={{ fontSize: '0.85rem', fontWeight: 500 }}>
+                      Item Specifics
+                      <span style={{ fontSize: '0.75rem', fontWeight: 400, color: 'var(--text-secondary)', marginLeft: '6px' }}>
+                        ({Object.keys(pushModal.listing.itemSpecifics || {}).length} set)
+                      </span>
+                    </label>
+                    <button
+                      className="btn-icon"
+                      style={{ fontSize: '0.72rem', padding: '2px 8px' }}
+                      onClick={() => setPushExtraSpecifics(prev => [...prev, { name: '', value: '' }])}
+                    >+ Add field</button>
+                  </div>
+                  {!Object.keys(pushModal.listing.itemSpecifics || {}).some(k => k.toLowerCase() === 'type') &&
+                   !pushExtraSpecifics.some(s => s.name.toLowerCase() === 'type') && (
+                    <div style={{ fontSize: '0.78rem', color: '#f59e0b', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                      <AlertTriangle size={12} /> "Type" is required for most eBay categories — fill it in below
+                    </div>
+                  )}
+                  {pushExtraSpecifics.map((s, i) => (
+                    <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '6px', marginBottom: '6px' }}>
+                      <input
+                        className="input-base"
+                        value={s.name}
+                        onChange={e => setPushExtraSpecifics(prev => prev.map((r, idx) => idx === i ? { ...r, name: e.target.value } : r))}
+                        placeholder="Name (e.g. Type)"
+                        style={{ fontSize: '0.8rem', padding: '6px 10px' }}
+                      />
+                      <input
+                        className="input-base"
+                        value={s.value}
+                        onChange={e => setPushExtraSpecifics(prev => prev.map((r, idx) => idx === i ? { ...r, value: e.target.value } : r))}
+                        placeholder="Value (e.g. T-Shirt)"
+                        style={{ fontSize: '0.8rem', padding: '6px 10px' }}
+                      />
+                      <button className="btn-icon" style={{ color: '#ef4444', padding: '4px 8px' }} onClick={() => setPushExtraSpecifics(prev => prev.filter((_, idx) => idx !== i))}>✕</button>
+                    </div>
+                  ))}
                 </div>
                 <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '0.5rem' }}>
                   <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setPushModal(null)}>Cancel</button>
