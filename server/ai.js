@@ -77,7 +77,7 @@ async function generateListing(imageParts, instructions, apiKey) {
       
       1. "condition": A concise condition report based purely on visual evidence and instructions.
       2. "description": An HTML description optimized to maximize purchase likelihood. Include a clear Call To Action. The styling must be inline CSS with a color scheme matching the product. Look premium and trustworthy. Do NOT wrap this field value in markdown.
-      3. "itemSpecifics": A JSON object containing key/value pairs of relevant eBay Item Specifics (e.g. "Brand": "Nike", "MPN": "Does Not Apply"). Fill in "Unable to determine" if unknown.
+      3. "itemSpecifics": A JSON object containing key/value pairs of relevant eBay Item Specifics (e.g. "Brand": "Nike", "MPN": "Does Not Apply"). IMPORTANT RULES: (a) ALWAYS include a "Type" field describing what kind of item this is (e.g. "T-Shirt", "Action Figure", "Trading Card", "Necklace"). (b) NEVER include "Condition", "ConditionID", "Price", "Currency", or "Listing Type" — eBay handles these separately. (c) Fill in "Does Not Apply" if a value is truly unknown, not "Unable to determine".
       4. "category": The most accurate suggested eBay category path (e.g. "Collectibles > Historical Memorabilia").
       5. "priceRecommendation": A single recommended sell price as a plain decimal number string only (e.g. "49.99"). No currency symbols, no ranges, no text — just the number.
       6. "priceJustification": A brief explanation of why that price was chosen (comparable sold listings, condition, rarity, etc.). This is for the seller's reference only.

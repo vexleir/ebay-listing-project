@@ -656,9 +656,19 @@ app.post('/api/ebay/draft', async (req, res) => {
     if (uploadedPictureUrls.length > 0) {
       pictureDetailsXml = '<PictureDetails>\n' + uploadedPictureUrls.map(url => `<PictureURL>${url}</PictureURL>`).join('\n') + '\n</PictureDetails>';
     }
+    // Fields eBay handles via dedicated XML elements — sending them in ItemSpecifics
+    // causes "Dropped condition" warnings that can block the push with other required-field errors.
+    const RESERVED_SPECIFICS = new Set([
+      'condition', 'conditionid', 'condition id', 'price', 'start price',
+      'buy it now price', 'currency', 'listing type', 'listing duration',
+    ]);
     let itemSpecificsXml = '';
     if (listing.itemSpecifics && Object.keys(listing.itemSpecifics).length > 0) {
-      itemSpecificsXml = '<ItemSpecifics>\n' + Object.entries(listing.itemSpecifics).map(([name, val]) => `<NameValueList><Name><![CDATA[${name}]]></Name><Value><![CDATA[${val}]]></Value></NameValueList>`).join('\n') + '\n</ItemSpecifics>';
+      const filteredEntries = Object.entries(listing.itemSpecifics)
+        .filter(([name, val]) => name && val && !RESERVED_SPECIFICS.has(name.toLowerCase().trim()));
+      if (filteredEntries.length > 0) {
+        itemSpecificsXml = '<ItemSpecifics>\n' + filteredEntries.map(([name, val]) => `<NameValueList><Name><![CDATA[${name}]]></Name><Value><![CDATA[${val}]]></Value></NameValueList>`).join('\n') + '\n</ItemSpecifics>';
+      }
     }
 
     const descHeader = userSettings.descriptionHeader || '';
@@ -698,10 +708,22 @@ app.post('/api/ebay/draft', async (req, res) => {
       headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1331', 'X-EBAY-API-CALL-NAME': 'AddFixedPriceItem', 'X-EBAY-API-SITEID': '0', 'X-EBAY-API-IAF-TOKEN': token, 'Content-Type': 'text/xml' }
     });
     if (addRes.data.includes('<Ack>Failure</Ack>') || addRes.data.includes('<Ack>Error</Ack>')) {
-      const errorMatches = [...addRes.data.matchAll(/<LongMessage>(.*?)<\/LongMessage>/g)];
-      const errorMsg = errorMatches.length > 0 ? errorMatches.map(m => m[1]).join(' | ') : 'Unknown Trading API Error';
-      console.error('eBay Trading API Error:', errorMsg);
-      return res.status(400).json({ error: 'eBay API Error: ' + errorMsg });
+      // Parse each <Errors> block separately so we can separate true errors from warnings
+      const errBlocks = [...addRes.data.matchAll(/<Errors>([\s\S]*?)<\/Errors>/g)].map(m => m[1]);
+      const trueErrors = [];
+      const warnings = [];
+      errBlocks.forEach(block => {
+        const severity = block.match(/<SeverityCode>(.*?)<\/SeverityCode>/)?.[1] || 'Error';
+        const msg = block.match(/<LongMessage>(.*?)<\/LongMessage>/)?.[1] || '';
+        if (msg) {
+          if (severity === 'Warning') warnings.push(msg);
+          else trueErrors.push(msg);
+        }
+      });
+      if (warnings.length) console.warn('[draft] eBay warnings:', warnings.join(' | '));
+      const errorMsg = trueErrors.length > 0 ? trueErrors.join(' | ') : 'Unknown Trading API Error';
+      console.error('[draft] eBay errors:', errorMsg);
+      return res.status(400).json({ error: 'eBay API Error: ' + errorMsg, warnings });
     }
     const itemIdMatch = addRes.data.match(/<ItemID>(.*?)<\/ItemID>/);
     const draftId = itemIdMatch ? itemIdMatch[1] : 'Unknown ID';
