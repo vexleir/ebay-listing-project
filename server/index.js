@@ -342,6 +342,30 @@ app.post('/api/generate-from-urls', async (req, res) => {
 
 // ─── eBay API helpers ─────────────────────────────────────────────────────────
 
+// Returns the valid ConditionIDs for a given category (varies by category type)
+app.get('/api/ebay/category-conditions', async (req, res) => {
+  const { categoryId } = req.query;
+  if (!categoryId) return res.status(400).json({ error: 'categoryId required' });
+  try {
+    const token = await getValidAccessToken(req.companyId);
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetCategoryFeaturesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <CategoryID>${categoryId}</CategoryID>
+  <FeatureID>ConditionValues</FeatureID>
+  <ViewAllNodes>true</ViewAllNodes>
+</GetCategoryFeaturesRequest>`;
+    const resp = await axios.post('https://api.ebay.com/ws/api.dll', xml, {
+      headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1331', 'X-EBAY-API-CALL-NAME': 'GetCategoryFeatures', 'X-EBAY-API-SITEID': '0', 'X-EBAY-API-IAF-TOKEN': token, 'Content-Type': 'text/xml' }
+    });
+    const conditions = [...resp.data.matchAll(/<Condition>\s*<ID>(\d+)<\/ID>\s*<DisplayName>(.*?)<\/DisplayName>/g)]
+      .map(m => ({ id: m[1], label: m[2] }));
+    res.json({ conditions });
+  } catch (e) {
+    console.error('[category-conditions] error:', e.message);
+    res.json({ conditions: [] }); // empty = client falls back to full list
+  }
+});
+
 app.get('/api/ebay/categories', async (req, res) => {
   try {
     const query = (req.query.query || '').trim();
@@ -707,20 +731,41 @@ app.post('/api/ebay/draft', async (req, res) => {
     const addRes = await axios.post(TRADING_URL, addItemXml, {
       headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1331', 'X-EBAY-API-CALL-NAME': 'AddFixedPriceItem', 'X-EBAY-API-SITEID': '0', 'X-EBAY-API-IAF-TOKEN': token, 'Content-Type': 'text/xml' }
     });
-    if (addRes.data.includes('<Ack>Failure</Ack>') || addRes.data.includes('<Ack>Error</Ack>')) {
-      // Parse each <Errors> block separately so we can separate true errors from warnings
-      const errBlocks = [...addRes.data.matchAll(/<Errors>([\s\S]*?)<\/Errors>/g)].map(m => m[1]);
-      const trueErrors = [];
-      const warnings = [];
-      errBlocks.forEach(block => {
-        const severity = block.match(/<SeverityCode>(.*?)<\/SeverityCode>/)?.[1] || 'Error';
-        const msg = block.match(/<LongMessage>(.*?)<\/LongMessage>/)?.[1] || '';
-        if (msg) {
-          if (severity === 'Warning') warnings.push(msg);
-          else trueErrors.push(msg);
-        }
+    // Parse errors/warnings from the response
+    const parseEbayErrors = (xml) => {
+      const blocks = [...xml.matchAll(/<Errors>([\s\S]*?)<\/Errors>/g)].map(m => m[1]);
+      const errors = [], warnings2 = [];
+      blocks.forEach(b => {
+        const severity = b.match(/<SeverityCode>(.*?)<\/SeverityCode>/)?.[1] || 'Error';
+        const msg = b.match(/<LongMessage>(.*?)<\/LongMessage>/)?.[1] || '';
+        if (msg) { severity === 'Warning' ? warnings2.push(msg) : errors.push(msg); }
       });
+      return { errors, warnings: warnings2 };
+    };
+
+    if (addRes.data.includes('<Ack>Failure</Ack>') || addRes.data.includes('<Ack>Error</Ack>')) {
+      const { errors: trueErrors, warnings } = parseEbayErrors(addRes.data);
       if (warnings.length) console.warn('[draft] eBay warnings:', warnings.join(' | '));
+
+      // Auto-retry: if the only blocking error is an invalid condition, fall back to 3000 (Used)
+      const isConditionError = trueErrors.length > 0 && trueErrors.every(e =>
+        e.toLowerCase().includes('condition') && (e.toLowerCase().includes('invalid') || e.toLowerCase().includes('not valid'))
+      );
+      if (isConditionError && conditionId !== '3000') {
+        console.warn(`[draft] Condition ${conditionId} invalid for category ${config.categoryId} — retrying with 3000 (Used)`);
+        const retryXml = addItemXml.replace(`<ConditionID>${conditionId}</ConditionID>`, '<ConditionID>3000</ConditionID>');
+        const retryRes = await axios.post(TRADING_URL, retryXml, {
+          headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1331', 'X-EBAY-API-CALL-NAME': 'AddFixedPriceItem', 'X-EBAY-API-SITEID': '0', 'X-EBAY-API-IAF-TOKEN': token, 'Content-Type': 'text/xml' }
+        });
+        if (!retryRes.data.includes('<Ack>Failure</Ack>') && !retryRes.data.includes('<Ack>Error</Ack>')) {
+          const retryItemId = retryRes.data.match(/<ItemID>(.*?)<\/ItemID>/)?.[1] || 'Unknown ID';
+          console.log(`[draft] Retry succeeded with condition 3000. Item ID: ${retryItemId}`);
+          return res.json({ success: true, draftId: retryItemId, conditionFallback: true });
+        }
+        const { errors: retryErrors, warnings: retryWarnings } = parseEbayErrors(retryRes.data);
+        return res.status(400).json({ error: 'eBay API Error: ' + retryErrors.join(' | '), warnings: retryWarnings });
+      }
+
       const errorMsg = trueErrors.length > 0 ? trueErrors.join(' | ') : 'Unknown Trading API Error';
       console.error('[draft] eBay errors:', errorMsg);
       return res.status(400).json({ error: 'eBay API Error: ' + errorMsg, warnings });

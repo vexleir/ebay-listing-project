@@ -264,6 +264,7 @@ function ImageEditModal({ listing, appPassword, onSave, onClose }: {
 interface PushModal {
   listing: StagedListing;
   conditionId: string;
+  validConditions: { id: string; label: string }[];
   fulfillmentPolicyId: string;
   categoryId: string;
   fulfillmentPolicies: EbayPolicy[];
@@ -342,7 +343,8 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
     const hasType = Object.keys(listing.itemSpecifics || {}).some(k => k.toLowerCase() === 'type');
     setPushExtraSpecifics(hasType ? [] : [{ name: 'Type', value: '' }]);
     // Pre-load: settings for default policy, categories for suggested ID
-    setPushModal({ listing, conditionId: autoConditionId(listing.condition), fulfillmentPolicyId: '', categoryId: '', fulfillmentPolicies: [], loading: true });
+    const desiredConditionId = autoConditionId(listing.condition);
+    setPushModal({ listing, conditionId: desiredConditionId, validConditions: [], fulfillmentPolicyId: '', categoryId: '', fulfillmentPolicies: [], loading: true });
     try {
       const [settingsResp, policiesResp, categoryResp] = await Promise.all([
         fetch('/api/settings', { headers: { 'Authorization': `Bearer ${pw}` } }).then(r => r.json()).catch(() => ({})),
@@ -351,7 +353,26 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
       ]);
       const defaultPolicyId = settingsResp.defaultFulfillmentPolicyId || '';
       const suggestedCategoryId = Array.isArray(categoryResp) && categoryResp[0] ? categoryResp[0].id : '';
-      setPushModal(prev => prev ? { ...prev, loading: false, fulfillmentPolicyId: defaultPolicyId, categoryId: suggestedCategoryId, fulfillmentPolicies: policiesResp.fulfillmentPolicies || [] } : null);
+
+      // Fetch valid conditions for the resolved category
+      let validConditions: { id: string; label: string }[] = [];
+      if (suggestedCategoryId) {
+        validConditions = await fetch(`/api/ebay/category-conditions?categoryId=${suggestedCategoryId}`, { headers: { 'Authorization': `Bearer ${pw}` } })
+          .then(r => r.json()).then(d => d.conditions || []).catch(() => []);
+      }
+
+      // Auto-correct condition: if desired condition isn't valid for this category, pick closest
+      let resolvedConditionId = desiredConditionId;
+      if (validConditions.length > 0) {
+        const validIds = validConditions.map(c => c.id);
+        if (!validIds.includes(resolvedConditionId)) {
+          // Walk from desired toward 3000 (Used) to find the nearest valid option
+          const fallbackOrder = [desiredConditionId, '3000', '1000', '4000', '5000', '6000'];
+          resolvedConditionId = fallbackOrder.find(id => validIds.includes(id)) ?? validIds[0];
+        }
+      }
+
+      setPushModal(prev => prev ? { ...prev, loading: false, conditionId: resolvedConditionId, validConditions, fulfillmentPolicyId: defaultPolicyId, categoryId: suggestedCategoryId, fulfillmentPolicies: policiesResp.fulfillmentPolicies || [] } : null);
     } catch {
       setPushModal(prev => prev ? { ...prev, loading: false } : null);
     }
@@ -617,8 +638,14 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
                   <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>eBay Condition</label>
                   <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0 0 6px 0' }}>AI assessed: "{pushModal.listing.condition?.substring(0, 80)}"</p>
                   <select className="input-base" value={pushModal.conditionId} onChange={e => setPushModal(prev => prev ? { ...prev, conditionId: e.target.value } : null)}>
-                    {EBAY_CONDITIONS.map(c => <option key={c.id} value={c.id}>{c.id} — {c.label}</option>)}
+                    {(pushModal.validConditions.length > 0 ? pushModal.validConditions : EBAY_CONDITIONS)
+                      .map(c => <option key={c.id} value={c.id}>{c.id} — {c.label}</option>)}
                   </select>
+                  {pushModal.validConditions.length > 0 && pushModal.validConditions.length < EBAY_CONDITIONS.length && (
+                    <p style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', margin: '4px 0 0 0' }}>
+                      Showing {pushModal.validConditions.length} condition{pushModal.validConditions.length !== 1 ? 's' : ''} valid for this category
+                    </p>
+                  )}
                 </div>
                 {pushModal.fulfillmentPolicies.length > 0 && (
                   <div>
