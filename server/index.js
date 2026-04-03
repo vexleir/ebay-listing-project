@@ -608,7 +608,7 @@ function getConditionId(conditionStr) {
 }
 
 app.post('/api/ebay/draft', async (req, res) => {
-  const { listing, overrideCategoryId, overrideConditionId, overrideFulfillmentPolicyId } = req.body;
+  const { listing, overrideCategoryId, overrideConditionId, overrideFulfillmentPolicyId, scheduleDate } = req.body;
   const userSettings = await getSettings(req.companyId).catch(() => ({}));
   const config = {
     fulfillmentPolicy: overrideFulfillmentPolicyId || userSettings.defaultFulfillmentPolicyId || process.env.EBAY_FULFILLMENT_POLICY_ID,
@@ -672,9 +672,20 @@ app.post('/api/ebay/draft', async (req, res) => {
     const rawPrice = (listing.priceRecommendation || '').replace(/[^0-9.]/g, '');
     const validPrice = rawPrice && !isNaN(parseFloat(rawPrice)) ? parseFloat(rawPrice).toFixed(2) : '50.00';
     const conditionId = overrideConditionId || getConditionId(listing.condition);
-    const scheduleDate = new Date();
-    scheduleDate.setDate(scheduleDate.getDate() + 21);
-    const scheduleTimeStr = scheduleDate.toISOString();
+
+    // ScheduleTime — validate within eBay's 21-day window, fall back to immediate if invalid
+    let scheduleTimeXml = '';
+    if (scheduleDate) {
+      const scheduleMs = new Date(scheduleDate).getTime();
+      const maxMs = Date.now() + (21 * 24 * 60 * 60 * 1000);
+      const minMs = Date.now() + (5 * 60 * 1000); // at least 5 min in the future
+      if (scheduleMs >= minMs && scheduleMs <= maxMs) {
+        scheduleTimeXml = `<ScheduleTime>${new Date(scheduleDate).toISOString()}</ScheduleTime>`;
+        console.log(`[draft] Scheduling listing for: ${new Date(scheduleDate).toISOString()}`);
+      } else {
+        console.warn(`[draft] scheduleDate ${scheduleDate} out of eBay range — listing immediately`);
+      }
+    }
 
     let pictureDetailsXml = '';
     if (uploadedPictureUrls.length > 0) {
@@ -724,7 +735,7 @@ app.post('/api/ebay/draft', async (req, res) => {
       <SellerReturnProfile><ReturnProfileID>${config.returnPolicy}</ReturnProfileID></SellerReturnProfile>
       <SellerShippingProfile><ShippingProfileID>${config.fulfillmentPolicy}</ShippingProfileID></SellerShippingProfile>
     </SellerProfiles>
-    <ScheduleTime>${scheduleTimeStr}</ScheduleTime>
+    ${scheduleTimeXml}
   </Item>
 </AddFixedPriceItemRequest>`;
 

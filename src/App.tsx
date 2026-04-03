@@ -244,14 +244,18 @@ function App() {
   };
 
   const handleMoveToListed = async (listing: StagedListing, draftId: string) => {
-    const listedListing: StagedListing = { ...listing, status: 'listed', ebayDraftId: draftId, updatedAt: Date.now() };
+    const now = Date.now();
+    const listedListing: StagedListing = { ...listing, status: 'listed', ebayDraftId: draftId, updatedAt: now };
     setStagedListings(prev => prev.filter(l => l.id !== listing.id));
     setListedProducts(prev => [listedListing, ...prev]);
     setActiveTab('listed');
-    await Promise.all([
-      fetch(`/api/listings/${listing.id}`, { method: 'DELETE', headers: bearerHeaders(appPassword) }),
-      fetch('/api/listings', { method: 'POST', headers: apiHeaders(appPassword), body: JSON.stringify({ listing: listedListing }) }),
-    ]);
+    // Single atomic PUT instead of DELETE+POST — avoids race condition where deleteOne
+    // could match the newly-created listed doc (both share the same id field).
+    await fetch(`/api/listings/${listing.id}`, {
+      method: 'PUT',
+      headers: apiHeaders(appPassword),
+      body: JSON.stringify({ updates: { status: 'listed', ebayDraftId: draftId, updatedAt: now } }),
+    });
   };
 
   const handleDeleteListedListing = (id: string) => {

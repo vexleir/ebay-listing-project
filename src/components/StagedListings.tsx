@@ -265,6 +265,7 @@ interface PushModal {
   listing: StagedListing;
   conditionId: string;
   validConditions: { id: string; label: string }[];
+  scheduleDate: string; // datetime-local string, empty = list immediately
   fulfillmentPolicyId: string;
   categoryId: string;
   fulfillmentPolicies: EbayPolicy[];
@@ -282,6 +283,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
   const [sortBy, setSortBy] = useState<SortOption>('date-desc');
   const [pushModal, setPushModal] = useState<PushModal | null>(null);
   const [pushExtraSpecifics, setPushExtraSpecifics] = useState<{ name: string; value: string }[]>([]);
+  const [pushErrorModal, setPushErrorModal] = useState<{ title: string; message: string } | null>(null);
   const [expandedHealthId, setExpandedHealthId] = useState<string | null>(null);
 
   // Bulk selection
@@ -344,7 +346,10 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
     setPushExtraSpecifics(hasType ? [] : [{ name: 'Type', value: '' }]);
     // Pre-load: settings for default policy, categories for suggested ID
     const desiredConditionId = autoConditionId(listing.condition);
-    setPushModal({ listing, conditionId: desiredConditionId, validConditions: [], fulfillmentPolicyId: '', categoryId: '', fulfillmentPolicies: [], loading: true });
+    // Default schedule: 21 days from now (eBay's max), formatted for datetime-local input
+    const defaultSchedule = new Date(Date.now() + 21 * 24 * 60 * 60 * 1000);
+    const defaultScheduleStr = defaultSchedule.toISOString().slice(0, 16); // "YYYY-MM-DDTHH:mm"
+    setPushModal({ listing, conditionId: desiredConditionId, validConditions: [], scheduleDate: defaultScheduleStr, fulfillmentPolicyId: '', categoryId: '', fulfillmentPolicies: [], loading: true });
     try {
       const [settingsResp, policiesResp, categoryResp] = await Promise.all([
         fetch('/api/settings', { headers: { 'Authorization': `Bearer ${pw}` } }).then(r => r.json()).catch(() => ({})),
@@ -380,7 +385,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
 
   const confirmPushToEbay = async () => {
     if (!pushModal) return;
-    const { listing, conditionId, fulfillmentPolicyId, categoryId } = pushModal;
+    const { listing, conditionId, fulfillmentPolicyId, categoryId, scheduleDate } = pushModal;
     const pw = appPassword || localStorage.getItem('app_password') || '';
     setPushingId(listing.id);
     setPushModal(null);
@@ -392,14 +397,18 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
       const resp = await fetch('/api/ebay/draft', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pw}` },
-        body: JSON.stringify({ listing: { ...listing, itemSpecifics: mergedSpecifics }, overrideConditionId: conditionId, overrideFulfillmentPolicyId: fulfillmentPolicyId || undefined, overrideCategoryId: categoryId || undefined })
+        body: JSON.stringify({ listing: { ...listing, itemSpecifics: mergedSpecifics }, overrideConditionId: conditionId, overrideFulfillmentPolicyId: fulfillmentPolicyId || undefined, overrideCategoryId: categoryId || undefined, scheduleDate: scheduleDate || undefined })
       });
       const data = await resp.json();
       if (!resp.ok || data.error) throw new Error(data.error ?? 'Push failed');
+      if (data.conditionFallback) {
+        toast(`Pushed! eBay auto-corrected condition to "Used" for this category.`, 'info');
+      }
       onMoveToListed(listing, data.draftId);
       toast(`"${listing.title.substring(0, 40)}..." pushed to eBay!`, 'success');
     } catch (e: any) {
-      toast('Error pushing to eBay: ' + e.message, 'error');
+      // Show a persistent error modal so the full message is readable
+      setPushErrorModal({ title: listing.title.substring(0, 60), message: e.message });
     } finally {
       setPushingId(null);
     }
@@ -617,6 +626,30 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
   return (
     <div>
       {crossPostListing && <CrossPostModal listing={crossPostListing} onClose={() => setCrossPostListing(null)} />}
+
+      {/* Push error modal — persistent so the full message can be read */}
+      {pushErrorModal && createPortal(
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 9100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+          <div className="glass-panel" style={{ width: '100%', maxWidth: '560px', padding: '1.75rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '1rem' }}>
+              <AlertTriangle size={20} style={{ color: '#ef4444', flexShrink: 0 }} />
+              <h3 style={{ margin: 0, fontSize: '1rem', color: '#ef4444' }}>eBay Push Failed</h3>
+            </div>
+            <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {pushErrorModal.title}
+            </p>
+            <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.35)', borderRadius: '8px', padding: '12px 14px', fontSize: '0.85rem', color: '#fca5a5', lineHeight: 1.6, marginBottom: '1.25rem', wordBreak: 'break-word', userSelect: 'text' }}>
+              {pushErrorModal.message}
+            </div>
+            <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '1.25rem' }}>
+              Copy the error above and share it if you need help. Check your item specifics (especially "Type") and condition for this category.
+            </p>
+            <button className="btn-primary" onClick={() => setPushErrorModal(null)} style={{ width: '100%' }}>Dismiss</button>
+          </div>
+        </div>,
+        document.body
+      )}
+
       {/* Push confirmation modal */}
       {pushModal && createPortal(
         <div onClick={() => setPushModal(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
@@ -660,6 +693,44 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
                   <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>eBay Category ID</label>
                   <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0 0 6px 0' }}>AI category: "{pushModal.listing.category}"</p>
                   <input className="input-base" value={pushModal.categoryId} onChange={e => setPushModal(prev => prev ? { ...prev, categoryId: e.target.value } : null)} placeholder="Leave blank to use server default" />
+                </div>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <label style={{ fontSize: '0.85rem', fontWeight: 500 }}>Schedule Listing</label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                      <input
+                        type="checkbox"
+                        checked={!!pushModal.scheduleDate}
+                        onChange={e => {
+                          if (e.target.checked) {
+                            const d = new Date(Date.now() + 21 * 24 * 60 * 60 * 1000);
+                            setPushModal(prev => prev ? { ...prev, scheduleDate: d.toISOString().slice(0, 16) } : null);
+                          } else {
+                            setPushModal(prev => prev ? { ...prev, scheduleDate: '' } : null);
+                          }
+                        }}
+                        style={{ accentColor: 'var(--accent-color)', width: '14px', height: '14px' }}
+                      />
+                      Schedule for later
+                    </label>
+                  </div>
+                  {pushModal.scheduleDate ? (
+                    <>
+                      <input
+                        type="datetime-local"
+                        className="input-base"
+                        value={pushModal.scheduleDate}
+                        min={new Date(Date.now() + 5 * 60 * 1000).toISOString().slice(0, 16)}
+                        max={new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16)}
+                        onChange={e => setPushModal(prev => prev ? { ...prev, scheduleDate: e.target.value } : null)}
+                      />
+                      <p style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', margin: '4px 0 0 0' }}>
+                        eBay will make this listing live at the selected time (max 21 days out)
+                      </p>
+                    </>
+                  ) : (
+                    <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>Listing will go live immediately when pushed</p>
+                  )}
                 </div>
                 {/* Item Specifics quick-fix */}
                 <div>
