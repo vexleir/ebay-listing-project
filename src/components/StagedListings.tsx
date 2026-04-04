@@ -62,6 +62,12 @@ function computeHealthScore(listing: StagedListing): HealthScore {
   return { score, issues };
 }
 
+// Format a Date as "YYYY-MM-DDTHH:mm" in Arizona time (UTC-7, no DST)
+const toArizonaLocalISO = (date: Date): string => {
+  const az = new Date(date.getTime() - 7 * 60 * 60 * 1000);
+  return az.toISOString().slice(0, 16);
+};
+
 const EBAY_CONDITIONS = [
   { id: '1000', label: 'New' },
   { id: '1500', label: 'New Other (open box)' },
@@ -348,7 +354,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
     const desiredConditionId = autoConditionId(listing.condition);
     // Default schedule: 21 days from now (eBay's max), formatted for datetime-local input
     const defaultSchedule = new Date(Date.now() + 21 * 24 * 60 * 60 * 1000);
-    const defaultScheduleStr = defaultSchedule.toISOString().slice(0, 16); // "YYYY-MM-DDTHH:mm"
+    const defaultScheduleStr = toArizonaLocalISO(defaultSchedule);
     setPushModal({ listing, conditionId: desiredConditionId, validConditions: [], scheduleDate: defaultScheduleStr, fulfillmentPolicyId: '', categoryId: '', fulfillmentPolicies: [], loading: true });
     try {
       const [settingsResp, policiesResp, categoryResp] = await Promise.all([
@@ -397,7 +403,8 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
       const resp = await fetch('/api/ebay/draft', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pw}` },
-        body: JSON.stringify({ listing: { ...listing, itemSpecifics: mergedSpecifics }, overrideConditionId: conditionId, overrideFulfillmentPolicyId: fulfillmentPolicyId || undefined, overrideCategoryId: categoryId || undefined, scheduleDate: scheduleDate || undefined })
+        // Append Arizona offset (-07:00) so the server parses the local time correctly
+        body: JSON.stringify({ listing: { ...listing, itemSpecifics: mergedSpecifics }, overrideConditionId: conditionId, overrideFulfillmentPolicyId: fulfillmentPolicyId || undefined, overrideCategoryId: categoryId || undefined, scheduleDate: scheduleDate ? new Date(scheduleDate + ':00-07:00').toISOString() : undefined })
       });
       const data = await resp.json();
       if (!resp.ok || data.error) throw new Error(data.error ?? 'Push failed');
@@ -704,7 +711,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
                         onChange={e => {
                           if (e.target.checked) {
                             const d = new Date(Date.now() + 21 * 24 * 60 * 60 * 1000);
-                            setPushModal(prev => prev ? { ...prev, scheduleDate: d.toISOString().slice(0, 16) } : null);
+                            setPushModal(prev => prev ? { ...prev, scheduleDate: toArizonaLocalISO(d) } : null);
                           } else {
                             setPushModal(prev => prev ? { ...prev, scheduleDate: '' } : null);
                           }
@@ -720,8 +727,8 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
                         type="datetime-local"
                         className="input-base"
                         value={pushModal.scheduleDate}
-                        min={new Date(Date.now() + 5 * 60 * 1000).toISOString().slice(0, 16)}
-                        max={new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16)}
+                        min={toArizonaLocalISO(new Date(Date.now() + 5 * 60 * 1000))}
+                        max={toArizonaLocalISO(new Date(Date.now() + 21 * 24 * 60 * 60 * 1000))}
                         onChange={e => setPushModal(prev => prev ? { ...prev, scheduleDate: e.target.value } : null)}
                       />
                       <p style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', margin: '4px 0 0 0' }}>
