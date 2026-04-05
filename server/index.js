@@ -786,8 +786,11 @@ app.post('/api/ebay/draft', async (req, res) => {
     console.log(`Successfully pushed to eBay! Scheduled Item ID: ${draftId}`);
     res.json({ success: true, draftId });
   } catch (error) {
-    console.error('Node Error:', error.message);
-    res.status(500).json({ error: 'Failed to push scheduled draft to eBay via XML' });
+    const msg = error?.response?.data
+      ? (() => { const m = String(error.response.data).match(/<LongMessage>(.*?)<\/LongMessage>/); return m ? m[1] : String(error.response.data).substring(0, 300); })()
+      : error.message;
+    console.error('Node Error:', msg);
+    res.status(500).json({ error: `Push failed: ${msg}` });
   }
 });
 
