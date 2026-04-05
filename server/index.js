@@ -786,9 +786,16 @@ app.post('/api/ebay/draft', async (req, res) => {
     console.log(`Successfully pushed to eBay! Scheduled Item ID: ${draftId}`);
     res.json({ success: true, draftId });
   } catch (error) {
-    const msg = error?.response?.data
-      ? (() => { const m = String(error.response.data).match(/<LongMessage>(.*?)<\/LongMessage>/); return m ? m[1] : String(error.response.data).substring(0, 300); })()
-      : error.message;
+    let msg = error.message;
+    if (error?.response?.data) {
+      const d = error.response.data;
+      if (typeof d === 'string') {
+        const m = d.match(/<LongMessage>(.*?)<\/LongMessage>/);
+        msg = m ? m[1] : d.substring(0, 400);
+      } else if (typeof d === 'object') {
+        msg = JSON.stringify(d).substring(0, 400);
+      }
+    }
     console.error('Node Error:', msg);
     res.status(500).json({ error: `Push failed: ${msg}` });
   }
