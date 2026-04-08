@@ -397,6 +397,9 @@ function App() {
               {tokenDaysLeft !== null && (
                 <span style={{ fontSize: '0.72rem', color: tokenExpiryColor, opacity: 0.85 }}>Token expires in {tokenDaysLeft}d</span>
               )}
+              <button className="btn-icon" onClick={handleEbayConnect} style={{ fontSize: '0.68rem', padding: '1px 6px', opacity: 0.6 }}>
+                Reconnect
+              </button>
             </div>
           ) : (
             <button className="btn-primary" onClick={handleEbayConnect} style={{ fontSize: '0.85rem', padding: '6px 12px' }}>
