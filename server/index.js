@@ -204,6 +204,25 @@ app.get('/api/ebay/token-info', async (req, res) => {
   }
 });
 
+app.get('/api/ebay/debug-auth', async (req, res) => {
+  try {
+    const db = await getDb();
+    const doc = await db.collection('tokens').findOne({ _id: `${req.companyId}_tokens` });
+    res.json({
+      companyId: req.companyId,
+      clientIdPrefix: (process.env.EBAY_CLIENT_ID || '').substring(0, 12) + '...',
+      hasClientSecret: !!(process.env.EBAY_CLIENT_SECRET),
+      ruName: process.env.EBAY_RU_NAME || '(not set)',
+      tokenDocExists: !!doc,
+      refreshTokenPrefix: doc?.refresh_token ? doc.refresh_token.substring(0, 10) + '...' : null,
+      accessTokenExpiry: doc?.expires_at ? new Date(doc.expires_at).toISOString() : null,
+      refreshTokenExpiry: doc?.refresh_token_expires_at ? new Date(doc.refresh_token_expires_at).toISOString() : null,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/ebay/auth-status', async (req, res) => {
   try {
     const connected = await hasValidSession(req.companyId);
