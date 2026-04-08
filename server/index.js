@@ -77,6 +77,27 @@ app.delete('/api/ebay/tokens', async (req, res) => {
   }
 });
 
+// Temporary public debug endpoint — remove after diagnosing eBay auth issue
+app.get('/api/ebay/debug-auth-public', async (req, res) => {
+  try {
+    const db = await getDb();
+    const companies = await db.collection('tokens').find({}).toArray();
+    res.json({
+      clientIdPrefix: (process.env.EBAY_CLIENT_ID || '(not set)').substring(0, 15) + '...',
+      hasClientSecret: !!(process.env.EBAY_CLIENT_SECRET),
+      ruName: process.env.EBAY_RU_NAME || '(not set)',
+      tokenDocs: companies.map(doc => ({
+        id: doc._id,
+        refreshTokenPrefix: doc.refresh_token ? doc.refresh_token.substring(0, 10) + '...' : null,
+        refreshTokenExpiry: doc.refresh_token_expires_at ? new Date(doc.refresh_token_expires_at).toISOString() : null,
+        accessTokenExpiry: doc.expires_at ? new Date(doc.expires_at).toISOString() : null,
+      })),
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── Auth middleware — all /api/* routes below this require a valid JWT ──────
 app.use('/api/', authMiddleware);
 
