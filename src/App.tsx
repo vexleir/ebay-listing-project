@@ -142,6 +142,35 @@ function App() {
     }
   };
 
+  const handleEbayDisconnect = async () => {
+    await fetch('/api/ebay/tokens', { method: 'DELETE', headers: bearerHeaders(appPassword) });
+    setIsEbayConnected(false);
+    setTokenExpiresAt(null);
+    toast('eBay disconnected. Click "Connect to eBay" to reconnect.', 'info');
+  };
+
+  // Handle ?ebay=connected / ?ebay=error after OAuth redirect
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const ebayStatus = params.get('ebay');
+    if (!ebayStatus) return;
+    window.history.replaceState({}, '', '/');
+    if (ebayStatus === 'connected') {
+      setIsEbayConnected(true);
+      toast('eBay connected successfully!', 'success');
+      if (appPassword) {
+        fetch('/api/ebay/token-info', { headers: bearerHeaders(appPassword) })
+          .then(r => r.json())
+          .then(info => setTokenExpiresAt(info.refresh_token_expires_at || null))
+          .catch(() => {});
+      }
+    } else if (ebayStatus === 'error') {
+      const msg = params.get('msg');
+      const decoded = msg ? decodeURIComponent(msg) : 'Unknown error';
+      toast(`eBay connection failed: ${decoded}`, 'error');
+    }
+  }, []);
+
   const saveImages = (id: string, images: string[]) => {
     const store = JSON.parse(localStorage.getItem('listing_images') || '{}');
     store[id] = images;
@@ -397,9 +426,14 @@ function App() {
               {tokenDaysLeft !== null && (
                 <span style={{ fontSize: '0.72rem', color: tokenExpiryColor, opacity: 0.85 }}>Token expires in {tokenDaysLeft}d</span>
               )}
-              <button className="btn-icon" onClick={handleEbayConnect} style={{ fontSize: '0.68rem', padding: '1px 6px', opacity: 0.6 }}>
-                Reconnect
-              </button>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                <button className="btn-icon" onClick={handleEbayConnect} style={{ fontSize: '0.68rem', padding: '1px 6px', opacity: 0.6 }}>
+                  Reconnect
+                </button>
+                <button className="btn-icon" onClick={handleEbayDisconnect} style={{ fontSize: '0.68rem', padding: '1px 6px', opacity: 0.6, color: '#ef4444' }}>
+                  Disconnect
+                </button>
+              </div>
             </div>
           ) : (
             <button className="btn-primary" onClick={handleEbayConnect} style={{ fontSize: '0.85rem', padding: '6px 12px' }}>

@@ -53,13 +53,27 @@ app.get('/api/ebay/callback', async (req, res) => {
   const { code, state } = req.query;
   if (!code) return res.status(400).send('No authorization code provided.');
   try {
-    // Decode companyId from state param
     const companyId = state ? Buffer.from(state, 'base64').toString('utf8') : 'default';
+    console.log(`[oauth-callback] exchanging code for company=${companyId}`);
     await exchangeCodeForToken(code, companyId);
-    res.redirect('/');
+    console.log(`[oauth-callback] success for company=${companyId}`);
+    res.redirect('/?ebay=connected');
   } catch (error) {
-    console.error('OAuth Callback Error:', error.message);
-    res.status(500).send('Failed to authenticate with eBay.');
+    console.error('OAuth Callback Error:', error.response?.data || error.message);
+    const msg = encodeURIComponent(JSON.stringify(error.response?.data || error.message));
+    res.redirect(`/?ebay=error&msg=${msg}`);
+  }
+});
+
+// DELETE /api/ebay/tokens — clear stored tokens so user can do a clean reconnect
+app.delete('/api/ebay/tokens', async (req, res) => {
+  try {
+    const db = await getDb();
+    await db.collection('tokens').deleteOne({ _id: `${req.companyId}_tokens` });
+    console.log(`[ebay-tokens] cleared tokens for company=${req.companyId}`);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
