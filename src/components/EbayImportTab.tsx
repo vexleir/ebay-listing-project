@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Download, RefreshCw, CheckSquare, Square, ChevronRight, ExternalLink, ArrowRight } from 'lucide-react';
+import { Download, RefreshCw, CheckSquare, Square, ExternalLink, ArrowRight } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import type { StagedListing } from '../types';
 
