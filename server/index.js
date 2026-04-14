@@ -686,6 +686,15 @@ app.post('/api/ebay/draft', async (req, res) => {
     sellerZip: userSettings.sellerZip || process.env.SELLER_ZIP || '10001',
     sellerLocation: userSettings.sellerLocation || process.env.SELLER_LOCATION || 'United States',
   };
+  // Pre-flight: verify required policy IDs are set before uploading images
+  const missingPolicies = [];
+  if (!config.fulfillmentPolicy) missingPolicies.push('Shipping/Fulfillment Policy');
+  if (!config.returnPolicy) missingPolicies.push('Return Policy');
+  if (!config.paymentPolicy) missingPolicies.push('Payment Policy');
+  if (missingPolicies.length > 0) {
+    return res.status(400).json({ error: `eBay listing requires the following policies to be configured in Settings: ${missingPolicies.join(', ')}. Go to Settings → eBay Policies to select your saved eBay business policies.` });
+  }
+
   try {
     const token = await getValidAccessToken(req.companyId);
     console.log(`--- Initiating XML Trading API push for: ${listing.title} ---`);
@@ -770,7 +779,12 @@ app.post('/api/ebay/draft', async (req, res) => {
       const filteredEntries = Object.entries(listing.itemSpecifics)
         .filter(([name, val]) => name && val && !RESERVED_SPECIFICS.has(name.toLowerCase().trim()));
       if (filteredEntries.length > 0) {
-        itemSpecificsXml = '<ItemSpecifics>\n' + filteredEntries.map(([name, val]) => `<NameValueList><Name><![CDATA[${name}]]></Name><Value><![CDATA[${val}]]></Value></NameValueList>`).join('\n') + '\n</ItemSpecifics>';
+        // eBay enforces a 65-character limit on both aspect names and values
+        itemSpecificsXml = '<ItemSpecifics>\n' + filteredEntries.map(([name, val]) => {
+          const safeName = String(name).substring(0, 65);
+          const safeVal = String(val).substring(0, 65);
+          return `<NameValueList><Name><![CDATA[${safeName}]]></Name><Value><![CDATA[${safeVal}]]></Value></NameValueList>`;
+        }).join('\n') + '\n</ItemSpecifics>';
       }
     }
 
