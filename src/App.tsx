@@ -302,14 +302,14 @@ function App() {
     });
   };
 
-  const handleSyncSold = async () => {
-    if (!isEbayConnected) { toast('Connect to eBay first.', 'error'); return; }
+  const handleSyncSold = async (silent = false) => {
+    if (!isEbayConnected) { if (!silent) toast('Connect to eBay first.', 'error'); return; }
     try {
       const resp = await fetch('/api/ebay/sold-items', { headers: bearerHeaders(appPassword) });
       const data = await resp.json();
-      if (data.error) { toast('Sync failed: ' + data.error, 'error'); return; }
+      if (data.error) { if (!silent) toast('Sync failed: ' + data.error, 'error'); return; }
       const soldItems: { itemId: string; soldPrice: string; soldDate: string }[] = data.items || [];
-      if (soldItems.length === 0) { toast('No sold items found in the last 30 days.', 'info'); return; }
+      if (soldItems.length === 0) { if (!silent) toast('No sold items found in the last 30 days.', 'info'); return; }
       let count = 0;
       setListedProducts(prev => prev.map(l => {
         const match = soldItems.find(s => s.itemId && l.ebayDraftId && s.itemId === l.ebayDraftId);
@@ -322,11 +322,19 @@ function App() {
         return fetch(`/api/listings/${l.id}`, { method: 'PUT', headers: apiHeaders(appPassword), body: JSON.stringify({ updates: { archived: true, soldAt: Date.now(), soldPrice: match.soldPrice, updatedAt: Date.now() } }) });
       }));
       if (count > 0) toast(`${count} listing${count > 1 ? 's' : ''} marked as sold!`, 'success');
-      else toast('All listings already up to date.', 'info');
+      else if (!silent) toast('All listings already up to date.', 'info');
     } catch (e: any) {
-      toast('Sync error: ' + e.message, 'error');
+      if (!silent) toast('Sync error: ' + e.message, 'error');
     }
   };
+
+  // Auto-sync sold listings every 30 minutes when eBay is connected
+  useEffect(() => {
+    if (!isEbayConnected || !isAuthenticated) return;
+    const INTERVAL_MS = 30 * 60 * 1000;
+    const id = setInterval(() => handleSyncSold(true), INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [isEbayConnected, isAuthenticated, appPassword]);
 
   const handleRelistListing = async (listing: StagedListing) => {
     const id = crypto.randomUUID();
@@ -502,7 +510,12 @@ function App() {
           </div>
         ) : activeTab === 'ebay-import' ? (
           <div className="animate-fade-in">
-            <EbayImportTab appPassword={appPassword} isEbayConnected={isEbayConnected} onImported={handleEbayImported} />
+            <EbayImportTab
+              appPassword={appPassword}
+              isEbayConnected={isEbayConnected}
+              onImported={handleEbayImported}
+              existingEbayIds={new Set(listedProducts.map(l => l.ebayDraftId).filter((id): id is string => !!id))}
+            />
           </div>
         ) : activeTab === 'admin' && currentUser?.role === 'superadmin' ? (
           <div className="animate-fade-in">
