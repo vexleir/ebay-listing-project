@@ -661,6 +661,132 @@ app.get('/api/ebay/sold-items', async (req, res) => {
   }
 });
 
+// ─── eBay Active Listings Import ─────────────────────────────────────────────
+
+// GET /api/ebay/active-listings?page=N
+// Fetches one page of active eBay listings from the Trading API (max 200/page).
+// The frontend calls this repeatedly to paginate through all listings.
+app.get('/api/ebay/active-listings', async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const token = await getValidAccessToken(req.companyId);
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <ActiveList>
+    <Include>true</Include>
+    <Pagination>
+      <EntriesPerPage>200</EntriesPerPage>
+      <PageNumber>${page}</PageNumber>
+    </Pagination>
+  </ActiveList>
+  <HideVariations>true</HideVariations>
+</GetMyeBaySellingRequest>`;
+    const resp = await axios.post('https://api.ebay.com/ws/api.dll', xml, {
+      headers: {
+        'X-EBAY-API-COMPATIBILITY-LEVEL': '1331',
+        'X-EBAY-API-CALL-NAME': 'GetMyeBaySelling',
+        'X-EBAY-API-SITEID': '0',
+        'X-EBAY-API-IAF-TOKEN': token,
+        'Content-Type': 'text/xml',
+      },
+    });
+    const body = resp.data;
+
+    const totalPages = parseInt((/<TotalNumberOfPages>(\d+)<\/TotalNumberOfPages>/.exec(body) || [])[1] || '1');
+    const totalEntries = parseInt((/<TotalNumberOfEntries>(\d+)<\/TotalNumberOfEntries>/.exec(body) || [])[1] || '0');
+
+    const itemRegex = /<Item>([\s\S]*?)<\/Item>/g;
+    const items = [];
+    let m;
+    while ((m = itemRegex.exec(body)) !== null) {
+      const block = m[1];
+      const get = (tag) => {
+        const r = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`);
+        const x = r.exec(block);
+        return x ? x[1].trim() : '';
+      };
+      // Collect all PictureURL values
+      const picRegex = /<PictureURL[^>]*>([\s\S]*?)<\/PictureURL>/g;
+      const images = [];
+      let pm;
+      while ((pm = picRegex.exec(block)) !== null) images.push(pm[1].trim());
+
+      items.push({
+        ebayItemId: get('ItemID'),
+        title: get('Title'),
+        price: get('CurrentPrice') || get('BuyItNowPrice') || '',
+        condition: get('ConditionDisplayName') || '',
+        categoryId: get('CategoryID'),
+        categoryName: get('CategoryName'),
+        images,
+        endTime: get('EndTime'),
+        quantity: get('Quantity') || '1',
+        quantitySold: get('QuantitySold') || '0',
+      });
+    }
+
+    res.json({ items, totalPages, totalEntries, page });
+  } catch (e) {
+    console.error('[active-listings] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/ebay/import-listings
+// Saves selected eBay active listings into the DB as status='listed'.
+// Skips any whose ebayDraftId already exists in the company's listings.
+app.post('/api/ebay/import-listings', async (req, res) => {
+  try {
+    const { listings } = req.body;
+    if (!Array.isArray(listings) || listings.length === 0) {
+      return res.status(400).json({ error: 'listings array required' });
+    }
+    const db = await getDb();
+    // Fetch existing ebayDraftIds for this company to avoid duplicates
+    const existing = await db.collection('listings').find(
+      { companyId: req.companyId, ebayDraftId: { $exists: true, $ne: null } },
+      { projection: { ebayDraftId: 1 } }
+    ).toArray();
+    const existingIds = new Set(existing.map(e => e.ebayDraftId));
+
+    const now = Date.now();
+    let imported = 0;
+    const importedListings = [];
+
+    for (const item of listings) {
+      if (!item.ebayItemId) continue;
+      if (existingIds.has(item.ebayItemId)) continue; // already imported
+
+      const id = crypto.randomUUID();
+      const listing = {
+        id,
+        companyId: req.companyId,
+        title: item.title || '',
+        description: '',
+        condition: item.condition || '',
+        category: item.categoryName || '',
+        priceRecommendation: item.price ? `$${parseFloat(item.price).toFixed(2)}` : '',
+        shippingEstimate: '',
+        itemSpecifics: {},
+        images: Array.isArray(item.images) ? item.images : [],
+        status: 'listed',
+        ebayDraftId: item.ebayItemId,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await db.collection('listings').insertOne(listing);
+      const { _id, companyId, ...publicListing } = listing;
+      importedListings.push(publicListing);
+      imported++;
+    }
+
+    res.json({ imported, skipped: listings.length - imported, listings: importedListings });
+  } catch (e) {
+    console.error('[import-listings] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 function getConditionId(conditionStr) {
   const s = (conditionStr || '').toLowerCase();
   if (s.includes('for parts') || s.includes('not working') || s.includes('parts only')) return '7000';

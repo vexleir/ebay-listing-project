@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, ShoppingBag, Shield, DollarSign, Zap } from 'lucide-react';
+import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, ShoppingBag, Shield, DollarSign, Zap, Download } from 'lucide-react';
 import './index.css';
 
 import Uploader from './components/Uploader';
@@ -12,6 +12,7 @@ import SettingsPanel from './components/SettingsPanel';
 import SourcingTool from './components/SourcingTool';
 import ListingOptimizer from './components/ListingOptimizer';
 import AdminPanel from './components/AdminPanel';
+import EbayImportTab from './components/EbayImportTab';
 import LoginScreen from './components/LoginScreen';
 import { generateListing } from './services/ai';
 import type { StagedListing } from './types';
@@ -52,7 +53,7 @@ function App() {
   });
 
   const [stagedListings, setStagedListings] = useState<StagedListing[]>([]);
-  const [activeTab, setActiveTab] = useState<'new' | 'staged' | 'listed' | 'sold' | 'analytics' | 'settings' | 'source' | 'optimizer' | 'admin'>('new');
+  const [activeTab, setActiveTab] = useState<'new' | 'staged' | 'listed' | 'sold' | 'analytics' | 'settings' | 'source' | 'optimizer' | 'admin' | 'ebay-import'>('new');
   const [listedProducts, setListedProducts] = useState<StagedListing[]>([]);
   const [isLoadingListings, setIsLoadingListings] = useState(false);
 
@@ -362,6 +363,17 @@ function App() {
     setListedProducts(prev => prev.map(l => l.id === updated.id ? updated : l));
   };
 
+  // Called when EbayImportTab successfully imports listings to the DB.
+  // Merges them into listedProducts state and navigates to the Listed tab.
+  const handleEbayImported = (imported: StagedListing[]) => {
+    setListedProducts(prev => {
+      const existingIds = new Set(prev.map(l => l.id));
+      const newOnes = imported.filter(l => !existingIds.has(l.id));
+      return [...newOnes, ...prev];
+    });
+    setActiveTab('listed');
+  };
+
   const handleGenerate = async (activeImages: File[], activeInstructions: string) => {
     if (activeImages.length === 0 && !activeInstructions.trim()) {
       toast('Please select at least one image or provide written instructions.', 'error');
@@ -407,6 +419,7 @@ function App() {
           <button style={tabBtnStyle('new')} onClick={() => setActiveTab('new')}><PlusCircle size={18} /> New Listing</button>
           <button style={tabBtnStyle('staged')} onClick={() => setActiveTab('staged')}><List size={18} /> Staged ({stagedListings.length})</button>
           <button style={tabBtnStyle('listed')} onClick={() => setActiveTab('listed')}><Check size={18} /> Listed ({listedProducts.filter(l => !l.soldAt).length})</button>
+          <button style={{ ...tabBtnStyle('ebay-import'), borderStyle: activeTab === 'ebay-import' ? 'solid' : 'dashed', opacity: activeTab === 'ebay-import' ? 1 : 0.75 }} onClick={() => setActiveTab('ebay-import')}><Download size={18} /> eBay Import</button>
           <button style={tabBtnStyle('sold')} onClick={() => setActiveTab('sold')}><DollarSign size={18} /> Sold ({listedProducts.filter(l => !!l.soldAt).length})</button>
           <button style={tabBtnStyle('analytics')} onClick={() => setActiveTab('analytics')}><BarChart2 size={18} /> Analytics</button>
           <button style={tabBtnStyle('source')} onClick={() => setActiveTab('source')}><ShoppingBag size={18} /> Source</button>
@@ -486,6 +499,10 @@ function App() {
         ) : activeTab === 'optimizer' ? (
           <div className="animate-fade-in">
             <ListingOptimizer appPassword={appPassword} />
+          </div>
+        ) : activeTab === 'ebay-import' ? (
+          <div className="animate-fade-in">
+            <EbayImportTab appPassword={appPassword} isEbayConnected={isEbayConnected} onImported={handleEbayImported} />
           </div>
         ) : activeTab === 'admin' && currentUser?.role === 'superadmin' ? (
           <div className="animate-fade-in">
