@@ -371,11 +371,10 @@ app.post('/api/shopify/push', async (req, res) => {
       ? parseFloat(listing.priceRecommendation.replace(/[^0-9.]/g, '')).toFixed(2)
       : '0.00';
 
-    // Build media array from image URLs (Cloudinary URLs work directly)
-    const media = (listing.images || [])
+    // Build images array from Cloudinary URLs (classic ProductInput format)
+    const imageUrls = (listing.images || [])
       .filter(url => typeof url === 'string' && url.startsWith('http'))
-      .slice(0, 10)
-      .map(url => ({ originalSource: url, alt: listing.title, mediaContentType: 'IMAGE' }));
+      .slice(0, 10);
 
     const productInput = {
       title: listing.title || 'Untitled',
@@ -383,12 +382,12 @@ app.post('/api/shopify/push', async (req, res) => {
       vendor: 'Flip Side Collectibles',
       productType: listing.category || '',
       tags: listing.tags || [],
-      ...(media.length > 0 ? { media } : {}),
+      ...(imageUrls.length > 0 ? { images: imageUrls.map(src => ({ src })) } : {}),
     };
 
     // Create the product
     const createResult = await shopifyAuth.shopifyGraphQL(req.companyId, `
-      mutation productCreate($input: ProductCreateInput!) {
+      mutation productCreate($input: ProductInput!) {
         productCreate(input: $input) {
           product {
             id
