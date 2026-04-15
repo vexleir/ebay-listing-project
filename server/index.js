@@ -392,7 +392,7 @@ app.post('/api/shopify/push', async (req, res) => {
           product {
             id
             handle
-            variants(first: 1) { edges { node { id inventoryItemId } } }
+            variants(first: 1) { edges { node { id inventoryItem { id } } } }
           }
           userErrors { field message }
         }
@@ -406,7 +406,7 @@ app.post('/api/shopify/push', async (req, res) => {
     if (!product) throw new Error('No product returned from Shopify');
 
     const variantNode = product.variants?.edges?.[0]?.node;
-    const inventoryItemId = variantNode?.inventoryItemId;
+    const inventoryItemId = variantNode?.inventoryItem?.id;
     const variantId = variantNode?.id;
 
     // Set price on the variant
@@ -471,12 +471,12 @@ app.post('/api/shopify/delist/:listingId', async (req, res) => {
     const productData = await shopifyAuth.shopifyGraphQL(req.companyId, `
       query getVariant($id: ID!) {
         product(id: $id) {
-          variants(first: 1) { edges { node { inventoryItemId } } }
+          variants(first: 1) { edges { node { inventoryItem { id } } } }
         }
       }
     `, { id: listing.shopifyProductId });
 
-    const inventoryItemId = productData?.product?.variants?.edges?.[0]?.node?.inventoryItemId;
+    const inventoryItemId = productData?.product?.variants?.edges?.[0]?.node?.inventoryItem?.id;
     if (inventoryItemId && config.locationId) {
       await shopifyAuth.shopifyGraphQL(req.companyId, `
         mutation inventorySetQuantities($input: InventorySetQuantitiesInput!) {
