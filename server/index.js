@@ -382,6 +382,7 @@ app.post('/api/shopify/push', async (req, res) => {
       vendor: 'Flip Side Collectibles',
       productType: listing.category || '',
       tags: listing.tags || [],
+      variants: [{ price }],
       ...(imageUrls.length > 0 ? { images: imageUrls.map(src => ({ src })) } : {}),
     };
 
@@ -407,19 +408,6 @@ app.post('/api/shopify/push', async (req, res) => {
 
     const variantNode = product.variants?.edges?.[0]?.node;
     const inventoryItemId = variantNode?.inventoryItem?.id;
-    const variantId = variantNode?.id;
-
-    // Set price on the variant
-    if (variantId) {
-      await shopifyAuth.shopifyGraphQL(req.companyId, `
-        mutation productVariantUpdate($input: ProductVariantInput!) {
-          productVariantUpdate(input: $input) {
-            productVariant { id price }
-            userErrors { field message }
-          }
-        }
-      `, { input: { id: variantId, price } });
-    }
 
     // Set inventory to 1
     if (inventoryItemId && config.locationId) {
