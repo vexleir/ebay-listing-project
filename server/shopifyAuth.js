@@ -48,6 +48,13 @@ async function exchangeCodeForToken(code, companyId) {
     console.warn('[shopifyAuth] Could not fetch location ID:', e.message);
   }
 
+  // Register orders/create webhook
+  try {
+    await registerOrdersWebhook(companyId, data.access_token);
+  } catch (e) {
+    console.warn('[shopifyAuth] Could not register webhook:', e.message);
+  }
+
   return data;
 }
 
@@ -93,6 +100,36 @@ async function fetchDefaultLocationId(companyId, accessToken) {
   const locationId = data?.data?.locations?.edges?.[0]?.node?.id;
   if (!locationId) throw new Error('No locations found in Shopify store');
   return locationId;
+}
+
+async function registerOrdersWebhook(companyId, accessToken) {
+  const webhookUrl = `${process.env.APP_BASE_URL || 'https://ebay-listing-project.onrender.com'}/api/shopify/webhooks/orders`;
+
+  // Check if webhook already registered to avoid duplicates
+  const listResp = await fetch(`https://${SHOPIFY_SHOP}/admin/api/2026-01/webhooks.json?topic=orders/create`, {
+    headers: { 'X-Shopify-Access-Token': accessToken },
+  });
+  if (listResp.ok) {
+    const existing = await listResp.json();
+    const alreadyExists = (existing.webhooks || []).some(w => w.address === webhookUrl);
+    if (alreadyExists) {
+      console.log('[shopifyAuth] orders/create webhook already registered');
+      return;
+    }
+  }
+
+  const createResp = await fetch(`https://${SHOPIFY_SHOP}/admin/api/2026-01/webhooks.json`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': accessToken },
+    body: JSON.stringify({
+      webhook: { topic: 'orders/create', address: webhookUrl, format: 'json' }
+    }),
+  });
+  if (!createResp.ok) {
+    const err = await createResp.text();
+    throw new Error(`Webhook registration failed: ${err}`);
+  }
+  console.log('[shopifyAuth] orders/create webhook registered successfully');
 }
 
 async function shopifyGraphQL(companyId, query, variables = {}) {

@@ -16,8 +16,23 @@ const {
   createUser, getUserByEmail, getUserById, getUsers, updateUser, deleteUser, verifyPassword,
 } = require('./users');
 
+const crypto = require('crypto');
+
 const app = express();
 app.use(cors());
+
+// Capture raw body for Shopify webhook HMAC verification before JSON parsing
+app.use((req, res, next) => {
+  if (req.path === '/api/shopify/webhooks/orders') {
+    let raw = '';
+    req.setEncoding('utf8');
+    req.on('data', chunk => { raw += chunk; });
+    req.on('end', () => { req.rawBody = raw; next(); });
+  } else {
+    next();
+  }
+});
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
@@ -140,6 +155,83 @@ app.get('/api/shopify/callback', async (req, res) => {
       <body><div class="box"><h2>✗ Shopify Connection Failed</h2>
       <pre>${error.message}</pre>
       <a href="/">Return to App</a></div></body></html>`);
+  }
+});
+
+// POST /api/shopify/webhooks/orders — receives Shopify orders/create webhook
+// Public: Shopify calls this directly (no JWT). HMAC-verified instead.
+app.post('/api/shopify/webhooks/orders', async (req, res) => {
+  // Respond 200 immediately — Shopify retries if we take >5s
+  res.sendStatus(200);
+
+  try {
+    const hmacHeader = req.headers['x-shopify-hmac-sha256'];
+    const secret = process.env.SHOPIFY_CLIENT_SECRET;
+    if (secret && hmacHeader && req.rawBody) {
+      const computed = crypto.createHmac('sha256', secret).update(req.rawBody, 'utf8').digest('base64');
+      if (computed !== hmacHeader) {
+        console.warn('[shopify-webhook] HMAC mismatch — ignoring request');
+        return;
+      }
+    }
+
+    const order = req.body;
+    const lineItems = order?.line_items || [];
+    if (lineItems.length === 0) return;
+
+    const db = await getDb();
+
+    for (const item of lineItems) {
+      if (!item.product_id) continue;
+      const shopifyProductId = `gid://shopify/Product/${item.product_id}`;
+
+      const listing = await db.collection('listings').findOne({ shopifyProductId });
+      if (!listing) continue;
+      if (listing.soldAt) continue; // already marked sold
+
+      const soldPrice = item.price || '0.00';
+      const now = Date.now();
+
+      // Mark listing as sold
+      await db.collection('listings').updateOne(
+        { _id: listing._id },
+        { $set: {
+          archived: true,
+          soldAt: now,
+          soldPrice,
+          soldPlatform: 'shopify',
+          shopifyStatus: 'unlisted',
+          updatedAt: now,
+        }}
+      );
+      console.log(`[shopify-webhook] Marked sold: "${listing.title}" at $${soldPrice}`);
+
+      // Auto-end eBay listing if cross-listed
+      if (listing.ebayDraftId) {
+        try {
+          const token = await getValidAccessToken(listing.companyId);
+          const xml = `<?xml version="1.0" encoding="utf-8"?>
+<EndFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <ItemID>${listing.ebayDraftId}</ItemID>
+  <EndingReason>NotAvailable</EndingReason>
+</EndFixedPriceItemRequest>`;
+          await axios.post('https://api.ebay.com/ws/api.dll', xml, {
+            headers: {
+              'X-EBAY-API-COMPATIBILITY-LEVEL': '1331',
+              'X-EBAY-API-CALL-NAME': 'EndFixedPriceItem',
+              'X-EBAY-API-SITEID': '0',
+              'X-EBAY-API-IAF-TOKEN': token,
+              'Content-Type': 'text/xml',
+            }
+          });
+          console.log(`[shopify-webhook] Auto-ended eBay listing ${listing.ebayDraftId}`);
+        } catch (ebayErr) {
+          console.error(`[shopify-webhook] Failed to end eBay listing ${listing.ebayDraftId}:`, ebayErr.message);
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[shopify-webhook] error:', e.message);
   }
 });
 

@@ -20,6 +20,7 @@ export interface StagedListing {
   tags?: string[];
   soldAt?: number;
   soldPrice?: string;
+  soldPlatform?: 'ebay' | 'shopify';
   shippingLabelCost?: string;
   // Shopify cross-listing
   shopifyProductId?: string;

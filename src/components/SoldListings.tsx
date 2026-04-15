@@ -75,6 +75,12 @@ export default function SoldListings({ listings, onDelete, onUnmarkSold, onRelis
       <div key={listing.id} className="glass-card" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', border: '1px solid rgba(16,185,129,0.35)' }}>
         <div style={{ padding: '8px 12px', background: 'rgba(16,185,129,0.15)', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.88rem', fontWeight: 600 }}>
           ✓ SOLD · {formatDate(listing.soldAt)}
+          {listing.soldPlatform === 'shopify' && (
+            <span style={{ fontSize: '0.7rem', background: 'rgba(150,191,72,0.25)', color: '#96bf48', border: '1px solid rgba(150,191,72,0.4)', borderRadius: '4px', padding: '1px 6px', fontWeight: 600 }}>Shopify</span>
+          )}
+          {listing.soldPlatform === 'ebay' && (
+            <span style={{ fontSize: '0.7rem', background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.35)', borderRadius: '4px', padding: '1px 6px', fontWeight: 600 }}>eBay</span>
+          )}
           <span style={{ marginLeft: 'auto', fontSize: '0.78rem', opacity: 0.8 }}>
             {listedAmt > 0 && soldAmt > 0 && listedAmt !== soldAmt ? `Listed $${listedAmt.toFixed(2)} → ` : ''}
             ${soldAmt > 0 ? soldAmt.toFixed(2) : listedAmt.toFixed(2)}

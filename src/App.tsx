@@ -326,9 +326,13 @@ function App() {
         return l;
       }));
       const updated = listedProducts.filter(l => soldItems.some(s => s.itemId === l.ebayDraftId && !l.soldAt));
-      await Promise.all(updated.map(l => {
+      await Promise.all(updated.map(async l => {
         const match = soldItems.find(s => s.itemId === l.ebayDraftId)!;
-        return fetch(`/api/listings/${l.id}`, { method: 'PUT', headers: apiHeaders(appPassword), body: JSON.stringify({ updates: { archived: true, soldAt: Date.now(), soldPrice: match.soldPrice, updatedAt: Date.now() } }) });
+        await fetch(`/api/listings/${l.id}`, { method: 'PUT', headers: apiHeaders(appPassword), body: JSON.stringify({ updates: { archived: true, soldAt: Date.now(), soldPrice: match.soldPrice, soldPlatform: 'ebay', updatedAt: Date.now() } }) });
+        // Auto-delist from Shopify if cross-listed
+        if (l.shopifyProductId && l.shopifyStatus === 'listed') {
+          fetch(`/api/shopify/delist/${l.id}`, { method: 'POST', headers: bearerHeaders(appPassword) }).catch(() => {});
+        }
       }));
       if (count > 0) toast(`${count} listing${count > 1 ? 's' : ''} marked as sold!`, 'success');
       else if (!silent) toast('All listings already up to date.', 'info');

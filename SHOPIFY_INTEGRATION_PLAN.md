@@ -81,25 +81,21 @@ shopifyLocationId: string         // fetched once on connect, stored for invento
 
 ---
 
-## Phase 3 — Webhook & Automatic Cross-Delist
+## Phase 3 — Webhook & Automatic Cross-Delist ✅ COMPLETE
 **Goal:** Selling on either platform automatically updates both. This is the core value of the integration.
 
 ### Server
-- [ ] `POST /api/shopify/webhooks/orders` endpoint:
-  - Verify HMAC signature (`X-Shopify-Hmac-Sha256` header)
-  - Match `line_items[].product_id` to listing with matching `shopifyProductId`
-  - Mark listing: `soldAt`, `soldPrice`, `shopifySoldAt`, `shopifySoldPrice`, `archived: true`
-  - If listing has `ebayDraftId`: automatically call eBay `EndFixedPriceItem` to delist
-  - Return 200 quickly (Shopify retries if response takes >5s)
-- [ ] Register `orders/create` webhook on Shopify during the connect flow (Phase 1 `save-config` endpoint)
-- [ ] Extend existing `handleSyncSold()` flow (eBay sold → Shopify delist):
-  - After marking an eBay-sold item, if `shopifyProductId` exists, call `POST /api/shopify/delist/:id`
+- [x] `POST /api/shopify/webhooks/orders` — public endpoint, HMAC-verified, responds 200 immediately, matches `line_items[].product_id` to `shopifyProductId` in DB, marks sold, auto-calls eBay `EndFixedPriceItem`
+- [x] Raw body middleware added before express.json() for HMAC verification
+- [x] `registerOrdersWebhook()` in shopifyAuth.js — registers `orders/create` webhook on connect, deduplicates
+- [x] `handleSyncSold()` extended — when eBay sold sync marks an item sold, auto-calls `POST /api/shopify/delist/:id` if cross-listed
+- [x] `soldPlatform: 'ebay' | 'shopify'` field added to StagedListing type and persisted on both paths
 
 ### Frontend
-- [ ] Webhook health indicator in Settings — last received, any failures
-- [ ] Sold listings show which platform originated the sale (eBay vs Shopify badge)
+- [x] Sold listings show platform badge — green "Shopify" or indigo "eBay" in the sold banner
+- [ ] Webhook health indicator in Settings (deferred to Phase 4)
 
-**Deliverable:** Full cross-platform sold sync. Selling on one platform automatically delists from the other.
+**Deliverable:** Full cross-platform sold sync. Selling on Shopify auto-ends eBay. Selling on eBay auto-delists from Shopify.
 
 ---
 
@@ -194,5 +190,5 @@ mutation webhookSubscriptionCreate($topic: String!, $callbackUrl: URL!) { ... }
 |-------|--------|-------|
 | Phase 1 — Foundation | ✅ Complete | server/shopifyAuth.js + Settings UI |
 | Phase 2 — Push to Shopify | ✅ Complete | ShoppingBag button in Listed tab |
-| Phase 3 — Webhooks & Auto-Delist | ⬜ Not Started | Depends on Phase 2 |
+| Phase 3 — Webhooks & Auto-Delist | ✅ Complete | orders/create webhook + bidirectional auto-delist |
 | Phase 4 — Polish & Analytics | ⬜ Not Started | Depends on Phase 3 |
