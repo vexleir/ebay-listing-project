@@ -5,6 +5,7 @@ const axios = require('axios');
 const path = require('path');
 const { generateListing, generateListingFromUrls } = require('./ai');
 const { getAuthUrl, exchangeCodeForToken, getValidAccessToken, hasValidSession, getTokenExpiry } = require('./ebayAuth');
+const shopifyAuth = require('./shopifyAuth');
 const { getListings, createListing, updateListing, deleteListing, getAllListingsMeta, getActiveListings, getSettings, saveSettings, incrementTokenUsage, getTokenUsage } = require('./listings');
 const { fetchListingForOptimizer, fetchSoldComps, aiOptimizeListing } = require('./optimizer');
 const { uploadImage } = require('./cloudinary');
@@ -109,6 +110,36 @@ app.get('/api/ebay/debug-auth-public', async (req, res) => {
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/shopify/callback — exempt from auth; Shopify redirects here after OAuth
+app.get('/api/shopify/callback', async (req, res) => {
+  const { code, state } = req.query;
+  if (!code) return res.status(400).send('No authorization code provided.');
+  try {
+    const companyId = state ? Buffer.from(state, 'base64').toString('utf8') : 'default';
+    console.log(`[shopify-callback] exchanging code for company=${companyId}`);
+    await shopifyAuth.exchangeCodeForToken(code, companyId);
+    console.log(`[shopify-callback] success for company=${companyId}`);
+    res.send(`<!DOCTYPE html><html><head><title>Shopify Connected</title>
+      <style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0f172a;color:#fff;}
+      .box{text-align:center;padding:2rem;background:#1e293b;border-radius:12px;max-width:400px;}
+      h2{color:#22c55e;margin-bottom:0.5rem;} p{color:#94a3b8;margin-bottom:1.5rem;}
+      a{display:inline-block;padding:10px 24px;background:#6366f1;color:#fff;text-decoration:none;border-radius:8px;}</style></head>
+      <body><div class="box"><h2>✓ Shopify Connected!</h2>
+      <p>Your Shopify store was linked successfully.</p>
+      <a href="/">Return to App</a></div></body></html>`);
+  } catch (error) {
+    console.error('[shopify-callback] error:', error.message);
+    res.send(`<!DOCTYPE html><html><head><title>Shopify Connection Failed</title>
+      <style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0f172a;color:#fff;}
+      .box{text-align:center;padding:2rem;background:#1e293b;border-radius:12px;max-width:500px;}
+      h2{color:#ef4444;margin-bottom:0.5rem;} pre{color:#fca5a5;background:#450a0a;padding:1rem;border-radius:8px;text-align:left;overflow:auto;font-size:0.8rem;white-space:pre-wrap;}
+      a{display:inline-block;padding:10px 24px;background:#6366f1;color:#fff;text-decoration:none;border-radius:8px;margin-top:1rem;}</style></head>
+      <body><div class="box"><h2>✗ Shopify Connection Failed</h2>
+      <pre>${error.message}</pre>
+      <a href="/">Return to App</a></div></body></html>`);
   }
 });
 
@@ -274,6 +305,40 @@ app.get('/api/ebay/auth-url', (req, res) => {
     res.json({ url });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── Shopify Auth ─────────────────────────────────────────────────────────────
+
+app.get('/api/shopify/auth-status', async (req, res) => {
+  try {
+    const connected = await shopifyAuth.hasShopifySession(req.companyId);
+    if (connected) {
+      const config = await shopifyAuth.getShopifyConfig(req.companyId);
+      res.json({ connected: true, shop: config.shop, locationId: config.locationId || null });
+    } else {
+      res.json({ connected: false });
+    }
+  } catch (e) {
+    res.json({ connected: false });
+  }
+});
+
+app.get('/api/shopify/auth-url', (req, res) => {
+  try {
+    const url = shopifyAuth.getAuthUrl(req.companyId);
+    res.json({ url });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/shopify/tokens', async (req, res) => {
+  try {
+    await shopifyAuth.clearShopifyConfig(req.companyId);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 

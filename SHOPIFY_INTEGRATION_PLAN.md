@@ -37,25 +37,25 @@ shopifyLocationId: string         // fetched once on connect, stored for invento
 
 ---
 
-## Phase 1 — Foundation: Shopify Connection
+## Phase 1 — Foundation: Shopify Connection ✅ COMPLETE
 **Goal:** Shopify connection works in Settings; no listing push yet. Zero risk to existing eBay functionality.
 
 ### Server
-- [ ] Install `@shopify/shopify-api` package on server
-- [ ] Create `server/shopifyClient.js`:
-  - GraphQL request helper (handles auth header, endpoint construction)
-  - HMAC webhook signature verifier
-- [ ] Add `shopifyAccessToken`, `shopifyStoreDomain`, `shopifyLocationId` to company config in MongoDB
-- [ ] `GET /api/shopify/auth-status` — returns `{ connected, storeDomain, locationId }`
-- [ ] `POST /api/shopify/save-config` — saves token + domain, auto-fetches and stores `locationId`
+- [x] Create `server/shopifyAuth.js` (OAuth URL, code exchange, token storage, GraphQL helper, location ID fetch)
+- [x] `GET /api/shopify/callback` — public OAuth redirect handler
+- [x] `GET /api/shopify/auth-status` — returns `{ connected, shop, locationId }`
+- [x] `GET /api/shopify/auth-url` — generates Shopify OAuth URL
+- [x] `DELETE /api/shopify/tokens` — disconnect
 
 ### Frontend
-- [ ] `src/components/SettingsPanel.tsx` — add Shopify section:
-  - Store domain input field
-  - Access token input field (masked)
-  - "Connect" button → calls `POST /api/shopify/save-config`
-  - Connection status indicator (green/red)
-- [ ] `src/App.tsx` — add `isShopifyConnected` state, fetch alongside eBay status on load
+- [x] `src/components/SettingsPanel.tsx` — Shopify Integration section with connect/disconnect UI
+- [x] `src/App.tsx` — `isShopifyConnected` state, fetched on login/load, passed to SettingsPanel
+
+**Notes:**
+- No `@shopify/shopify-api` package needed — native fetch (Node 18+)
+- OAuth app via Shopify Partners Dashboard (store admin custom apps deprecated Jan 2026)
+- Redirect URL: `https://ebay-listing-project.onrender.com/api/shopify/callback`
+- Env vars required in Render: `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET`
 
 **Deliverable:** Settings panel shows Shopify connected/disconnected. Ready to build Phase 2.
 
@@ -201,7 +201,7 @@ mutation webhookSubscriptionCreate($topic: String!, $callbackUrl: URL!) { ... }
 
 | Phase | Status | Notes |
 |-------|--------|-------|
-| Phase 1 — Foundation | ⬜ Not Started | |
+| Phase 1 — Foundation | ✅ Complete | server/shopifyAuth.js + Settings UI |
 | Phase 2 — Push to Shopify | ⬜ Not Started | Depends on Phase 1 |
 | Phase 3 — Webhooks & Auto-Delist | ⬜ Not Started | Depends on Phase 2 |
 | Phase 4 — Polish & Analytics | ⬜ Not Started | Depends on Phase 3 |

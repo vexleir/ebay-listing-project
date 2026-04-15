@@ -35,6 +35,7 @@ function App() {
 
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isEbayConnected, setIsEbayConnected] = useState(false);
+  const [isShopifyConnected, setIsShopifyConnected] = useState(false);
   // appPassword holds the JWT token; prop name kept for backward compat across all child components
   const [appPassword, setAppPassword] = useState(localStorage.getItem('app_token') || '');
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
@@ -92,6 +93,10 @@ function App() {
               }
             })
             .catch(() => {});
+          fetch('/api/shopify/auth-status', { headers: bearerHeaders(appPassword) })
+            .then(r => r.json())
+            .then(d => setIsShopifyConnected(d.connected))
+            .catch(() => {});
         })
         .catch(() => {
           localStorage.removeItem('app_token');
@@ -120,6 +125,10 @@ function App() {
             .catch(() => {});
         }
       })
+      .catch(() => {});
+    fetch('/api/shopify/auth-status', { headers: bearerHeaders(token) })
+      .then(r => r.json())
+      .then(d => setIsShopifyConnected(d.connected))
       .catch(() => {});
   };
 
@@ -523,7 +532,7 @@ function App() {
           </div>
         ) : (
           <div className="animate-fade-in">
-            <SettingsPanel appPassword={appPassword} isEbayConnected={isEbayConnected} staged={stagedListings} listed={listedProducts} />
+            <SettingsPanel appPassword={appPassword} isEbayConnected={isEbayConnected} isShopifyConnected={isShopifyConnected} onShopifyConnectionChange={setIsShopifyConnected} staged={stagedListings} listed={listedProducts} />
           </div>
         )}
       </main>

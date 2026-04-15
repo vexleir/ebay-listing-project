@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import type React from 'react';
-import { Settings, Save, Download, RefreshCw, CheckCircle2, AlertTriangle, ExternalLink } from 'lucide-react';
+import { Settings, Save, Download, RefreshCw, CheckCircle2, AlertTriangle, ExternalLink, Link, Unlink } from 'lucide-react';
 import type { UserSettings, EbayPolicies, StagedListing } from '../types';
 import { useToast } from '../context/ToastContext';
 
@@ -22,17 +22,21 @@ const Field = ({ label, hint, children }: { label: string; hint?: string; childr
 interface SettingsPanelProps {
   appPassword: string;
   isEbayConnected: boolean;
+  isShopifyConnected: boolean;
+  onShopifyConnectionChange: (connected: boolean) => void;
   staged: StagedListing[];
   listed: StagedListing[];
 }
 
-export default function SettingsPanelView({ appPassword, isEbayConnected, staged, listed }: SettingsPanelProps) {
+export default function SettingsPanelView({ appPassword, isEbayConnected, isShopifyConnected, onShopifyConnectionChange, staged, listed }: SettingsPanelProps) {
   const { toast } = useToast();
   const [settings, setSettings] = useState<UserSettings>({});
   const [policies, setPolicies] = useState<EbayPolicies | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [loadingPolicies, setLoadingPolicies] = useState(false);
+  const [isConnectingShopify, setIsConnectingShopify] = useState(false);
+  const [isDisconnectingShopify, setIsDisconnectingShopify] = useState(false);
 
   const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${appPassword}` };
 
@@ -56,6 +60,32 @@ export default function SettingsPanelView({ appPassword, isEbayConnected, staged
       toast('Failed to load eBay policies: ' + e.message, 'error');
     } finally {
       setLoadingPolicies(false);
+    }
+  };
+
+  const handleShopifyConnect = async () => {
+    setIsConnectingShopify(true);
+    try {
+      const resp = await fetch('/api/shopify/auth-url', { headers: { 'Authorization': `Bearer ${appPassword}` } });
+      const data = await resp.json();
+      if (data.url) window.location.href = data.url;
+      else throw new Error(data.error || 'Failed to get Shopify auth URL');
+    } catch (e: any) {
+      toast('Shopify connect error: ' + e.message, 'error');
+      setIsConnectingShopify(false);
+    }
+  };
+
+  const handleShopifyDisconnect = async () => {
+    setIsDisconnectingShopify(true);
+    try {
+      await fetch('/api/shopify/tokens', { method: 'DELETE', headers: { 'Authorization': `Bearer ${appPassword}` } });
+      onShopifyConnectionChange(false);
+      toast('Shopify disconnected.', 'success');
+    } catch (e: any) {
+      toast('Disconnect error: ' + e.message, 'error');
+    } finally {
+      setIsDisconnectingShopify(false);
     }
   };
 
@@ -104,6 +134,7 @@ export default function SettingsPanelView({ appPassword, isEbayConnected, staged
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
           {[
             { ok: isEbayConnected, label: 'eBay account connected', action: !isEbayConnected ? 'Connect in the top nav bar' : null },
+            { ok: isShopifyConnected, label: 'Shopify store connected', action: !isShopifyConnected ? 'Connect below in Shopify Integration' : null },
             { ok: !!(settings.sellerZip), label: 'Seller ZIP code configured', action: !settings.sellerZip ? 'Set below in Seller Info' : null },
             { ok: !!(settings.defaultFulfillmentPolicyId), label: 'Shipping policy selected', action: !(settings.defaultFulfillmentPolicyId) ? 'Load policies below' : null },
             { ok: !!(settings.storeName), label: 'Store name set (for description templates)', action: !settings.storeName ? 'Set below in Seller Info' : null },
@@ -204,6 +235,48 @@ export default function SettingsPanelView({ appPassword, isEbayConnected, staged
           <div style={{ padding: '8px 12px', background: 'rgba(99,102,241,0.1)', borderRadius: '6px', fontSize: '0.82rem', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.25)' }}>
             Template active — will be wrapped around description on every eBay push.
           </div>
+        )}
+      </div>
+
+      {/* Shopify Integration */}
+      <div className="glass-panel" style={{ padding: '1.5rem' }}>
+        <SectionHeader title="Shopify Integration" sub="Connect your Shopify store to cross-list items and auto-delist when sold" />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '10px', padding: '0.75rem 1rem',
+            background: isShopifyConnected ? 'rgba(34,197,94,0.08)' : 'rgba(100,100,100,0.08)',
+            border: `1px solid ${isShopifyConnected ? 'rgba(34,197,94,0.3)' : 'var(--border-color)'}`,
+            borderRadius: '8px', fontSize: '0.875rem',
+          }}>
+            <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: isShopifyConnected ? '#22c55e' : 'var(--text-secondary)', flexShrink: 0 }} />
+            <span>{isShopifyConnected ? 'Connected to bxjqfz-ku.myshopify.com' : 'Not connected'}</span>
+          </div>
+          {isShopifyConnected ? (
+            <button
+              className="btn-secondary"
+              onClick={handleShopifyDisconnect}
+              disabled={isDisconnectingShopify}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#ef4444', borderColor: 'rgba(239,68,68,0.3)' }}
+            >
+              <Unlink size={15} />
+              {isDisconnectingShopify ? 'Disconnecting…' : 'Disconnect Shopify'}
+            </button>
+          ) : (
+            <button
+              className="btn-primary"
+              onClick={handleShopifyConnect}
+              disabled={isConnectingShopify}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'linear-gradient(135deg, #96bf48, #5e8e3e)' }}
+            >
+              <Link size={15} />
+              {isConnectingShopify ? 'Redirecting…' : 'Connect Shopify'}
+            </button>
+          )}
+        </div>
+        {!isShopifyConnected && (
+          <p style={{ margin: '0.75rem 0 0 0', fontSize: '0.75rem', color: 'var(--text-secondary)', opacity: 0.75 }}>
+            You'll be redirected to Shopify to authorize access. Make sure you've added the redirect URL to your app in the Shopify Partners Dashboard first.
+          </p>
         )}
       </div>
 
