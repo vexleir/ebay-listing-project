@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { ExternalLink, Calendar, CheckCircle, Trash2, Archive, ArchiveRestore, Search, ChevronDown, LayoutGrid, List, Download, RefreshCw, Eye, RotateCcw, CircleSlash, Share2, DollarSign, Pencil, ShoppingBag } from 'lucide-react';
+import { ExternalLink, Calendar, CheckCircle, Trash2, Archive, ArchiveRestore, Search, ChevronDown, LayoutGrid, List, Download, RefreshCw, Eye, RotateCcw, CircleSlash, Share2, DollarSign, Pencil, ShoppingBag, Check, X } from 'lucide-react';
 import type { StagedListing } from '../types';
 import ImageSearchButton from './ImageSearchButton';
 import Lightbox from './Lightbox';
@@ -94,6 +94,10 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
   const [loadingStatsId, setLoadingStatsId] = useState<string | null>(null);
   const [shopifyPushingId, setShopifyPushingId] = useState<string | null>(null);
   const [shopifyDelistingId, setShopifyDelistingId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkShopifyPushingIds, setBulkShopifyPushingIds] = useState<Set<string>>(new Set());
+  const [perPage, setPerPage] = useState<number>(20);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const [crossPostListing, setCrossPostListing] = useState<StagedListing | null>(null);
   // End listing confirm
@@ -211,6 +215,46 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
       }
     });
 
+  // Reset to page 1 when filters/search change
+  useEffect(() => { setCurrentPage(1); }, [search, statusFilter, activeTag, sort]);
+
+  const totalPages = perPage === 0 ? 1 : Math.ceil(filteredListings.length / perPage);
+  const paginatedListings = perPage === 0 ? filteredListings : filteredListings.slice((currentPage - 1) * perPage, currentPage * perPage);
+
+  const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const selectAllFiltered = () => setSelectedIds(new Set(filteredListings.map(l => l.id)));
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const handleBulkShopifyPush = async () => {
+    const toPush = filteredListings.filter(l => selectedIds.has(l.id) && !(l.shopifyProductId && l.shopifyStatus === 'listed'));
+    if (toPush.length === 0) { toast('All selected items are already on Shopify.', 'info'); return; }
+    setBulkShopifyPushingIds(new Set(toPush.map(l => l.id)));
+    let success = 0; let fail = 0;
+    for (const listing of toPush) {
+      try {
+        const resp = await fetch('/api/shopify/push', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pw}` }, body: JSON.stringify({ listing }) });
+        const data = await resp.json();
+        if (!resp.ok || data.error) throw new Error(data.error);
+        onUpdateListing?.({ ...listing, shopifyProductId: data.shopifyProductId, shopifyStatus: 'listed', shopifyListedAt: Date.now() });
+        success++;
+      } catch { fail++; }
+    }
+    setBulkShopifyPushingIds(new Set());
+    clearSelection();
+    toast(`Shopify push: ${success} listed${fail > 0 ? `, ${fail} failed` : ''}.`, success > 0 ? 'success' : 'error');
+  };
+
+  const handleBulkArchive = () => {
+    Array.from(selectedIds).forEach(id => onArchive(id));
+    clearSelection();
+    toast(`${selectedIds.size} listings archived.`, 'success');
+  };
+
+  const handleBulkDelete = () => {
+    Array.from(selectedIds).forEach(id => onDelete(id));
+    clearSelection();
+  };
+
   if (nonSold.length === 0) {
     return (
       <div className="glass-panel" style={{ padding: '4rem 2rem', textAlign: 'center' }}>
@@ -220,8 +264,10 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
     );
   }
 
-  const renderCard = (listing: StagedListing, isArchived: boolean) => (
-    <div key={listing.id} className="glass-card" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', border: `1px solid ${isArchived ? 'var(--border-color)' : 'var(--success-light)'}`, opacity: isArchived ? 0.65 : 1 }}>
+  const renderCard = (listing: StagedListing, isArchived: boolean) => {
+    const isSelected = selectedIds.has(listing.id);
+    return (
+    <div key={listing.id} className="glass-card" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', border: `1px solid ${isSelected ? 'var(--accent-color)' : isArchived ? 'var(--border-color)' : 'var(--success-light)'}`, opacity: isArchived ? 0.65 : 1, outline: isSelected ? '2px solid var(--accent-color)' : 'none', outlineOffset: '2px' }}>
       {listing.soldAt ? (
         <div style={{ padding: '8px 12px', background: 'rgba(16,185,129,0.2)', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', fontWeight: 600 }}>
           ✓ SOLD
@@ -239,7 +285,10 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
           {listing.ebayDraftId && <span style={{ marginLeft: 'auto', fontSize: '0.75rem', opacity: 0.6 }}>ID: {listing.ebayDraftId}</span>}
         </div>
       )}
-      <div style={{ display: 'flex', height: '140px', background: 'rgba(0,0,0,0.5)' }}>
+      <div style={{ display: 'flex', height: '140px', background: 'rgba(0,0,0,0.5)', position: 'relative' }}>
+        <div onClick={() => toggleSelect(listing.id)} style={{ position: 'absolute', top: '8px', left: '8px', zIndex: 3, cursor: 'pointer', width: '22px', height: '22px', borderRadius: '5px', background: isSelected ? 'var(--accent-color)' : 'rgba(0,0,0,0.6)', border: `2px solid ${isSelected ? 'var(--accent-color)' : 'rgba(255,255,255,0.4)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s' }}>
+          {isSelected && <Check size={13} color="white" />}
+        </div>
         {listing.images && listing.images.length > 0 ? (
           <div style={{ flex: 1, height: '100%', position: 'relative', cursor: 'pointer' }} onClick={() => { setLightboxImages(listing.images); setLightboxIndex(0); }}>
             <img src={listing.images[0]} alt="Main" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -329,10 +378,16 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
         </div>
       </div>
     </div>
-  );
+    );
+  };
 
-  const renderListRow = (listing: StagedListing, isArchived: boolean) => (
-    <div key={listing.id} style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.75rem 1.25rem', opacity: isArchived ? 0.65 : 1, borderBottom: '1px solid var(--border-color)' }}>
+  const renderListRow = (listing: StagedListing, isArchived: boolean) => {
+    const isSelected = selectedIds.has(listing.id);
+    return (
+    <div key={listing.id} style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.75rem 1.25rem', opacity: isArchived ? 0.65 : 1, borderBottom: '1px solid var(--border-color)', background: isSelected ? 'rgba(99,102,241,0.06)' : 'transparent' }}>
+      <div onClick={() => toggleSelect(listing.id)} style={{ width: '18px', height: '18px', flexShrink: 0, borderRadius: '4px', background: isSelected ? 'var(--accent-color)' : 'transparent', border: `2px solid ${isSelected ? 'var(--accent-color)' : 'var(--border-color)'}`, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {isSelected && <Check size={11} color="white" />}
+      </div>
       <div style={{ width: '56px', height: '56px', flexShrink: 0, borderRadius: '6px', overflow: 'hidden', background: 'rgba(0,0,0,0.4)', position: 'relative', cursor: listing.images?.[0] ? 'pointer' : 'default' }}
         onClick={() => listing.images?.[0] && (setLightboxImages(listing.images), setLightboxIndex(0))}>
         {listing.images?.[0] ? (
@@ -400,7 +455,8 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
         </button>
       </div>
     </div>
-  );
+    );
+  };
 
   return (
     <div>
@@ -502,6 +558,29 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
         </div>
       )}
 
+      {/* Bulk action bar */}
+      {selectedIds.size > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem', padding: '0.6rem 1rem', background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: '8px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.85rem', color: '#a5b4fc', fontWeight: 500 }}>{selectedIds.size} selected</span>
+          {isShopifyConnected && (
+            <button className="btn-primary" onClick={handleBulkShopifyPush} disabled={bulkShopifyPushingIds.size > 0}
+              style={{ fontSize: '0.8rem', padding: '4px 12px', background: 'linear-gradient(135deg, #96bf48, #5e8e3e)', display: 'flex', alignItems: 'center', gap: '5px' }}>
+              {bulkShopifyPushingIds.size > 0 ? <RefreshCw size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <ShoppingBag size={13} />}
+              {bulkShopifyPushingIds.size > 0 ? `Pushing ${bulkShopifyPushingIds.size}…` : `Push to Shopify`}
+            </button>
+          )}
+          <button onClick={handleBulkArchive} style={{ fontSize: '0.8rem', padding: '4px 12px', background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border-color)', color: 'var(--text-secondary)', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <Archive size={13} /> Archive
+          </button>
+          <button onClick={handleBulkDelete} style={{ fontSize: '0.8rem', padding: '4px 12px', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', color: '#ef4444', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <Trash2 size={13} /> Delete
+          </button>
+          <button onClick={clearSelection} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
       {/* Toolbar */}
       <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
         <div style={{ position: 'relative', flex: 1, minWidth: '200px' }}>
@@ -530,6 +609,10 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
           onClick={() => { exportCsv(listings); toast('CSV exported.', 'success'); }}>
           <Download size={16} /> CSV
         </button>
+        <button onClick={selectedIds.size > 0 ? clearSelection : selectAllFiltered}
+          style={{ fontSize: '0.8rem', padding: '5px 10px', background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border-color)', color: 'var(--text-secondary)', borderRadius: '6px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+          {selectedIds.size > 0 ? `Deselect All` : `Select All (${filteredListings.length})`}
+        </button>
         <div style={{ display: 'flex', gap: '0.25rem' }}>
           <button onClick={() => setViewMode('grid')} title="Grid view" style={{ padding: '6px 10px', background: viewMode === 'grid' ? 'var(--glass-bg)' : 'transparent', border: '1px solid', borderColor: viewMode === 'grid' ? 'var(--glass-border)' : 'transparent', color: 'var(--text-primary)', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
             <LayoutGrid size={18} />
@@ -548,18 +631,51 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
         </div>
       )}
 
-      {filteredListings.length > 0 && viewMode === 'grid' && (
+      {paginatedListings.length > 0 && viewMode === 'grid' && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '1.5rem', marginBottom: '1.5rem' }}>
-          {filteredListings.map(l => renderCard(l, !!l.archived))}
+          {paginatedListings.map(l => renderCard(l, !!l.archived))}
         </div>
       )}
-      {filteredListings.length > 0 && viewMode === 'list' && (
+      {paginatedListings.length > 0 && viewMode === 'list' && (
         <div className="glass-panel" style={{ padding: 0, overflow: 'hidden', marginBottom: '1.5rem' }}>
-          {filteredListings.map(l => renderListRow(l, !!l.archived))}
+          {paginatedListings.map(l => renderListRow(l, !!l.archived))}
           <div style={{ height: '1px' }} />
         </div>
       )}
 
+      {/* Pagination controls */}
+      {filteredListings.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', justifyContent: 'center', marginTop: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+            <span style={{ marginRight: '4px' }}>Show:</span>
+            {[20, 50, 100, 200, 0].map(n => (
+              <button key={n} onClick={() => { setPerPage(n); setCurrentPage(1); }}
+                style={{ padding: '3px 8px', borderRadius: '4px', border: '1px solid', cursor: 'pointer', fontSize: '0.8rem',
+                  background: perPage === n ? 'rgba(99,102,241,0.2)' : 'transparent',
+                  borderColor: perPage === n ? 'var(--accent-color)' : 'var(--border-color)',
+                  color: perPage === n ? '#a5b4fc' : 'var(--text-secondary)' }}>
+                {n === 0 ? 'All' : n}
+              </button>
+            ))}
+          </div>
+          {totalPages > 1 && (
+            <>
+              <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}
+                style={{ padding: '4px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-primary)', cursor: currentPage === 1 ? 'default' : 'pointer', opacity: currentPage === 1 ? 0.35 : 1 }}>
+                ←
+              </button>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                Page {currentPage} of {totalPages} · {filteredListings.length} items
+              </span>
+              <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}
+                style={{ padding: '4px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-primary)', cursor: currentPage === totalPages ? 'default' : 'pointer', opacity: currentPage === totalPages ? 0.35 : 1 }}>
+                →
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }

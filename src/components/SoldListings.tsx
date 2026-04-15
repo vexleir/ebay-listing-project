@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Trash2, RotateCcw, Search, ChevronDown, LayoutGrid, List, DollarSign, TrendingUp, Package } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Trash2, RotateCcw, Search, ChevronDown, LayoutGrid, List, DollarSign, TrendingUp, Package, Check, X } from 'lucide-react';
 import type { StagedListing } from '../types';
 import { useToast } from '../context/ToastContext';
 import { calculateNetProfit } from '../utils/fees';
@@ -30,6 +30,9 @@ export default function SoldListings({ listings, onDelete, onUnmarkSold, onRelis
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [lightboxImages, setLightboxImages] = useState<string[] | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState(0);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [perPage, setPerPage] = useState<number>(20);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const filtered = listings
     .filter(l => {
@@ -46,6 +49,16 @@ export default function SoldListings({ listings, onDelete, onUnmarkSold, onRelis
         default: return 0;
       }
     });
+
+  useEffect(() => { setCurrentPage(1); }, [search, sort]);
+
+  const totalPages = perPage === 0 ? 1 : Math.ceil(filtered.length / perPage);
+  const paginated = perPage === 0 ? filtered : filtered.slice((currentPage - 1) * perPage, currentPage * perPage);
+
+  const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const selectAllFiltered = () => setSelectedIds(new Set(filtered.map(l => l.id)));
+  const clearSelection = () => setSelectedIds(new Set());
+  const handleBulkDelete = () => { Array.from(selectedIds).forEach(id => onDelete(id)); clearSelection(); };
 
   const totalRevenue = listings.reduce((sum, l) => sum + parsePrice(l.soldPrice), 0);
   const totalProfit = listings.reduce((sum, l) => {
@@ -70,9 +83,10 @@ export default function SoldListings({ listings, onDelete, onUnmarkSold, onRelis
     const np = listing.costBasis
       ? calculateNetProfit(listing.soldPrice || listing.priceRecommendation, listing.costBasis, listing.category || '', listing.shippingLabelCost)
       : null;
+    const isSelected = selectedIds.has(listing.id);
 
     return (
-      <div key={listing.id} className="glass-card" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', border: '1px solid rgba(16,185,129,0.35)' }}>
+      <div key={listing.id} className="glass-card" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', border: `1px solid ${isSelected ? 'var(--accent-color)' : 'rgba(16,185,129,0.35)'}`, outline: isSelected ? '2px solid var(--accent-color)' : 'none', outlineOffset: '2px' }}>
         <div style={{ padding: '8px 12px', background: 'rgba(16,185,129,0.15)', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.88rem', fontWeight: 600 }}>
           ✓ SOLD · {formatDate(listing.soldAt)}
           {listing.soldPlatform === 'shopify' && (
@@ -86,8 +100,11 @@ export default function SoldListings({ listings, onDelete, onUnmarkSold, onRelis
             ${soldAmt > 0 ? soldAmt.toFixed(2) : listedAmt.toFixed(2)}
           </span>
         </div>
-        <div style={{ height: '120px', background: 'rgba(0,0,0,0.5)', cursor: listing.images?.[0] ? 'pointer' : 'default' }}
+        <div style={{ height: '120px', background: 'rgba(0,0,0,0.5)', cursor: listing.images?.[0] ? 'pointer' : 'default', position: 'relative' }}
           onClick={() => listing.images?.[0] && (setLightboxImages(listing.images), setLightboxIndex(0))}>
+          <div onClick={e => { e.stopPropagation(); toggleSelect(listing.id); }} style={{ position: 'absolute', top: '8px', left: '8px', zIndex: 3, cursor: 'pointer', width: '22px', height: '22px', borderRadius: '5px', background: isSelected ? 'var(--accent-color)' : 'rgba(0,0,0,0.6)', border: `2px solid ${isSelected ? 'var(--accent-color)' : 'rgba(255,255,255,0.4)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s' }}>
+            {isSelected && <Check size={13} color="white" />}
+          </div>
           {listing.images?.[0]
             ? <img src={listing.images[0]} alt="thumb" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>No image</div>
@@ -127,8 +144,12 @@ export default function SoldListings({ listings, onDelete, onUnmarkSold, onRelis
   const renderListRow = (listing: StagedListing) => {
     const soldAmt = parsePrice(listing.soldPrice);
     const listedAmt = parsePrice(listing.priceRecommendation);
+    const isSelected = selectedIds.has(listing.id);
     return (
-      <div key={listing.id} style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.75rem 1.25rem', borderBottom: '1px solid var(--border-color)' }}>
+      <div key={listing.id} style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.75rem 1.25rem', borderBottom: '1px solid var(--border-color)', background: isSelected ? 'rgba(99,102,241,0.06)' : 'transparent' }}>
+        <div onClick={() => toggleSelect(listing.id)} style={{ width: '18px', height: '18px', flexShrink: 0, borderRadius: '4px', background: isSelected ? 'var(--accent-color)' : 'transparent', border: `2px solid ${isSelected ? 'var(--accent-color)' : 'var(--border-color)'}`, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          {isSelected && <Check size={11} color="white" />}
+        </div>
         <div style={{ width: '48px', height: '48px', flexShrink: 0, borderRadius: '6px', overflow: 'hidden', background: 'rgba(0,0,0,0.4)', cursor: listing.images?.[0] ? 'pointer' : 'default' }}
           onClick={() => listing.images?.[0] && (setLightboxImages(listing.images), setLightboxIndex(0))}>
           {listing.images?.[0]
@@ -199,6 +220,19 @@ export default function SoldListings({ listings, onDelete, onUnmarkSold, onRelis
         </div>
       </div>
 
+      {/* Bulk action bar */}
+      {selectedIds.size > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem', padding: '0.6rem 1rem', background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: '8px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.85rem', color: '#a5b4fc', fontWeight: 500 }}>{selectedIds.size} selected</span>
+          <button onClick={handleBulkDelete} style={{ fontSize: '0.8rem', padding: '4px 12px', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', color: '#ef4444', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <Trash2 size={13} /> Delete Selected
+          </button>
+          <button onClick={clearSelection} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
       {/* Toolbar */}
       <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
         <div style={{ position: 'relative', flex: 1, minWidth: '200px' }}>
@@ -215,6 +249,10 @@ export default function SoldListings({ listings, onDelete, onUnmarkSold, onRelis
           </select>
           <ChevronDown size={14} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-secondary)' }} />
         </div>
+        <button onClick={selectedIds.size > 0 ? clearSelection : selectAllFiltered}
+          style={{ fontSize: '0.8rem', padding: '5px 10px', background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border-color)', color: 'var(--text-secondary)', borderRadius: '6px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+          {selectedIds.size > 0 ? 'Deselect All' : `Select All (${filtered.length})`}
+        </button>
         <div style={{ display: 'flex', gap: '0.25rem' }}>
           <button onClick={() => setViewMode('grid')} title="Grid view" style={{ padding: '6px 10px', background: viewMode === 'grid' ? 'var(--glass-bg)' : 'transparent', border: '1px solid', borderColor: viewMode === 'grid' ? 'var(--glass-border)' : 'transparent', color: 'var(--text-primary)', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
             <LayoutGrid size={18} />
@@ -231,15 +269,48 @@ export default function SoldListings({ listings, onDelete, onUnmarkSold, onRelis
         </div>
       )}
 
-      {filtered.length > 0 && viewMode === 'grid' && (
+      {paginated.length > 0 && viewMode === 'grid' && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1.5rem' }}>
-          {filtered.map(l => renderCard(l))}
+          {paginated.map(l => renderCard(l))}
         </div>
       )}
-      {filtered.length > 0 && viewMode === 'list' && (
+      {paginated.length > 0 && viewMode === 'list' && (
         <div className="glass-panel" style={{ padding: 0, overflow: 'hidden' }}>
-          {filtered.map(l => renderListRow(l))}
+          {paginated.map(l => renderListRow(l))}
           <div style={{ height: '1px' }} />
+        </div>
+      )}
+
+      {/* Pagination controls */}
+      {filtered.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', justifyContent: 'center', marginTop: '1.5rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+            <span style={{ marginRight: '4px' }}>Show:</span>
+            {[20, 50, 100, 200, 0].map(n => (
+              <button key={n} onClick={() => { setPerPage(n); setCurrentPage(1); }}
+                style={{ padding: '3px 8px', borderRadius: '4px', border: '1px solid', cursor: 'pointer', fontSize: '0.8rem',
+                  background: perPage === n ? 'rgba(99,102,241,0.2)' : 'transparent',
+                  borderColor: perPage === n ? 'var(--accent-color)' : 'var(--border-color)',
+                  color: perPage === n ? '#a5b4fc' : 'var(--text-secondary)' }}>
+                {n === 0 ? 'All' : n}
+              </button>
+            ))}
+          </div>
+          {totalPages > 1 && (
+            <>
+              <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}
+                style={{ padding: '4px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-primary)', cursor: currentPage === 1 ? 'default' : 'pointer', opacity: currentPage === 1 ? 0.35 : 1 }}>
+                ←
+              </button>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                Page {currentPage} of {totalPages} · {filtered.length} items
+              </span>
+              <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}
+                style={{ padding: '4px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-primary)', cursor: currentPage === totalPages ? 'default' : 'pointer', opacity: currentPage === totalPages ? 0.35 : 1 }}>
+                →
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>

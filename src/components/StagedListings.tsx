@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Trash2, Edit2, Copy, Check, Calendar, LayoutGrid, List, Wand2, TrendingUp, X, RefreshCw, ImagePlus, GripVertical, UploadCloud, Search, ChevronDown, ShieldCheck, ShieldAlert, ShieldX, Share2, AlertTriangle } from 'lucide-react';
 import type { StagedListing, EbayPolicy } from '../types';
@@ -295,6 +295,9 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkPushingIds, setBulkPushingIds] = useState<Set<string>>(new Set());
+  // Pagination
+  const [perPage, setPerPage] = useState<number>(20);
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Lightbox
   const [lightboxImages, setLightboxImages] = useState<string[] | null>(null);
@@ -463,7 +466,11 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
     });
   };
 
-  const selectAll = () => setSelectedIds(new Set(listings.map(l => l.id)));
+  useEffect(() => { setCurrentPage(1); }, [search, activeTag, sortBy]);
+  const totalPages = perPage === 0 ? 1 : Math.ceil(visibleListings.length / perPage);
+  const paginatedListings = perPage === 0 ? visibleListings : visibleListings.slice((currentPage - 1) * perPage, currentPage * perPage);
+
+  const selectAll = () => setSelectedIds(new Set(visibleListings.map(l => l.id)));
   const clearSelection = () => setSelectedIds(new Set());
 
   const handleReanalyze = async () => {
@@ -914,7 +921,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
       {/* Grid view */}
       {viewMode === 'grid' && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '1.5rem' }}>
-          {visibleListings.map(listing => {
+          {paginatedListings.map(listing => {
             const isSelected = selectedIds.has(listing.id);
             return (
               <div key={listing.id} className="glass-card" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', outline: isSelected ? '2px solid var(--accent-color)' : 'none', outlineOffset: '2px' }}>
@@ -1002,7 +1009,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
       {/* List view */}
       {viewMode === 'list' && (
         <div className="glass-panel" style={{ padding: 0, overflow: 'hidden' }}>
-          {visibleListings.map((listing, idx) => {
+          {paginatedListings.map((listing, idx) => {
             const isSelected = selectedIds.has(listing.id);
             return (
               <div key={listing.id}>
@@ -1044,13 +1051,46 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
                   </div>
                 </div>
                 {compsId === listing.id && (
-                  <div style={{ padding: '0 1.25rem', borderBottom: idx < visibleListings.length - 1 ? '1px solid var(--border-color)' : 'none' }}>
+                  <div style={{ padding: '0 1.25rem', borderBottom: idx < paginatedListings.length - 1 ? '1px solid var(--border-color)' : 'none' }}>
                     <CompsPanel listing={listing} />
                   </div>
                 )}
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Pagination controls */}
+      {visibleListings.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', justifyContent: 'center', marginTop: '1.5rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+            <span style={{ marginRight: '4px' }}>Show:</span>
+            {[20, 50, 100, 200, 0].map(n => (
+              <button key={n} onClick={() => { setPerPage(n); setCurrentPage(1); }}
+                style={{ padding: '3px 8px', borderRadius: '4px', border: '1px solid', cursor: 'pointer', fontSize: '0.8rem',
+                  background: perPage === n ? 'rgba(99,102,241,0.2)' : 'transparent',
+                  borderColor: perPage === n ? 'var(--accent-color)' : 'var(--border-color)',
+                  color: perPage === n ? '#a5b4fc' : 'var(--text-secondary)' }}>
+                {n === 0 ? 'All' : n}
+              </button>
+            ))}
+          </div>
+          {totalPages > 1 && (
+            <>
+              <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}
+                style={{ padding: '4px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-primary)', cursor: currentPage === 1 ? 'default' : 'pointer', opacity: currentPage === 1 ? 0.35 : 1 }}>
+                ←
+              </button>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                Page {currentPage} of {totalPages} · {visibleListings.length} listings
+              </span>
+              <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}
+                style={{ padding: '4px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-primary)', cursor: currentPage === totalPages ? 'default' : 'pointer', opacity: currentPage === totalPages ? 0.35 : 1 }}>
+                →
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>
