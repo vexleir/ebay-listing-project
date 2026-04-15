@@ -1068,27 +1068,24 @@ app.get('/api/ebay/active-listings', async (req, res) => {
   }
 });
 
-// POST /api/ebay/refresh-listings
-// Re-fetches all active eBay listings and patches matching DB records with updated images,
-// title, price, and condition. Useful to backfill missing images after import.
+// POST /api/ebay/refresh-listings?page=N
+// Processes one page (200 items) of active eBay listings per call.
+// Updates existing DB records (images/title/price/condition) and inserts any not yet imported.
+// Frontend calls this repeatedly for each page, accumulating counts.
 app.post('/api/ebay/refresh-listings', async (req, res) => {
   try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
     const token = await getValidAccessToken(req.companyId);
     const db = await getDb();
 
-    // Load all imported listings for this company keyed by ebayDraftId
+    // Load all imported listings keyed by ebayDraftId for fast lookup
     const allImported = await db.collection('listings').find(
       { companyId: req.companyId, ebayDraftId: { $exists: true, $ne: null } },
-      { projection: { _id: 1, ebayDraftId: 1, images: 1, title: 1, priceRecommendation: 1, condition: 1 } }
+      { projection: { _id: 1, ebayDraftId: 1 } }
     ).toArray();
     const byEbayId = new Map(allImported.map(l => [l.ebayDraftId, l]));
 
-    let page = 1;
-    let totalPages = 1;
-    let updated = 0;
-
-    while (page <= totalPages) {
-      const xml = `<?xml version="1.0" encoding="utf-8"?>
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
 <GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <ActiveList>
     <Include>true</Include>
@@ -1100,68 +1097,79 @@ app.post('/api/ebay/refresh-listings', async (req, res) => {
   <DetailLevel>ReturnAll</DetailLevel>
   <HideVariations>true</HideVariations>
 </GetMyeBaySellingRequest>`;
-      const resp = await axios.post('https://api.ebay.com/ws/api.dll', xml, {
-        headers: {
-          'X-EBAY-API-COMPATIBILITY-LEVEL': '1331',
-          'X-EBAY-API-CALL-NAME': 'GetMyeBaySelling',
-          'X-EBAY-API-SITEID': '0',
-          'X-EBAY-API-IAF-TOKEN': token,
-          'Content-Type': 'text/xml',
-        },
-      });
-      const body = resp.data;
-      if (page === 1) {
-        totalPages = parseInt((/<TotalNumberOfPages>(\d+)<\/TotalNumberOfPages>/.exec(body) || [])[1] || '1');
-      }
+    const resp = await axios.post('https://api.ebay.com/ws/api.dll', xml, {
+      headers: {
+        'X-EBAY-API-COMPATIBILITY-LEVEL': '1331',
+        'X-EBAY-API-CALL-NAME': 'GetMyeBaySelling',
+        'X-EBAY-API-SITEID': '0',
+        'X-EBAY-API-IAF-TOKEN': token,
+        'Content-Type': 'text/xml',
+      },
+    });
+    const body = resp.data;
+    const totalPages = parseInt((/<TotalNumberOfPages>(\d+)<\/TotalNumberOfPages>/.exec(body) || [])[1] || '1');
 
-      const itemRegex = /<Item>([\s\S]*?)<\/Item>/g;
-      const bulkOps = [];
-      let m;
-      while ((m = itemRegex.exec(body)) !== null) {
-        const block = m[1];
-        const get = (tag) => {
-          const r = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`);
-          const x = r.exec(block);
-          return x ? x[1].trim() : '';
-        };
-        const ebayItemId = get('ItemID');
-        if (!ebayItemId || !byEbayId.has(ebayItemId)) continue;
+    const itemRegex = /<Item>([\s\S]*?)<\/Item>/g;
+    const updateOps = [];
+    const insertOps = [];
+    const now = Date.now();
+    let m;
+    while ((m = itemRegex.exec(body)) !== null) {
+      const block = m[1];
+      const get = (tag) => {
+        const r = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`);
+        const x = r.exec(block);
+        return x ? x[1].trim() : '';
+      };
+      const ebayItemId = get('ItemID');
+      if (!ebayItemId) continue;
 
+      const picRegex = /<PictureURL[^>]*>([\s\S]*?)<\/PictureURL>/g;
+      const images = [];
+      let pm;
+      while ((pm = picRegex.exec(block)) !== null) images.push(pm[1].trim());
+
+      const title = get('Title');
+      const rawPrice = get('CurrentPrice') || get('BuyItNowPrice') || '';
+      const priceRecommendation = rawPrice ? `$${parseFloat(rawPrice).toFixed(2)}` : '';
+      const condition = get('ConditionDisplayName') || '';
+      const categoryName = get('CategoryName') || '';
+
+      if (byEbayId.has(ebayItemId)) {
         const existing = byEbayId.get(ebayItemId);
-        const picRegex = /<PictureURL[^>]*>([\s\S]*?)<\/PictureURL>/g;
-        const images = [];
-        let pm;
-        while ((pm = picRegex.exec(block)) !== null) images.push(pm[1].trim());
-
-        const patch = { updatedAt: Date.now() };
+        const patch = { updatedAt: now };
         if (images.length > 0) patch.images = images;
-
-        const title = get('Title');
         if (title) patch.title = title;
-
-        const rawPrice = get('CurrentPrice') || get('BuyItNowPrice') || '';
-        if (rawPrice) patch.priceRecommendation = `$${parseFloat(rawPrice).toFixed(2)}`;
-
-        const condition = get('ConditionDisplayName');
+        if (priceRecommendation) patch.priceRecommendation = priceRecommendation;
         if (condition) patch.condition = condition;
-
-        bulkOps.push({
-          updateOne: {
-            filter: { _id: existing._id },
-            update: { $set: patch },
-          },
+        updateOps.push({ updateOne: { filter: { _id: existing._id }, update: { $set: patch } } });
+      } else {
+        insertOps.push({
+          id: crypto.randomUUID(),
+          companyId: req.companyId,
+          title,
+          description: '',
+          condition,
+          category: categoryName,
+          priceRecommendation,
+          shippingEstimate: '',
+          itemSpecifics: {},
+          images,
+          status: 'listed',
+          ebayDraftId: ebayItemId,
+          createdAt: now,
+          updatedAt: now,
         });
       }
-
-      if (bulkOps.length > 0) {
-        const result = await db.collection('listings').bulkWrite(bulkOps);
-        updated += result.modifiedCount;
-      }
-
-      page++;
     }
 
-    res.json({ updated });
+    const ops = [
+      ...updateOps,
+      ...insertOps.map(doc => ({ insertOne: { document: doc } })),
+    ];
+    if (ops.length > 0) await db.collection('listings').bulkWrite(ops);
+
+    res.json({ refreshed: updateOps.length, imported: insertOps.length, totalPages, page });
   } catch (e) {
     console.error('[refresh-listings] error:', e.message);
     res.status(500).json({ error: e.message });

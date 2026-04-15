@@ -39,6 +39,7 @@ export default function SettingsPanelView({ appPassword, isEbayConnected, isShop
   const [isDisconnectingShopify, setIsDisconnectingShopify] = useState(false);
   const [webhookLastReceived, setWebhookLastReceived] = useState<number | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshProgress, setRefreshProgress] = useState<{ page: number; totalPages: number } | null>(null);
 
   const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${appPassword}` };
 
@@ -113,15 +114,31 @@ export default function SettingsPanelView({ appPassword, isEbayConnected, isShop
   const handleRefreshFromEbay = async () => {
     if (!isEbayConnected) { toast('Connect to eBay first.', 'error'); return; }
     setIsRefreshing(true);
+    setRefreshProgress(null);
+    let totalRefreshed = 0;
+    let totalImported = 0;
     try {
-      const resp = await fetch('/api/ebay/refresh-listings', { method: 'POST', headers });
-      const data = await resp.json();
-      if (data.error) throw new Error(data.error);
-      toast(`Refreshed ${data.updated} listing${data.updated !== 1 ? 's' : ''} from eBay.`, 'success');
+      let page = 1;
+      let totalPages = 1;
+      while (page <= totalPages) {
+        setRefreshProgress({ page, totalPages });
+        const resp = await fetch(`/api/ebay/refresh-listings?page=${page}`, { method: 'POST', headers });
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error);
+        totalRefreshed += data.refreshed;
+        totalImported += data.imported;
+        totalPages = data.totalPages;
+        page++;
+      }
+      const parts = [];
+      if (totalRefreshed > 0) parts.push(`${totalRefreshed} refreshed`);
+      if (totalImported > 0) parts.push(`${totalImported} newly imported`);
+      toast(`eBay sync complete: ${parts.length ? parts.join(', ') : 'nothing changed'}.`, 'success');
     } catch (e: any) {
       toast('Refresh failed: ' + e.message, 'error');
     } finally {
       setIsRefreshing(false);
+      setRefreshProgress(null);
     }
   };
 
@@ -346,7 +363,11 @@ export default function SettingsPanelView({ appPassword, isEbayConnected, isShop
           </button>
           <button className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }} onClick={handleRefreshFromEbay} disabled={isRefreshing || !isEbayConnected}>
             {isRefreshing ? <RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <RefreshCw size={16} />}
-            {isRefreshing ? 'Refreshing…' : 'Refresh from eBay'}
+            {isRefreshing
+              ? refreshProgress
+                ? `Syncing page ${refreshProgress.page} of ${refreshProgress.totalPages}…`
+                : 'Starting…'
+              : 'Refresh from eBay'}
           </button>
           <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
             {staged.length} staged + {listed.length} listed = {staged.length + listed.length} total listings
