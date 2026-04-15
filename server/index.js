@@ -348,9 +348,24 @@ app.post('/api/shopify/push', async (req, res) => {
     const { listing } = req.body;
     if (!listing || !listing.id) return res.status(400).json({ error: 'listing required' });
 
-    const config = await shopifyAuth.getShopifyConfig(req.companyId);
+    let config = await shopifyAuth.getShopifyConfig(req.companyId);
     if (!config || !config.access_token) return res.status(400).json({ error: 'Shopify not connected' });
-    if (!config.locationId) return res.status(400).json({ error: 'Shopify location ID not found. Try disconnecting and reconnecting Shopify.' });
+
+    // Fetch and store locationId on the fly if it wasn't captured during OAuth
+    if (!config.locationId) {
+      console.log('[shopify/push] locationId missing, fetching now...');
+      const locResult = await shopifyAuth.shopifyGraphQL(req.companyId, `{ locations(first: 1) { edges { node { id name } } } }`);
+      const locationId = locResult?.locations?.edges?.[0]?.node?.id;
+      if (!locationId) return res.status(400).json({ error: 'Could not find a location in your Shopify store. Please check Shopify Admin → Settings → Locations.' });
+      const db = await getDb();
+      await db.collection('config').updateOne(
+        { _id: `${req.companyId}_shopify` },
+        { $set: { locationId } },
+        { upsert: true }
+      );
+      config = { ...config, locationId };
+      console.log('[shopify/push] locationId stored:', locationId);
+    }
 
     const price = listing.priceRecommendation
       ? parseFloat(listing.priceRecommendation.replace(/[^0-9.]/g, '')).toFixed(2)
