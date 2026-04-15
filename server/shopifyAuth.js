@@ -2,7 +2,7 @@ const { getDb } = require('./db');
 
 const SHOPIFY_SHOP = process.env.SHOPIFY_SHOP || 'bxjqfz-ku.myshopify.com';
 const REDIRECT_URI = `${process.env.APP_BASE_URL || 'https://ebay-listing-project.onrender.com'}/api/shopify/callback`;
-const SCOPES = 'write_products,read_products,write_inventory,read_inventory,read_orders';
+const SCOPES = 'write_products,read_products,write_inventory,read_inventory,read_orders,read_locations';
 
 function configDocId(companyId) {
   return `${companyId}_shopify`;
