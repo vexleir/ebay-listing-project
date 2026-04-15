@@ -342,6 +342,155 @@ app.delete('/api/shopify/tokens', async (req, res) => {
   }
 });
 
+// POST /api/shopify/push — create a product in Shopify from a listing
+app.post('/api/shopify/push', async (req, res) => {
+  try {
+    const { listing } = req.body;
+    if (!listing || !listing.id) return res.status(400).json({ error: 'listing required' });
+
+    const config = await shopifyAuth.getShopifyConfig(req.companyId);
+    if (!config || !config.access_token) return res.status(400).json({ error: 'Shopify not connected' });
+    if (!config.locationId) return res.status(400).json({ error: 'Shopify location ID not found. Try disconnecting and reconnecting Shopify.' });
+
+    const price = listing.priceRecommendation
+      ? parseFloat(listing.priceRecommendation.replace(/[^0-9.]/g, '')).toFixed(2)
+      : '0.00';
+
+    // Build media array from image URLs (Cloudinary URLs work directly)
+    const media = (listing.images || [])
+      .filter(url => typeof url === 'string' && url.startsWith('http'))
+      .slice(0, 10)
+      .map(url => ({ originalSource: url, alt: listing.title, mediaContentType: 'IMAGE' }));
+
+    const productInput = {
+      title: listing.title || 'Untitled',
+      descriptionHtml: listing.description || '',
+      vendor: 'Flip Side Collectibles',
+      productType: listing.category || '',
+      tags: listing.tags || [],
+      ...(media.length > 0 ? { media } : {}),
+    };
+
+    // Create the product
+    const createResult = await shopifyAuth.shopifyGraphQL(req.companyId, `
+      mutation productCreate($input: ProductCreateInput!) {
+        productCreate(input: $input) {
+          product {
+            id
+            handle
+            variants(first: 1) { edges { node { id inventoryItemId } } }
+          }
+          userErrors { field message }
+        }
+      }
+    `, { input: productInput });
+
+    const userErrors = createResult?.productCreate?.userErrors || [];
+    if (userErrors.length > 0) throw new Error(userErrors.map(e => e.message).join(', '));
+
+    const product = createResult?.productCreate?.product;
+    if (!product) throw new Error('No product returned from Shopify');
+
+    const variantNode = product.variants?.edges?.[0]?.node;
+    const inventoryItemId = variantNode?.inventoryItemId;
+    const variantId = variantNode?.id;
+
+    // Set price on the variant
+    if (variantId) {
+      await shopifyAuth.shopifyGraphQL(req.companyId, `
+        mutation productVariantUpdate($input: ProductVariantInput!) {
+          productVariantUpdate(input: $input) {
+            productVariant { id price }
+            userErrors { field message }
+          }
+        }
+      `, { input: { id: variantId, price } });
+    }
+
+    // Set inventory to 1
+    if (inventoryItemId && config.locationId) {
+      await shopifyAuth.shopifyGraphQL(req.companyId, `
+        mutation inventorySetQuantities($input: InventorySetQuantitiesInput!) {
+          inventorySetQuantities(input: $input) {
+            userErrors { field message }
+          }
+        }
+      `, {
+        input: {
+          name: 'available',
+          quantities: [{ inventoryItemId, locationId: config.locationId, quantity: 1 }],
+          reason: 'correction',
+        }
+      });
+    }
+
+    // Persist shopifyProductId back to the listing in DB
+    const db = await getDb();
+    await db.collection('listings').updateOne(
+      { id: listing.id, companyId: req.companyId },
+      { $set: { shopifyProductId: product.id, shopifyStatus: 'listed', shopifyListedAt: Date.now(), updatedAt: Date.now() } }
+    );
+
+    const shopHandle = config.shop.replace('.myshopify.com', '');
+    res.json({
+      success: true,
+      shopifyProductId: product.id,
+      shopifyUrl: `https://${config.shop}/products/${product.handle}`,
+    });
+  } catch (e) {
+    console.error('[shopify/push] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/shopify/delist/:listingId — unpublish a Shopify product (reversible)
+app.post('/api/shopify/delist/:listingId', async (req, res) => {
+  try {
+    const db = await getDb();
+    const listing = await db.collection('listings').findOne({ id: req.params.listingId, companyId: req.companyId });
+    if (!listing || !listing.shopifyProductId) return res.status(400).json({ error: 'Listing not found or not on Shopify' });
+
+    // Set inventory to 0 — simpler and more reliable than unpublish for single-item stores
+    const config = await shopifyAuth.getShopifyConfig(req.companyId);
+
+    // Get the inventory item ID via GraphQL
+    const productData = await shopifyAuth.shopifyGraphQL(req.companyId, `
+      query getVariant($id: ID!) {
+        product(id: $id) {
+          variants(first: 1) { edges { node { inventoryItemId } } }
+        }
+      }
+    `, { id: listing.shopifyProductId });
+
+    const inventoryItemId = productData?.product?.variants?.edges?.[0]?.node?.inventoryItemId;
+    if (inventoryItemId && config.locationId) {
+      await shopifyAuth.shopifyGraphQL(req.companyId, `
+        mutation inventorySetQuantities($input: InventorySetQuantitiesInput!) {
+          inventorySetQuantities(input: $input) {
+            userErrors { field message }
+          }
+        }
+      `, {
+        input: {
+          name: 'available',
+          quantities: [{ inventoryItemId, locationId: config.locationId, quantity: 0 }],
+          reason: 'correction',
+        }
+      });
+    }
+
+    await db.collection('listings').updateOne(
+      { id: req.params.listingId, companyId: req.companyId },
+      { $set: { shopifyStatus: 'unlisted', updatedAt: Date.now() } }
+    );
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error('[shopify/delist] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── Listings ─────────────────────────────────────────────────────────────────
 
 app.get('/api/listings', async (req, res) => {

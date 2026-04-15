@@ -21,6 +21,10 @@ export interface StagedListing {
   soldAt?: number;
   soldPrice?: string;
   shippingLabelCost?: string;
+  // Shopify cross-listing
+  shopifyProductId?: string;
+  shopifyStatus?: 'listed' | 'unlisted';
+  shopifyListedAt?: number;
 }
 
 export interface AppState {

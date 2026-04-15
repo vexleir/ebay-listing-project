@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ExternalLink, Calendar, CheckCircle, Trash2, Archive, ArchiveRestore, Search, ChevronDown, LayoutGrid, List, Download, RefreshCw, Eye, RotateCcw, CircleSlash, Share2, DollarSign, Pencil } from 'lucide-react';
+import { ExternalLink, Calendar, CheckCircle, Trash2, Archive, ArchiveRestore, Search, ChevronDown, LayoutGrid, List, Download, RefreshCw, Eye, RotateCcw, CircleSlash, Share2, DollarSign, Pencil, ShoppingBag } from 'lucide-react';
 import type { StagedListing } from '../types';
 import ImageSearchButton from './ImageSearchButton';
 import Lightbox from './Lightbox';
@@ -18,6 +18,7 @@ interface ListedProductsProps {
   onMarkSold?: (id: string, soldPrice: string, soldAt: number) => void;
   onUpdateListing?: (updated: StagedListing) => void;
   isEbayConnected?: boolean;
+  isShopifyConnected?: boolean;
   appPassword?: string;
 }
 
@@ -77,7 +78,7 @@ function exportCsv(listings: StagedListing[]) {
   URL.revokeObjectURL(url);
 }
 
-export default function ListedProductsView({ listings, onDelete, onArchive, onSyncSold, onRelist, onMarkSold, onUpdateListing, isEbayConnected, appPassword = '' }: ListedProductsProps) {
+export default function ListedProductsView({ listings, onDelete, onArchive, onSyncSold, onRelist, onMarkSold, onUpdateListing, isEbayConnected, isShopifyConnected, appPassword = '' }: ListedProductsProps) {
   const { toast } = useToast();
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortOption>('date-desc');
@@ -91,6 +92,8 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [stats, setStats] = useState<Record<string, { watchCount: string; hitCount: string; quantitySold: string } | null>>({});
   const [loadingStatsId, setLoadingStatsId] = useState<string | null>(null);
+  const [shopifyPushingId, setShopifyPushingId] = useState<string | null>(null);
+  const [shopifyDelistingId, setShopifyDelistingId] = useState<string | null>(null);
 
   const [crossPostListing, setCrossPostListing] = useState<StagedListing | null>(null);
   // End listing confirm
@@ -131,6 +134,47 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
       toast('Stats fetch failed: ' + e.message, 'error');
     } finally {
       setLoadingStatsId(null);
+    }
+  };
+
+  const handleShopifyPush = async (listing: StagedListing) => {
+    setShopifyPushingId(listing.id);
+    try {
+      const resp = await fetch('/api/shopify/push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pw}` },
+        body: JSON.stringify({ listing }),
+      });
+      const data = await resp.json();
+      if (!resp.ok || data.error) throw new Error(data.error || 'Shopify push failed');
+      if (onUpdateListing) {
+        onUpdateListing({ ...listing, shopifyProductId: data.shopifyProductId, shopifyStatus: 'listed', shopifyListedAt: Date.now() });
+      }
+      toast(`Listed on Shopify!`, 'success');
+    } catch (e: any) {
+      toast('Shopify push failed: ' + e.message, 'error');
+    } finally {
+      setShopifyPushingId(null);
+    }
+  };
+
+  const handleShopifyDelist = async (listing: StagedListing) => {
+    setShopifyDelistingId(listing.id);
+    try {
+      const resp = await fetch(`/api/shopify/delist/${listing.id}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${pw}` },
+      });
+      const data = await resp.json();
+      if (!resp.ok || data.error) throw new Error(data.error || 'Delist failed');
+      if (onUpdateListing) {
+        onUpdateListing({ ...listing, shopifyStatus: 'unlisted' });
+      }
+      toast('Removed from Shopify store.', 'success');
+    } catch (e: any) {
+      toast('Shopify delist failed: ' + e.message, 'error');
+    } finally {
+      setShopifyDelistingId(null);
     }
   };
 
@@ -216,6 +260,11 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
           <ProfitBadge price={listing.priceRecommendation} costBasis={listing.costBasis} category={listing.category} shippingLabelCost={listing.shippingLabelCost} />
           <span style={{ fontSize: '0.8rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px' }}>{listing.category}</span>
           {listing.sku && <span style={{ fontSize: '0.8rem', background: 'rgba(99,102,241,0.25)', padding: '2px 8px', borderRadius: '4px', color: '#a5b4fc' }}>SKU: {listing.sku}</span>}
+          {listing.shopifyProductId && listing.shopifyStatus === 'listed' && (
+            <span style={{ fontSize: '0.78rem', background: 'rgba(150,191,72,0.2)', color: '#96bf48', border: '1px solid rgba(150,191,72,0.35)', padding: '2px 8px', borderRadius: '4px', fontWeight: 600 }}>
+              Shopify ✓
+            </span>
+          )}
         </div>
         {listing.sellerNotes && <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', padding: '6px 8px', marginBottom: '0.75rem', fontStyle: 'italic' }}>📝 {listing.sellerNotes}</p>}
         {stats[listing.id] && (
@@ -252,6 +301,21 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
             <button className="btn-icon" title="Fetch view/watcher stats from eBay" onClick={() => fetchStats(listing)} disabled={loadingStatsId === listing.id} style={{ color: stats[listing.id] ? 'var(--accent-color)' : undefined }}>
               {loadingStatsId === listing.id ? <span style={{ fontSize: '10px' }}>...</span> : <Eye size={18} />}
             </button>
+          )}
+          {isShopifyConnected && !isArchived && (
+            listing.shopifyProductId && listing.shopifyStatus === 'listed' ? (
+              <button className="btn-icon" title="Remove from Shopify" onClick={() => handleShopifyDelist(listing)}
+                disabled={shopifyDelistingId === listing.id}
+                style={{ color: '#96bf48', fontSize: '0.7rem', gap: '3px' }}>
+                {shopifyDelistingId === listing.id ? <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <ShoppingBag size={16} />}
+              </button>
+            ) : (
+              <button className="btn-icon" title="Push to Shopify" onClick={() => handleShopifyPush(listing)}
+                disabled={shopifyPushingId === listing.id}
+                style={{ color: 'var(--text-secondary)', fontSize: '0.7rem', gap: '3px' }}>
+                {shopifyPushingId === listing.id ? <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <ShoppingBag size={16} />}
+              </button>
+            )
           )}
           <button className="btn-icon" title="Cross-post to other platforms" onClick={() => setCrossPostListing(listing)}>
             <Share2 size={18} />
@@ -310,6 +374,19 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
           <button className="btn-icon" title="Fetch view/watcher stats" onClick={() => fetchStats(listing)} disabled={loadingStatsId === listing.id} style={{ color: stats[listing.id] ? 'var(--accent-color)' : undefined }}>
             {loadingStatsId === listing.id ? <span style={{ fontSize: '10px' }}>...</span> : <Eye size={18} />}
           </button>
+        )}
+        {isShopifyConnected && !isArchived && (
+          listing.shopifyProductId && listing.shopifyStatus === 'listed' ? (
+            <button className="btn-icon" title="Remove from Shopify" onClick={() => handleShopifyDelist(listing)}
+              disabled={shopifyDelistingId === listing.id} style={{ color: '#96bf48' }}>
+              {shopifyDelistingId === listing.id ? <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <ShoppingBag size={16} />}
+            </button>
+          ) : (
+            <button className="btn-icon" title="Push to Shopify" onClick={() => handleShopifyPush(listing)}
+              disabled={shopifyPushingId === listing.id}>
+              {shopifyPushingId === listing.id ? <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <ShoppingBag size={16} />}
+            </button>
+          )
         )}
         <button className="btn-icon" title="Cross-post to other platforms" onClick={() => setCrossPostListing(listing)}>
           <Share2 size={18} />

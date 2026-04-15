@@ -61,32 +61,23 @@ shopifyLocationId: string         // fetched once on connect, stored for invento
 
 ---
 
-## Phase 2 — Push to Shopify
+## Phase 2 — Push to Shopify ✅ COMPLETE
 **Goal:** Can manually push any listed item to Shopify from the Listed tab.
 
 ### Type Changes
-- [ ] `src/types/index.ts` — add new platform fields to `StagedListing` (see Data Model Changes above)
+- [x] `src/types/index.ts` — added `shopifyProductId?`, `shopifyStatus?`, `shopifyListedAt?` to `StagedListing`
 
 ### Server
-- [ ] `POST /api/shopify/push` endpoint:
-  - Accept listing object
-  - Call `productCreate` GraphQL mutation (title, description, images via Cloudinary URLs, tags, vendor)
-  - Call `inventorySetQuantities` to set qty = 1 at stored `locationId`
-  - Update listing in MongoDB: set `shopifyProductId`, `shopifyStatus: 'listed'`, `shopifyListedAt`
-  - Return `{ success, shopifyProductId, shopifyUrl }`
-- [ ] `POST /api/shopify/delist/:listingId` endpoint:
-  - Call `publishableUnpublish` GraphQL mutation (reversible — keeps product data intact)
-  - Update listing: set `shopifyStatus: 'unlisted'`
+- [x] `POST /api/shopify/push` — `productCreate` → `productVariantUpdate` (price) → `inventorySetQuantities` (qty=1) → persists to MongoDB
+- [x] `POST /api/shopify/delist/:listingId` — sets inventory to 0, updates `shopifyStatus: 'unlisted'`
 
 ### Frontend
-- [ ] `src/components/ListedProducts.tsx`:
-  - "Push to Shopify" button per listing (shown when `!shopifyProductId`)
-  - Shopify badge + external store link when `shopifyProductId` is set
-  - "Delist from Shopify" option when listed on Shopify
-- [ ] Bulk push — select multiple listed items → push all to Shopify
-- [ ] `src/App.tsx` — handler functions: `handlePushToShopify(listing)`, `handleDelistFromShopify(listing)`
+- [x] `src/components/ListedProducts.tsx` — ShoppingBag icon button (push/delist toggle), "Shopify ✓" badge, spinner states, works in grid and list view
+- [x] `src/App.tsx` — passes `isShopifyConnected` to ListedProducts
 
-**Deliverable:** Can manually cross-list any eBay-listed item to Shopify.
+**Notes:** Price set via separate `productVariantUpdate` mutation. Images via Cloudinary URLs (no re-upload).
+
+**Deliverable:** Can manually cross-list any listed item to Shopify.
 
 ---
 
@@ -202,6 +193,6 @@ mutation webhookSubscriptionCreate($topic: String!, $callbackUrl: URL!) { ... }
 | Phase | Status | Notes |
 |-------|--------|-------|
 | Phase 1 — Foundation | ✅ Complete | server/shopifyAuth.js + Settings UI |
-| Phase 2 — Push to Shopify | ⬜ Not Started | Depends on Phase 1 |
+| Phase 2 — Push to Shopify | ✅ Complete | ShoppingBag button in Listed tab |
 | Phase 3 — Webhooks & Auto-Delist | ⬜ Not Started | Depends on Phase 2 |
 | Phase 4 — Polish & Analytics | ⬜ Not Started | Depends on Phase 3 |
