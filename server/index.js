@@ -1005,22 +1005,24 @@ app.get('/api/ebay/active-listings', async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const token = await getValidAccessToken(req.companyId);
+    // GetSellerList returns ALL active listings including out-of-stock GTC items.
+    // EndTimeFrom=now filters to listings that haven't ended yet.
+    const listNow = new Date();
+    const listEndTimeTo = new Date(listNow.getTime() + 120 * 24 * 60 * 60 * 1000);
     const xml = `<?xml version="1.0" encoding="utf-8"?>
-<GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <ActiveList>
-    <Include>true</Include>
-    <Pagination>
-      <EntriesPerPage>200</EntriesPerPage>
-      <PageNumber>${page}</PageNumber>
-    </Pagination>
-  </ActiveList>
+<GetSellerListRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <EndTimeFrom>${listNow.toISOString()}</EndTimeFrom>
+  <EndTimeTo>${listEndTimeTo.toISOString()}</EndTimeTo>
   <DetailLevel>ReturnAll</DetailLevel>
-  <HideVariations>true</HideVariations>
-</GetMyeBaySellingRequest>`;
+  <Pagination>
+    <EntriesPerPage>200</EntriesPerPage>
+    <PageNumber>${page}</PageNumber>
+  </Pagination>
+</GetSellerListRequest>`;
     const resp = await axios.post('https://api.ebay.com/ws/api.dll', xml, {
       headers: {
         'X-EBAY-API-COMPATIBILITY-LEVEL': '1331',
-        'X-EBAY-API-CALL-NAME': 'GetMyeBaySelling',
+        'X-EBAY-API-CALL-NAME': 'GetSellerList',
         'X-EBAY-API-SITEID': '0',
         'X-EBAY-API-IAF-TOKEN': token,
         'Content-Type': 'text/xml',
@@ -1085,22 +1087,25 @@ app.post('/api/ebay/refresh-listings', async (req, res) => {
     ).toArray();
     const byEbayId = new Map(allImported.map(l => [l.ebayDraftId, l]));
 
+    // GetSellerList returns ALL active listings including out-of-stock GTC items.
+    // GetMyeBaySelling/ActiveList skips those, causing a large discrepancy.
+    // EndTimeFrom=now ensures we only fetch listings that haven't ended yet.
+    const callNow = new Date();
+    const endTimeTo = new Date(callNow.getTime() + 120 * 24 * 60 * 60 * 1000);
     const xml = `<?xml version="1.0" encoding="utf-8"?>
-<GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <ActiveList>
-    <Include>true</Include>
-    <Pagination>
-      <EntriesPerPage>200</EntriesPerPage>
-      <PageNumber>${page}</PageNumber>
-    </Pagination>
-  </ActiveList>
+<GetSellerListRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <EndTimeFrom>${callNow.toISOString()}</EndTimeFrom>
+  <EndTimeTo>${endTimeTo.toISOString()}</EndTimeTo>
   <DetailLevel>ReturnAll</DetailLevel>
-  <HideVariations>true</HideVariations>
-</GetMyeBaySellingRequest>`;
+  <Pagination>
+    <EntriesPerPage>200</EntriesPerPage>
+    <PageNumber>${page}</PageNumber>
+  </Pagination>
+</GetSellerListRequest>`;
     const resp = await axios.post('https://api.ebay.com/ws/api.dll', xml, {
       headers: {
         'X-EBAY-API-COMPATIBILITY-LEVEL': '1331',
-        'X-EBAY-API-CALL-NAME': 'GetMyeBaySelling',
+        'X-EBAY-API-CALL-NAME': 'GetSellerList',
         'X-EBAY-API-SITEID': '0',
         'X-EBAY-API-IAF-TOKEN': token,
         'Content-Type': 'text/xml',
