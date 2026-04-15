@@ -38,6 +38,7 @@ export default function SettingsPanelView({ appPassword, isEbayConnected, isShop
   const [isConnectingShopify, setIsConnectingShopify] = useState(false);
   const [isDisconnectingShopify, setIsDisconnectingShopify] = useState(false);
   const [webhookLastReceived, setWebhookLastReceived] = useState<number | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${appPassword}` };
 
@@ -106,6 +107,21 @@ export default function SettingsPanelView({ appPassword, isEbayConnected, isShop
       toast('Failed to save settings: ' + e.message, 'error');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleRefreshFromEbay = async () => {
+    if (!isEbayConnected) { toast('Connect to eBay first.', 'error'); return; }
+    setIsRefreshing(true);
+    try {
+      const resp = await fetch('/api/ebay/refresh-listings', { method: 'POST', headers });
+      const data = await resp.json();
+      if (data.error) throw new Error(data.error);
+      toast(`Refreshed ${data.updated} listing${data.updated !== 1 ? 's' : ''} from eBay.`, 'success');
+    } catch (e: any) {
+      toast('Refresh failed: ' + e.message, 'error');
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -323,17 +339,22 @@ export default function SettingsPanelView({ appPassword, isEbayConnected, isShop
 
       {/* Data Management */}
       <div className="glass-panel" style={{ padding: '1.5rem' }}>
-        <SectionHeader title="Data Management" sub="Export and backup your listing data" />
+        <SectionHeader title="Data Management" sub="Export your listing data or sync changes from eBay" />
         <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
           <button className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }} onClick={handleExportData}>
             <Download size={16} /> Export All Listings (JSON)
+          </button>
+          <button className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }} onClick={handleRefreshFromEbay} disabled={isRefreshing || !isEbayConnected}>
+            {isRefreshing ? <RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <RefreshCw size={16} />}
+            {isRefreshing ? 'Refreshing…' : 'Refresh from eBay'}
           </button>
           <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
             {staged.length} staged + {listed.length} listed = {staged.length + listed.length} total listings
           </span>
         </div>
         <p style={{ margin: '0.75rem 0 0 0', fontSize: '0.75rem', color: 'var(--text-secondary)', opacity: 0.7 }}>
-          Export includes all listing metadata, prices, tags, cost basis, and sold data. Images are stored as Cloudinary URLs.
+          Export includes all listing metadata, prices, tags, cost basis, and sold data. Images are stored as Cloudinary URLs.<br />
+          Refresh from eBay re-pulls images, title, price, and condition for all imported listings — useful if images are missing or you've edited listings directly on eBay.
         </p>
       </div>
 
