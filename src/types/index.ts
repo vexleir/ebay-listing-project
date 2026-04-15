@@ -46,6 +46,7 @@ export interface UserSettings {
   defaultPaymentPolicyId?: string;
   defaultReturnPolicyId?: string;
   promotedListingPct?: number;
+  autoShopifyCrosslist?: boolean;
 }
 
 export interface EbayPolicy {

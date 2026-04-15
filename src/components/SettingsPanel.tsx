@@ -37,6 +37,7 @@ export default function SettingsPanelView({ appPassword, isEbayConnected, isShop
   const [loadingPolicies, setLoadingPolicies] = useState(false);
   const [isConnectingShopify, setIsConnectingShopify] = useState(false);
   const [isDisconnectingShopify, setIsDisconnectingShopify] = useState(false);
+  const [webhookLastReceived, setWebhookLastReceived] = useState<number | null>(null);
 
   const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${appPassword}` };
 
@@ -46,7 +47,13 @@ export default function SettingsPanelView({ appPassword, isEbayConnected, isShop
       .then(data => setSettings(data || {}))
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [appPassword]);
+    if (isShopifyConnected) {
+      fetch('/api/shopify/webhook-status', { headers: { 'Authorization': `Bearer ${appPassword}` } })
+        .then(r => r.json())
+        .then(data => setWebhookLastReceived(data.lastReceivedAt || null))
+        .catch(() => {});
+    }
+  }, [appPassword, isShopifyConnected]);
 
   const fetchPolicies = async () => {
     if (!isEbayConnected) { toast('Connect to eBay first to load policies.', 'error'); return; }
@@ -277,6 +284,40 @@ export default function SettingsPanelView({ appPassword, isEbayConnected, isShop
           <p style={{ margin: '0.75rem 0 0 0', fontSize: '0.75rem', color: 'var(--text-secondary)', opacity: 0.75 }}>
             You'll be redirected to Shopify to authorize access. Make sure you've added the redirect URL to your app in the Shopify Partners Dashboard first.
           </p>
+        )}
+        {isShopifyConnected && (
+          <div style={{ marginTop: '0.75rem', fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: webhookLastReceived ? '#22c55e' : '#f59e0b', flexShrink: 0 }} />
+            {webhookLastReceived
+              ? `Webhook active · last received ${new Date(webhookLastReceived).toLocaleString()}`
+              : 'Webhook not yet received — will activate on first Shopify sale'}
+          </div>
+        )}
+        {isShopifyConnected && (
+          <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', userSelect: 'none' }}>
+              <div
+                onClick={() => setSettings(prev => ({ ...prev, autoShopifyCrosslist: !prev.autoShopifyCrosslist }))}
+                style={{
+                  width: '40px', height: '22px', borderRadius: '11px', flexShrink: 0, cursor: 'pointer',
+                  background: settings.autoShopifyCrosslist ? '#96bf48' : 'var(--border-color)',
+                  position: 'relative', transition: 'background 0.2s',
+                }}
+              >
+                <div style={{
+                  position: 'absolute', top: '3px', left: settings.autoShopifyCrosslist ? '21px' : '3px',
+                  width: '16px', height: '16px', borderRadius: '50%', background: '#fff',
+                  transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                }} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.875rem', fontWeight: 500 }}>Auto cross-list to Shopify</div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                  When enabled, every eBay push automatically lists the item on Shopify too. Remember to save settings.
+                </div>
+              </div>
+            </label>
+          </div>
         )}
       </div>
 

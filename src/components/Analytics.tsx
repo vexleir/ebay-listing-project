@@ -119,6 +119,13 @@ export default function Analytics({ staged, listed, appPassword }: AnalyticsProp
     ? Math.round(soldWithDates.reduce((sum, l) => sum + (l.soldAt! - l.createdAt) / 86400000, 0) / soldWithDates.length)
     : null;
 
+  // Platform breakdown
+  const ebaySold = soldItems.filter(l => l.soldPlatform === 'ebay' || (!l.soldPlatform && l.ebayDraftId));
+  const shopifySold = soldItems.filter(l => l.soldPlatform === 'shopify');
+  const ebaySoldRevenue = ebaySold.reduce((sum, l) => sum + parsePrice(l.soldPrice), 0);
+  const shopifySoldRevenue = shopifySold.reduce((sum, l) => sum + parsePrice(l.soldPrice), 0);
+  const crossListed = listed.filter(l => !l.soldAt && l.ebayDraftId && l.shopifyProductId && l.shopifyStatus === 'listed');
+
   // Monthly revenue (last 6 months)
   const monthlyData = Array.from({ length: 6 }, (_, i) => {
     const d = new Date();
@@ -347,6 +354,46 @@ export default function Analytics({ staged, listed, appPassword }: AnalyticsProp
                   <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>{m.label}</span>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Platform breakdown */}
+        {(ebaySold.length > 0 || shopifySold.length > 0 || crossListed.length > 0) && (
+          <div className="glass-panel" style={{ padding: '1.5rem' }}>
+            <h3 style={{ marginBottom: '1.25rem', fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '6px' }}><TrendingUp size={16} /> Platform Breakdown</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {/* eBay row */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '0.85rem' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.35)', borderRadius: '4px', padding: '1px 7px', fontSize: '0.75rem', fontWeight: 600 }}>eBay</span>
+                    {ebaySold.length} sold
+                  </span>
+                  <strong style={{ color: 'var(--success)' }}>${ebaySoldRevenue.toFixed(2)}</strong>
+                </div>
+                <div style={{ height: '6px', background: 'rgba(255,255,255,0.08)', borderRadius: '3px', overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: totalSoldValue > 0 ? `${(ebaySoldRevenue / totalSoldValue) * 100}%` : '0%', background: 'linear-gradient(90deg, #6366f1, #a855f7)', borderRadius: '3px', transition: 'width 0.4s ease' }} />
+                </div>
+              </div>
+              {/* Shopify row */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '0.85rem' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ background: 'rgba(150,191,72,0.2)', color: '#96bf48', border: '1px solid rgba(150,191,72,0.35)', borderRadius: '4px', padding: '1px 7px', fontSize: '0.75rem', fontWeight: 600 }}>Shopify</span>
+                    {shopifySold.length} sold
+                  </span>
+                  <strong style={{ color: 'var(--success)' }}>${shopifySoldRevenue.toFixed(2)}</strong>
+                </div>
+                <div style={{ height: '6px', background: 'rgba(255,255,255,0.08)', borderRadius: '3px', overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: totalSoldValue > 0 ? `${(shopifySoldRevenue / totalSoldValue) * 100}%` : '0%', background: 'linear-gradient(90deg, #96bf48, #5e8e3e)', borderRadius: '3px', transition: 'width 0.4s ease' }} />
+                </div>
+              </div>
+              {crossListed.length > 0 && (
+                <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                  <strong style={{ color: '#96bf48' }}>{crossListed.length}</strong> item{crossListed.length !== 1 ? 's' : ''} currently live on both platforms
+                </p>
+              )}
             </div>
           </div>
         )}

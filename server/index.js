@@ -189,6 +189,13 @@ app.post('/api/shopify/webhooks/orders', async (req, res) => {
       if (!listing) continue;
       if (listing.soldAt) continue; // already marked sold
 
+      // Stamp last webhook received time on the company's Shopify config
+      await db.collection('config').updateOne(
+        { _id: `${listing.companyId}_shopify` },
+        { $set: { webhookLastReceivedAt: now } },
+        { upsert: true }
+      );
+
       const soldPrice = item.price || '0.00';
       const now = Date.now();
 
@@ -431,6 +438,15 @@ app.delete('/api/shopify/tokens', async (req, res) => {
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/shopify/webhook-status', async (req, res) => {
+  try {
+    const config = await shopifyAuth.getShopifyConfig(req.companyId);
+    res.json({ lastReceivedAt: config?.webhookLastReceivedAt || null });
+  } catch (e) {
+    res.json({ lastReceivedAt: null });
   }
 });
 
@@ -1311,6 +1327,52 @@ app.post('/api/ebay/draft', async (req, res) => {
     const itemIdMatch = addRes.data.match(/<ItemID>(.*?)<\/ItemID>/);
     const draftId = itemIdMatch ? itemIdMatch[1] : 'Unknown ID';
     console.log(`Successfully pushed to eBay! Scheduled Item ID: ${draftId}`);
+
+    // Auto cross-list to Shopify if setting enabled
+    const userSettings2 = await getSettings(req.companyId).catch(() => ({}));
+    if (userSettings2.autoShopifyCrosslist) {
+      try {
+        const shopifyConnected = await shopifyAuth.hasShopifySession(req.companyId);
+        if (shopifyConnected && listing) {
+          // Run async — don't block eBay response
+          setImmediate(async () => {
+            try {
+              const shopifyConfig = await shopifyAuth.getShopifyConfig(req.companyId);
+              const price2 = listing.priceRecommendation
+                ? parseFloat(listing.priceRecommendation.replace(/[^0-9.]/g, '')).toFixed(2)
+                : '0.00';
+              const imageUrls2 = (listing.images || []).filter(u => typeof u === 'string' && u.startsWith('http')).slice(0, 10);
+              const createResult2 = await shopifyAuth.shopifyGraphQL(req.companyId, `
+                mutation productCreate($input: ProductInput!) {
+                  productCreate(input: $input) {
+                    product { id handle variants(first: 1) { edges { node { id inventoryItem { id } } } } }
+                    userErrors { field message }
+                  }
+                }
+              `, { input: { title: listing.title || 'Untitled', descriptionHtml: listing.description || '', vendor: 'Flip Side Collectibles', productType: listing.category || '', tags: listing.tags || [], ...(imageUrls2.length > 0 ? { images: imageUrls2.map(src => ({ src })) } : {}) } });
+              const product2 = createResult2?.productCreate?.product;
+              if (product2) {
+                const vNode2 = product2.variants?.edges?.[0]?.node;
+                if (vNode2?.id && price2 !== '0.00') {
+                  await shopifyAuth.shopifyGraphQL(req.companyId, `mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) { productVariantsBulkUpdate(productId: $productId, variants: $variants) { userErrors { field message } } }`, { productId: product2.id, variants: [{ id: vNode2.id, price: price2 }] });
+                }
+                if (vNode2?.inventoryItem?.id && shopifyConfig?.locationId) {
+                  await shopifyAuth.shopifyGraphQL(req.companyId, `mutation inventorySetQuantities($input: InventorySetQuantitiesInput!) { inventorySetQuantities(input: $input) { userErrors { field message } } }`, { input: { name: 'available', quantities: [{ inventoryItemId: vNode2.inventoryItem.id, locationId: shopifyConfig.locationId, quantity: 1 }], reason: 'correction' } });
+                }
+                const db2 = await getDb();
+                await db2.collection('listings').updateOne({ id: listing.id, companyId: req.companyId }, { $set: { shopifyProductId: product2.id, shopifyStatus: 'listed', shopifyListedAt: Date.now(), updatedAt: Date.now() } });
+                console.log(`[auto-crosslist] Shopify product created: ${product2.id} for "${listing.title}"`);
+              }
+            } catch (shopifyErr) {
+              console.error('[auto-crosslist] Shopify push failed:', shopifyErr.message);
+            }
+          });
+        }
+      } catch (checkErr) {
+        console.error('[auto-crosslist] check failed:', checkErr.message);
+      }
+    }
+
     res.json({ success: true, draftId });
   } catch (error) {
     let msg = error.message;
