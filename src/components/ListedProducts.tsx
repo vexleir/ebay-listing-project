@@ -180,6 +180,12 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
   const [optimizeSaving, setOptimizeSaving] = useState(false);
   const [availableCollections, setAvailableCollections] = useState<{ id: string; title: string }[]>([]);
   const [optimizeCollectionIds, setOptimizeCollectionIds] = useState<string[]>([]);
+  // Shopify push options modal
+  const [pushOptionsListing, setPushOptionsListing] = useState<StagedListing | null>(null);
+  const [pushOptionsCollectionIds, setPushOptionsCollectionIds] = useState<string[]>([]);
+  const [pushOptionsTags, setPushOptionsTags] = useState<string[]>([]);
+  const [pushOptionsSeoKeywords, setPushOptionsSeoKeywords] = useState('');
+  const [pushOptionsPushing, setPushOptionsPushing] = useState(false);
 
   const pw = appPassword || localStorage.getItem('app_password') || '';
 
@@ -218,26 +224,43 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
     }
   };
 
-  const handleShopifyPush = async (listing: StagedListing) => {
-    setShopifyPushingId(listing.id);
+  const openShopifyPushModal = (listing: StagedListing) => {
+    setPushOptionsListing(listing);
+    setPushOptionsCollectionIds(listing.shopifyCollectionIds || []);
+    setPushOptionsTags(listing.tags || []);
+    setPushOptionsSeoKeywords(listing.seoKeywords || (listing.tags || []).join(', '));
+  };
+
+  const handleShopifyPushConfirm = async () => {
+    if (!pushOptionsListing) return;
+    const enriched: StagedListing = {
+      ...pushOptionsListing,
+      shopifyCollectionIds: pushOptionsCollectionIds,
+      tags: pushOptionsTags,
+      seoKeywords: pushOptionsSeoKeywords,
+    };
+    setPushOptionsPushing(true);
+    setShopifyPushingId(pushOptionsListing.id);
     try {
       const resp = await fetch('/api/shopify/push', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pw}` },
-        body: JSON.stringify({ listing }),
+        body: JSON.stringify({ listing: enriched }),
       });
       const data = await resp.json();
       if (!resp.ok || data.error) throw new Error(data.error || 'Shopify push failed');
-      if (onUpdateListing) {
-        onUpdateListing({ ...listing, shopifyProductId: data.shopifyProductId, shopifyStatus: 'listed', shopifyListedAt: Date.now() });
-      }
-      toast(`Listed on Shopify!`, 'success');
+      onUpdateListing?.({ ...enriched, shopifyProductId: data.shopifyProductId, shopifyStatus: 'listed', shopifyListedAt: Date.now() });
+      toast('Listed on Shopify!', 'success');
+      setPushOptionsListing(null);
     } catch (e: any) {
       toast('Shopify push failed: ' + e.message, 'error');
     } finally {
+      setPushOptionsPushing(false);
       setShopifyPushingId(null);
     }
   };
+
+  const handleShopifyPush = (listing: StagedListing) => openShopifyPushModal(listing);
 
   const handleShopifyDelist = async (listing: StagedListing) => {
     setShopifyDelistingId(listing.id);
@@ -703,6 +726,82 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
                 onClick={() => { const l = listings.find(x => x.id === endConfirmId); if (l) handleEndListing(l); }}
                 disabled={ending}>
                 {ending ? 'Ending...' : 'End Listing on eBay'}
+              </button>
+            </div>
+          </div>
+        </div>, document.body
+      )}
+
+      {/* Shopify push options modal */}
+      {pushOptionsListing && createPortal(
+        <div onClick={() => setPushOptionsListing(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+          <div className="glass-panel" onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '560px', padding: '2rem', maxHeight: '90vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '1.25rem' }}>
+              <ShoppingBag size={18} style={{ color: '#96bf48' }} />
+              <h3 style={{ margin: 0, flex: 1 }}>Push to Shopify</h3>
+              <button onClick={() => setPushOptionsListing(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px' }}><X size={18} /></button>
+            </div>
+
+            {/* Listing preview */}
+            <div style={{ display: 'flex', gap: '12px', marginBottom: '1.25rem', padding: '10px 12px', background: 'rgba(255,255,255,0.04)', borderRadius: '8px' }}>
+              {pushOptionsListing.images?.[0] && <img src={pushOptionsListing.images[0]} alt="" style={{ width: '52px', height: '52px', objectFit: 'cover', borderRadius: '6px', flexShrink: 0 }} />}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ margin: '0 0 2px 0', fontWeight: 500, fontSize: '0.88rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pushOptionsListing.title}</p>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>${pushOptionsListing.priceRecommendation}</span>
+              </div>
+            </div>
+
+            {/* Collections */}
+            {availableCollections.length > 0 && (
+              <div style={{ marginBottom: '1rem' }}>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>
+                  Collections <span style={{ fontWeight: 400, opacity: 0.6 }}>(select all that apply)</span>
+                </label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '10px', background: 'rgba(255,255,255,0.04)', borderRadius: '8px', border: '1px solid var(--border-color)', maxHeight: '160px', overflowY: 'auto' }}>
+                  {availableCollections.map(col => {
+                    const selected = pushOptionsCollectionIds.includes(col.id);
+                    return (
+                      <button key={col.id} onClick={() => setPushOptionsCollectionIds(prev => selected ? prev.filter(id => id !== col.id) : [...prev, col.id])}
+                        style={{ fontSize: '0.8rem', padding: '4px 12px', borderRadius: '14px', border: '1px solid', cursor: 'pointer', transition: 'all 0.15s',
+                          background: selected ? 'rgba(150,191,72,0.2)' : 'transparent',
+                          borderColor: selected ? '#96bf48' : 'var(--border-color)',
+                          color: selected ? '#96bf48' : 'var(--text-secondary)' }}>
+                        {selected ? '✓ ' : ''}{col.title}
+                      </button>
+                    );
+                  })}
+                </div>
+                {pushOptionsCollectionIds.length > 0 && (
+                  <p style={{ margin: '4px 0 0 0', fontSize: '0.75rem', color: '#96bf48' }}>{pushOptionsCollectionIds.length} collection{pushOptionsCollectionIds.length !== 1 ? 's' : ''} selected</p>
+                )}
+              </div>
+            )}
+
+            {/* Tags */}
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>Tags <span style={{ fontWeight: 400, opacity: 0.6 }}>(comma-separated)</span></label>
+              <input className="input-base" style={{ width: '100%' }}
+                value={pushOptionsTags.join(', ')}
+                onChange={e => setPushOptionsTags(e.target.value.split(',').map(t => t.trim()).filter(Boolean))}
+                placeholder="vintage, collectible, anime…" />
+            </div>
+
+            {/* SEO Keywords */}
+            <div style={{ marginBottom: '1.5rem' }}>
+              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>
+                SEO Keywords <span style={{ fontWeight: 400, opacity: 0.6 }}>(Google Shopping metafield)</span>
+              </label>
+              <input className="input-base" style={{ width: '100%' }}
+                value={pushOptionsSeoKeywords}
+                onChange={e => setPushOptionsSeoKeywords(e.target.value)}
+                placeholder="vintage figure, collectible toy, 90s anime…" />
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setPushOptionsListing(null)}>Cancel</button>
+              <button className="btn-primary" style={{ flex: 2, background: 'linear-gradient(135deg,#96bf48,#5e8e3e)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                disabled={pushOptionsPushing} onClick={handleShopifyPushConfirm}>
+                {pushOptionsPushing ? <><RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} /> Pushing…</> : <><ShoppingBag size={14} /> Push to Shopify</>}
               </button>
             </div>
           </div>

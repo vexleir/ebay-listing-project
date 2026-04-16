@@ -715,74 +715,85 @@ function mapGoogleCondition(conditionStr) {
   return 'used';
 }
 
+// Look up a value from itemSpecifics using multiple possible key names
+function pickSpecific(specifics, ...keys) {
+  if (!specifics) return null;
+  for (const key of keys) {
+    const val = specifics[key];
+    if (val && val !== 'Does Not Apply' && val !== 'N/A' && val !== 'Does not apply') return val;
+  }
+  return null;
+}
+
 async function applyShopifyMetafields(companyId, productId, variantId, listing) {
-  const metafields = [];
+  const specs = listing.itemSpecifics || {};
+  const googleCondition = mapGoogleCondition(listing.condition);
 
-  // Product-level metafields
-  if (listing.seoKeywords) {
-    metafields.push({ ownerId: productId, namespace: 'custom', key: 'seo_keywords', value: listing.seoKeywords, type: 'single_line_text_field' });
-  }
-  metafields.push({ ownerId: productId, namespace: 'google', key: 'condition', value: mapGoogleCondition(listing.condition), type: 'single_line_text_field' });
+  const mpn     = pickSpecific(specs, 'MPN', 'Model Number', 'Part Number', 'Item Number');
+  const ageGroup= pickSpecific(specs, 'Age Group', 'Target Audience', 'Intended Age Group', 'Age Range');
+  const gender  = pickSpecific(specs, 'Gender', 'Target Gender');
 
-  const mpn = listing.itemSpecifics?.MPN || listing.itemSpecifics?.['Model Number'] || listing.itemSpecifics?.['Part Number'];
-  if (mpn && mpn !== 'Does Not Apply' && mpn !== 'N/A') {
-    metafields.push({ ownerId: productId, namespace: 'google', key: 'mpn', value: mpn, type: 'single_line_text_field' });
-  }
+  // Build SEO keywords: explicit field, or fall back to tags joined
+  const seoKeywords = listing.seoKeywords || (Array.isArray(listing.tags) && listing.tags.length > 0 ? listing.tags.join(', ') : null);
 
-  const ageGroup = listing.itemSpecifics?.['Age Group'] || listing.itemSpecifics?.['Target Audience'];
-  if (ageGroup) {
-    metafields.push({ ownerId: productId, namespace: 'google', key: 'age_group', value: ageGroup.toLowerCase(), type: 'single_line_text_field' });
-  }
+  const productMeta = [];
+  if (seoKeywords) productMeta.push({ ownerId: productId, namespace: 'custom', key: 'seo_keywords', value: seoKeywords, type: 'single_line_text_field' });
+  productMeta.push({ ownerId: productId, namespace: 'google', key: 'condition', value: googleCondition, type: 'single_line_text_field' });
+  if (mpn)      productMeta.push({ ownerId: productId, namespace: 'google', key: 'mpn', value: mpn, type: 'single_line_text_field' });
+  if (ageGroup) productMeta.push({ ownerId: productId, namespace: 'google', key: 'age_group', value: ageGroup.toLowerCase(), type: 'single_line_text_field' });
+  if (gender)   productMeta.push({ ownerId: productId, namespace: 'google', key: 'gender', value: gender.toLowerCase(), type: 'single_line_text_field' });
 
-  const gender = listing.itemSpecifics?.Gender;
-  if (gender) {
-    metafields.push({ ownerId: productId, namespace: 'google', key: 'gender', value: gender.toLowerCase(), type: 'single_line_text_field' });
-  }
+  const variantMeta = variantId ? [
+    { ownerId: variantId, namespace: 'google', key: 'condition', value: googleCondition, type: 'single_line_text_field' },
+    ...(mpn      ? [{ ownerId: variantId, namespace: 'google', key: 'mpn', value: mpn, type: 'single_line_text_field' }] : []),
+    ...(ageGroup ? [{ ownerId: variantId, namespace: 'google', key: 'age_group', value: ageGroup.toLowerCase(), type: 'single_line_text_field' }] : []),
+    ...(gender   ? [{ ownerId: variantId, namespace: 'google', key: 'gender', value: gender.toLowerCase(), type: 'single_line_text_field' }] : []),
+  ] : [];
 
-  // Variant-level google metafields (Google Shopping uses variant-level for condition/mpn too)
-  if (variantId) {
-    metafields.push({ ownerId: variantId, namespace: 'google', key: 'condition', value: mapGoogleCondition(listing.condition), type: 'single_line_text_field' });
-    if (mpn && mpn !== 'Does Not Apply' && mpn !== 'N/A') {
-      metafields.push({ ownerId: variantId, namespace: 'google', key: 'mpn', value: mpn, type: 'single_line_text_field' });
-    }
-    if (ageGroup) {
-      metafields.push({ ownerId: variantId, namespace: 'google', key: 'age_group', value: ageGroup.toLowerCase(), type: 'single_line_text_field' });
-    }
-    if (gender) {
-      metafields.push({ ownerId: variantId, namespace: 'google', key: 'gender', value: gender.toLowerCase(), type: 'single_line_text_field' });
-    }
-  }
+  const allMetafields = [...productMeta, ...variantMeta];
+  if (allMetafields.length === 0) return;
 
-  if (metafields.length === 0) return;
+  console.log(`[shopify metafields] setting ${allMetafields.length} metafields for product ${productId}`);
 
   const result = await shopifyAuth.shopifyGraphQL(companyId, `
     mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
       metafieldsSet(metafields: $metafields) {
-        metafields { id key namespace }
+        metafields { id key namespace ownerId }
         userErrors { field message }
       }
     }
-  `, { metafields });
+  `, { metafields: allMetafields });
 
   const metafieldErrors = result?.metafieldsSet?.userErrors || [];
   if (metafieldErrors.length > 0) {
-    console.warn('[shopify metafields] warnings:', metafieldErrors.map(e => e.message).join(', '));
+    console.error('[shopify metafields] userErrors:', JSON.stringify(metafieldErrors));
+  } else {
+    const set = result?.metafieldsSet?.metafields || [];
+    console.log(`[shopify metafields] successfully set: ${set.map(m => `${m.namespace}.${m.key}`).join(', ')}`);
   }
 }
 
 async function applyShopifyCollections(companyId, productId, collectionIds) {
   if (!Array.isArray(collectionIds) || collectionIds.length === 0) return;
+  console.log(`[shopify collections] adding product ${productId} to ${collectionIds.length} collection(s)`);
   for (const collectionId of collectionIds) {
     try {
-      await shopifyAuth.shopifyGraphQL(companyId, `
+      const result = await shopifyAuth.shopifyGraphQL(companyId, `
         mutation collectionAddProducts($id: ID!, $productIds: [ID!]!) {
           collectionAddProducts(id: $id, productIds: $productIds) {
+            collection { id title }
             userErrors { field message }
           }
         }
       `, { id: collectionId, productIds: [productId] });
+      const errs = result?.collectionAddProducts?.userErrors || [];
+      if (errs.length > 0) {
+        console.error('[shopify collections] userErrors for', collectionId, JSON.stringify(errs));
+      } else {
+        console.log('[shopify collections] added to:', result?.collectionAddProducts?.collection?.title);
+      }
     } catch (e) {
-      console.warn('[shopify/collections] failed to add to collection:', collectionId, e.message);
+      console.error('[shopify/collections] exception for', collectionId, e.message);
     }
   }
 }
