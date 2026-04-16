@@ -25,6 +25,7 @@ interface ListedProductsProps {
 type SortOption = 'date-desc' | 'date-asc' | 'title-asc' | 'title-desc' | 'price-asc' | 'price-desc';
 type ViewMode = 'grid' | 'list';
 type StatusFilter = 'all' | 'active' | 'ended';
+type MarketplaceFilter = 'all' | 'ebay-only' | 'shopify' | 'both';
 
 function parsePrice(val: string): number {
   const m = val.replace(/[^0-9.]/g, '');
@@ -83,6 +84,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortOption>('date-desc');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [marketplaceFilter, setMarketplaceFilter] = useState<MarketplaceFilter>('all');
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [editListing, setEditListing] = useState<StagedListing | null>(null);
   const [markSoldModal, setMarkSoldModal] = useState<{ listing: StagedListing; price: string; date: string } | null>(null);
@@ -198,6 +200,13 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
       if (statusFilter === 'ended')  return l.archived;
       return true;
     })
+    .filter(l => {
+      const onShopify = !!(l.shopifyProductId && l.shopifyStatus === 'listed');
+      if (marketplaceFilter === 'shopify')   return onShopify;
+      if (marketplaceFilter === 'ebay-only') return !onShopify;
+      if (marketplaceFilter === 'both')      return !!(l.ebayDraftId) && onShopify;
+      return true;
+    })
     .filter(l => !activeTag || l.tags?.includes(activeTag))
     .filter(l => {
       const q = search.toLowerCase();
@@ -216,7 +225,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
     });
 
   // Reset to page 1 when filters/search change
-  useEffect(() => { setCurrentPage(1); }, [search, statusFilter, activeTag, sort]);
+  useEffect(() => { setCurrentPage(1); }, [search, statusFilter, marketplaceFilter, activeTag, sort]);
 
   const totalPages = perPage === 0 ? 1 : Math.ceil(filteredListings.length / perPage);
   const paginatedListings = perPage === 0 ? filteredListings : filteredListings.slice((currentPage - 1) * perPage, currentPage * perPage);
@@ -527,7 +536,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
       )}
 
       {/* Status filter pills */}
-      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '1rem', alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '0.75rem', alignItems: 'center' }}>
         {(['all', 'active', 'ended'] as StatusFilter[]).map(f => {
           const labels: Record<StatusFilter, string> = { all: 'All', active: 'Active', ended: 'Ended' };
           const colors: Record<StatusFilter, string> = { all: 'var(--accent)', active: 'var(--success)', ended: 'var(--text-secondary)' };
@@ -539,6 +548,29 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
                 borderColor: isActive ? colors[f] : 'var(--border-color)',
                 color: isActive ? colors[f] : 'var(--text-secondary)', fontWeight: isActive ? 600 : 400, transition: 'all 0.15s' }}>
               {labels[f]} <span style={{ opacity: 0.7, fontSize: '0.75rem' }}>({counts[f]})</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Marketplace filter pills */}
+      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '1rem', alignItems: 'center' }}>
+        <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', opacity: 0.7 }}>Platform:</span>
+        {([
+          { key: 'all',       label: 'All platforms' },
+          { key: 'ebay-only', label: 'eBay only',       color: '#6366f1' },
+          { key: 'shopify',   label: 'On Shopify',      color: '#96bf48' },
+          { key: 'both',      label: 'Both platforms',  color: '#f59e0b' },
+        ] as { key: MarketplaceFilter; label: string; color?: string }[]).map(({ key, label, color }) => {
+          const isActive = marketplaceFilter === key;
+          return (
+            <button key={key} onClick={() => setMarketplaceFilter(key)}
+              style={{ fontSize: '0.8rem', padding: '3px 11px', borderRadius: '20px', border: '1px solid', cursor: 'pointer',
+                background: isActive ? `rgba(${color ? color : '99,102,241'},0.15)` : 'rgba(255,255,255,0.04)',
+                borderColor: isActive ? (color || 'var(--accent-color)') : 'var(--border-color)',
+                color: isActive ? (color || 'var(--accent)') : 'var(--text-secondary)',
+                fontWeight: isActive ? 600 : 400, transition: 'all 0.15s' }}>
+              {label}
             </button>
           );
         })}

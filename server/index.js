@@ -490,10 +490,9 @@ app.post('/api/shopify/push', async (req, res) => {
       vendor: 'Flip Side Collectibles',
       productType: listing.category || '',
       tags: listing.tags || [],
-      ...(imageUrls.length > 0 ? { images: imageUrls.map(src => ({ src })) } : {}),
     };
 
-    // Create the product
+    // Create the product (images added separately via productCreateMedia — required in API 2024-01+)
     const createResult = await shopifyAuth.shopifyGraphQL(req.companyId, `
       mutation productCreate($input: ProductInput!) {
         productCreate(input: $input) {
@@ -516,6 +515,26 @@ app.post('/api/shopify/push', async (req, res) => {
     const variantNode = product.variants?.edges?.[0]?.node;
     const inventoryItemId = variantNode?.inventoryItem?.id;
     const variantId = variantNode?.id;
+
+    // Attach images via productCreateMedia (required in Shopify API 2024-01+;
+    // ProductInput.images was removed — media must be added after product creation)
+    if (imageUrls.length > 0) {
+      const mediaResult = await shopifyAuth.shopifyGraphQL(req.companyId, `
+        mutation productCreateMedia($productId: ID!, $media: [CreateMediaInput!]!) {
+          productCreateMedia(productId: $productId, media: $media) {
+            media { ... on MediaImage { id image { url } } }
+            userErrors { field message }
+          }
+        }
+      `, {
+        productId: product.id,
+        media: imageUrls.map(src => ({ originalSource: src, mediaContentType: 'IMAGE' })),
+      });
+      const mediaErrors = mediaResult?.productCreateMedia?.userErrors || [];
+      if (mediaErrors.length > 0) {
+        console.warn('[shopify/push] media upload warnings:', mediaErrors.map(e => e.message).join(', '));
+      }
+    }
 
     // Set price via productVariantsBulkUpdate
     if (variantId && price !== '0.00') {
