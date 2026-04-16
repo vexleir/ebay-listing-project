@@ -40,6 +40,8 @@ export default function SettingsPanelView({ appPassword, isEbayConnected, isShop
   const [webhookLastReceived, setWebhookLastReceived] = useState<number | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshProgress, setRefreshProgress] = useState<{ page: number; totalPages: number } | null>(null);
+  const [metafieldDefs, setMetafieldDefs] = useState<{ productDefs: Record<string,string>; variantDefs: Record<string,string> } | null>(null);
+  const [loadingMetafieldDefs, setLoadingMetafieldDefs] = useState(false);
 
   const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${appPassword}` };
 
@@ -350,6 +352,60 @@ export default function SettingsPanelView({ appPassword, isEbayConnected, isShop
                 </div>
               </div>
             </label>
+          </div>
+        )}
+
+        {isShopifyConnected && (
+          <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+              <div>
+                <div style={{ fontSize: '0.875rem', fontWeight: 500 }}>Metafield Definitions</div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                  Shows the actual namespace.key and type configured in your Shopify store — used when pushing metafields.
+                </div>
+              </div>
+              <button
+                onClick={async () => {
+                  setLoadingMetafieldDefs(true);
+                  try {
+                    const r = await fetch('/api/shopify/metafield-defs', { headers: { 'Authorization': `Bearer ${appPassword}` } });
+                    const data = await r.json();
+                    if (data.error) throw new Error(data.error);
+                    setMetafieldDefs(data);
+                  } catch (e: any) {
+                    toast('Could not fetch metafield definitions: ' + e.message, 'error');
+                  } finally {
+                    setLoadingMetafieldDefs(false);
+                  }
+                }}
+                disabled={loadingMetafieldDefs}
+                style={{ fontSize: '0.78rem', padding: '5px 12px', background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border-color)', color: 'var(--text-secondary)', borderRadius: '6px', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                {loadingMetafieldDefs ? 'Loading…' : 'Check Definitions'}
+              </button>
+            </div>
+            {metafieldDefs && (
+              <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                {[
+                  { label: 'Product metafields', defs: metafieldDefs.productDefs },
+                  { label: 'Variant metafields', defs: metafieldDefs.variantDefs },
+                ].map(({ label, defs }) => (
+                  <div key={label} style={{ flex: 1, minWidth: '220px' }}>
+                    <p style={{ margin: '0 0 6px 0', fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600 }}>{label} ({Object.keys(defs).length})</p>
+                    <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '6px', padding: '8px 10px', maxHeight: '180px', overflowY: 'auto' }}>
+                      {Object.keys(defs).length === 0
+                        ? <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--text-secondary)', fontStyle: 'italic' }}>None found</p>
+                        : Object.entries(defs).map(([key, type]) => (
+                          <div key={key} style={{ fontSize: '0.72rem', marginBottom: '3px', display: 'flex', gap: '8px' }}>
+                            <code style={{ color: '#a5b4fc', flex: 1 }}>{key}</code>
+                            <span style={{ color: 'var(--text-secondary)', opacity: 0.7 }}>{type}</span>
+                          </div>
+                        ))
+                      }
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
