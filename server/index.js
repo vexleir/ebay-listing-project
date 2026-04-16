@@ -328,6 +328,28 @@ app.post('/api/ebay/revise', async (req, res) => {
     });
     if (resp.data.includes('<Ack>Failure</Ack>')) {
       const err = resp.data.match(/<LongMessage>(.*?)<\/LongMessage>/)?.[1] || 'Unknown error';
+      // If price update is blocked by an active sale, retry without the price field
+      if (err.includes('part of a sale') || err.includes('cannot be updated since it is a part of a sale')) {
+        console.log('[revise] price blocked by sale — retrying without price');
+        const xmlNoPrice = `<?xml version="1.0" encoding="utf-8"?>
+<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <Item>
+    <ItemID>${itemId}</ItemID>
+    ${titleXml}
+    ${descXml}
+    ${condXml}
+    ${specificsXml}
+  </Item>
+</ReviseFixedPriceItemRequest>`;
+        const resp2 = await axios.post('https://api.ebay.com/ws/api.dll', xmlNoPrice, {
+          headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1331', 'X-EBAY-API-CALL-NAME': 'ReviseFixedPriceItem', 'X-EBAY-API-SITEID': '0', 'X-EBAY-API-IAF-TOKEN': token, 'Content-Type': 'text/xml' }
+        });
+        if (resp2.data.includes('<Ack>Failure</Ack>')) {
+          const err2 = resp2.data.match(/<LongMessage>(.*?)<\/LongMessage>/)?.[1] || 'Unknown error';
+          return res.status(400).json({ error: err2 });
+        }
+        return res.json({ success: true, warning: 'Price was not updated because this item is currently part of a sale.' });
+      }
       return res.status(400).json({ error: err });
     }
     res.json({ success: true });

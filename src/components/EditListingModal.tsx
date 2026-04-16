@@ -109,7 +109,11 @@ export default function EditListingModal({ listing, appPassword, onClose, onSave
       const data = await resp.json();
       if (!resp.ok || data.error) throw new Error(data.error || 'eBay push failed');
       onSaved({ ...listing, ...updates });
-      toast('Saved and pushed to eBay.', 'success');
+      if (data.warning) {
+        toast('Saved and pushed to eBay. Note: ' + data.warning, 'warning');
+      } else {
+        toast('Saved and pushed to eBay.', 'success');
+      }
       onClose();
     } catch (e: any) {
       toast('Push failed: ' + e.message, 'error');

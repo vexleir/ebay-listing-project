@@ -74,8 +74,12 @@ export default function RepricingAdvisor({ appPassword }: RepricingAdvisorProps)
       });
       const data = await resp.json();
       if (!resp.ok || data.error) throw new Error(data.error || 'Revise failed');
-      setApplied(prev => ({ ...prev, [s.id]: s.suggestedPrice }));
-      toast(`Price updated to $${s.suggestedPrice.toFixed(2)} on eBay.`, 'success');
+      if (data.warning) {
+        toast(`Price not updated: item is currently on sale. Remove it from sale to change the price.`, 'warning');
+      } else {
+        setApplied(prev => ({ ...prev, [s.id]: s.suggestedPrice }));
+        toast(`Price updated to $${s.suggestedPrice.toFixed(2)} on eBay.`, 'success');
+      }
     } catch (e: any) {
       toast('Failed to apply price: ' + e.message, 'error');
     } finally {

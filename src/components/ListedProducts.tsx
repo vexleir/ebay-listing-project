@@ -440,6 +440,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
         });
         const reviseData = await reviseResp.json();
         if (!reviseResp.ok || reviseData.error) throw new Error('eBay revise failed: ' + reviseData.error);
+        if (reviseData.warning) console.warn('[revise]', reviseData.warning);
       }
 
       // Push to Shopify
