@@ -806,7 +806,7 @@ async function applyShopifyMetafields(companyId, productId, variantId, listing) 
   const result = await shopifyAuth.shopifyGraphQL(companyId, `
     mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
       metafieldsSet(metafields: $metafields) {
-        metafields { id key namespace ownerId }
+        metafields { id key namespace }
         userErrors { field message elementIndex }
       }
     }
