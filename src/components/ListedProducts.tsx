@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { ExternalLink, Calendar, CheckCircle, Trash2, Archive, ArchiveRestore, Search, ChevronDown, LayoutGrid, List, Download, RefreshCw, Eye, RotateCcw, CircleSlash, Share2, DollarSign, Pencil, ShoppingBag, Check, X } from 'lucide-react';
+import { ExternalLink, Calendar, CheckCircle, Trash2, Archive, ArchiveRestore, Search, ChevronDown, LayoutGrid, List, Download, RefreshCw, Eye, RotateCcw, CircleSlash, Share2, DollarSign, Pencil, ShoppingBag, Check, X, Wand2, ShieldCheck, ShieldAlert, ShieldX } from 'lucide-react';
 import type { StagedListing } from '../types';
 import ImageSearchButton from './ImageSearchButton';
 import Lightbox from './Lightbox';
@@ -79,6 +79,73 @@ function exportCsv(listings: StagedListing[]) {
   URL.revokeObjectURL(url);
 }
 
+interface HealthScore { score: number; issues: string[]; }
+
+function computeHealthScore(listing: StagedListing): HealthScore {
+  const issues: string[] = [];
+  let score = 0;
+
+  const titleLen = listing.title?.length || 0;
+  if (titleLen >= 70) score += 20;
+  else if (titleLen >= 50) { score += 10; issues.push(`Title short: ${titleLen}/80 chars`); }
+  else { issues.push(`Title very short: ${titleLen}/80 chars`); }
+
+  const imgCount = (listing.images || []).length;
+  if (imgCount >= 3) score += 20;
+  else if (imgCount >= 1) { score += 10; issues.push(`Only ${imgCount} image — add 3+ for best visibility`); }
+  else { issues.push('No images attached'); }
+
+  const hasCloudImages = (listing.images || []).some(img => img.startsWith('http'));
+  if (hasCloudImages) score += 10;
+  else if (imgCount > 0) issues.push('Images not uploaded to cloud — push may fail');
+
+  const descLen = listing.description?.length || 0;
+  if (descLen > 300) score += 15;
+  else if (descLen > 80) { score += 8; issues.push('Description is short'); }
+  else { issues.push('Description missing or very short'); }
+
+  const cat = listing.category || '';
+  if (cat && cat !== 'Unknown') score += 15;
+  else issues.push('Category not set');
+
+  const price = parseFloat((listing.priceRecommendation || '').replace(/[^0-9.]/g, ''));
+  if (price > 0) score += 10;
+  else issues.push('Price not set');
+
+  const specificsCount = Object.keys(listing.itemSpecifics || {}).length;
+  if (specificsCount >= 5) score += 10;
+  else if (specificsCount >= 2) { score += 5; issues.push(`Only ${specificsCount} item specifics`); }
+  else { issues.push('Item specifics missing'); }
+
+  return { score, issues };
+}
+
+function autoConditionId(conditionStr: string): string {
+  const s = (conditionStr || '').toLowerCase();
+  if (s.includes('for parts') || s.includes('not working')) return '7000';
+  if (s.includes('acceptable') || s.includes('heavy wear')) return '6000';
+  if (s.includes('good') && !s.includes('very good') && !s.includes('like new')) return '5000';
+  if (s.includes('very good')) return '4000';
+  if (s.includes('like new') || s.includes('mint') || s.includes('open box')) return '2500';
+  if (s.includes('refurbished') || s.includes('refurb')) return '2500';
+  if (s.includes('new other')) return '1500';
+  if (s.includes('new') && !s.includes('like')) return '1000';
+  return '3000';
+}
+
+function HealthBadge({ listing }: { listing: StagedListing }) {
+  const { score, issues } = computeHealthScore(listing);
+  const color = score >= 80 ? 'var(--success)' : score >= 55 ? '#f59e0b' : '#ef4444';
+  const bg = score >= 80 ? 'rgba(16,185,129,0.15)' : score >= 55 ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)';
+  const Icon = score >= 80 ? ShieldCheck : score >= 55 ? ShieldAlert : ShieldX;
+  const tooltip = score >= 80 ? `Health: ${score}/100 — Good` : `Health: ${score}/100\n${issues.join('\n')}`;
+  return (
+    <span title={tooltip} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', background: bg, color, padding: '2px 7px', borderRadius: '4px', fontWeight: 600, cursor: 'help', whiteSpace: 'nowrap' }}>
+      <Icon size={11} /> {score}
+    </span>
+  );
+}
+
 export default function ListedProductsView({ listings, onDelete, onArchive, onSyncSold, onRelist, onMarkSold, onUpdateListing, isEbayConnected, isShopifyConnected, appPassword = '' }: ListedProductsProps) {
   const { toast } = useToast();
   const [search, setSearch] = useState('');
@@ -105,6 +172,12 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
   // End listing confirm
   const [endConfirmId, setEndConfirmId] = useState<string | null>(null);
   const [ending, setEnding] = useState(false);
+  // AI optimize modal
+  const [optimizeListing, setOptimizeListing] = useState<StagedListing | null>(null);
+  const [optimizeInstructions, setOptimizeInstructions] = useState('');
+  const [optimizing, setOptimizing] = useState(false);
+  const [optimizeResult, setOptimizeResult] = useState<any>(null);
+  const [optimizeSaving, setOptimizeSaving] = useState(false);
 
   const pw = appPassword || localStorage.getItem('app_password') || '';
 
@@ -264,6 +337,86 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
     clearSelection();
   };
 
+  const handleOptimize = async () => {
+    if (!optimizeListing) return;
+    setOptimizing(true);
+    setOptimizeResult(null);
+    try {
+      const resp = await fetch('/api/generate-from-urls', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pw}` },
+        body: JSON.stringify({ imageUrls: optimizeListing.images || [], instructions: optimizeInstructions }),
+      });
+      const data = await resp.json();
+      if (!resp.ok || data.error) throw new Error(data.error || 'AI optimization failed');
+      setOptimizeResult(data);
+    } catch (e: any) {
+      toast('AI optimization failed: ' + e.message, 'error');
+    } finally {
+      setOptimizing(false);
+    }
+  };
+
+  const handleSaveOptimized = async (pushEbay: boolean, pushShopify: boolean) => {
+    if (!optimizeListing || !optimizeResult) return;
+    setOptimizeSaving(true);
+    const updated: StagedListing = {
+      ...optimizeListing,
+      title: optimizeResult.title || optimizeListing.title,
+      description: optimizeResult.description || optimizeListing.description,
+      priceRecommendation: optimizeResult.priceRecommendation || optimizeListing.priceRecommendation,
+      category: optimizeResult.category || optimizeListing.category,
+      condition: optimizeResult.condition || optimizeListing.condition,
+      itemSpecifics: optimizeResult.itemSpecifics || optimizeListing.itemSpecifics,
+      tags: optimizeResult.tags || optimizeListing.tags,
+      updatedAt: Date.now(),
+    };
+    try {
+      // Save to DB
+      const saveResp = await fetch(`/api/listings/${optimizeListing.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pw}` },
+        body: JSON.stringify(updated),
+      });
+      if (!saveResp.ok) { const d = await saveResp.json(); throw new Error(d.error || 'Save failed'); }
+      onUpdateListing?.(updated);
+
+      // Push to eBay
+      if (pushEbay && optimizeListing.ebayDraftId) {
+        const conditionId = autoConditionId(updated.condition || '');
+        const specifics = Object.entries(updated.itemSpecifics || {}).map(([name, value]) => ({ name, value: String(value) }));
+        const reviseResp = await fetch('/api/ebay/revise', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pw}` },
+          body: JSON.stringify({ itemId: optimizeListing.ebayDraftId, newTitle: updated.title, newPrice: String(updated.priceRecommendation || '').replace(/[^0-9.]/g, ''), description: updated.description, conditionId, itemSpecifics: specifics }),
+        });
+        const reviseData = await reviseResp.json();
+        if (!reviseResp.ok || reviseData.error) throw new Error('eBay revise failed: ' + reviseData.error);
+      }
+
+      // Push to Shopify
+      if (pushShopify && optimizeListing.shopifyProductId) {
+        const shopifyResp = await fetch(`/api/shopify/update/${optimizeListing.id}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pw}` },
+          body: JSON.stringify(updated),
+        });
+        const shopifyData = await shopifyResp.json();
+        if (!shopifyResp.ok || shopifyData.error) throw new Error('Shopify update failed: ' + shopifyData.error);
+      }
+
+      const where = [pushEbay && 'eBay', pushShopify && 'Shopify'].filter(Boolean).join(' & ');
+      toast(`Listing optimized${where ? ` and pushed to ${where}` : ''}!`, 'success');
+      setOptimizeListing(null);
+      setOptimizeResult(null);
+      setOptimizeInstructions('');
+    } catch (e: any) {
+      toast(e.message, 'error');
+    } finally {
+      setOptimizeSaving(false);
+    }
+  };
+
   if (nonSold.length === 0) {
     return (
       <div className="glass-panel" style={{ padding: '4rem 2rem', textAlign: 'center' }}>
@@ -313,9 +466,10 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
           <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}><Calendar size={13} /> {new Date(listing.createdAt).toLocaleDateString()}</span>
           {listing.updatedAt && listing.updatedAt !== listing.createdAt && <span style={{ opacity: 0.7 }}>· updated {timeAgo(listing.updatedAt)}</span>}
         </div>
-        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
           <span style={{ fontSize: '0.8rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px' }}>${listing.priceRecommendation}</span>
           <ProfitBadge price={listing.priceRecommendation} costBasis={listing.costBasis} category={listing.category} shippingLabelCost={listing.shippingLabelCost} />
+          <HealthBadge listing={listing} />
           <span style={{ fontSize: '0.8rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px' }}>{listing.category}</span>
           {listing.sku && <span style={{ fontSize: '0.8rem', background: 'rgba(99,102,241,0.25)', padding: '2px 8px', borderRadius: '4px', color: '#a5b4fc' }}>SKU: {listing.sku}</span>}
           {listing.shopifyProductId && listing.shopifyStatus === 'listed' && (
@@ -347,6 +501,10 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
               <DollarSign size={17} /> Sold
             </button>
           )}
+          <button className="btn-icon" title="AI Optimize listing" onClick={() => { setOptimizeListing(listing); setOptimizeResult(null); setOptimizeInstructions(''); }}
+            style={{ color: '#a78bfa' }}>
+            <Wand2 size={18} />
+          </button>
           <button className="btn-icon" title="Edit listing" onClick={() => setEditListing(listing)}>
             <Pencil size={18} />
           </button>
@@ -415,9 +573,10 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
           {listing.updatedAt && listing.updatedAt !== listing.createdAt && <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', flexShrink: 0, opacity: 0.7 }}>updated {timeAgo(listing.updatedAt)}</span>}
         </div>
       </div>
-      <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
+      <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0, alignItems: 'center' }}>
         <span style={{ fontSize: '0.78rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px', whiteSpace: 'nowrap' }}>${listing.priceRecommendation}</span>
         <ProfitBadge price={listing.priceRecommendation} costBasis={listing.costBasis} category={listing.category} shippingLabelCost={listing.shippingLabelCost} />
+        <HealthBadge listing={listing} />
         {listing.sku && <span style={{ fontSize: '0.78rem', background: 'rgba(99,102,241,0.25)', padding: '2px 8px', borderRadius: '4px', color: '#a5b4fc', whiteSpace: 'nowrap' }}>{listing.sku}</span>}
       </div>
       <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', flexShrink: 0, minWidth: '80px', textAlign: 'right' }}>{new Date(listing.createdAt).toLocaleDateString()}</span>
@@ -431,6 +590,10 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
             <DollarSign size={17} />
           </button>
         )}
+        <button className="btn-icon" title="AI Optimize listing" onClick={() => { setOptimizeListing(listing); setOptimizeResult(null); setOptimizeInstructions(''); }}
+          style={{ color: '#a78bfa' }}>
+          <Wand2 size={17} />
+        </button>
         <button className="btn-icon" title="Edit listing" onClick={() => setEditListing(listing)}>
           <Pencil size={17} />
         </button>
@@ -531,6 +694,113 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
                 {ending ? 'Ending...' : 'End Listing on eBay'}
               </button>
             </div>
+          </div>
+        </div>, document.body
+      )}
+
+      {/* AI Optimize modal */}
+      {optimizeListing && createPortal(
+        <div onClick={() => setOptimizeListing(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', overflowY: 'auto' }}>
+          <div className="glass-panel" onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '700px', padding: '2rem', maxHeight: '90vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '1.25rem' }}>
+              <Wand2 size={20} style={{ color: '#a78bfa' }} />
+              <h3 style={{ margin: 0, flex: 1 }}>AI Optimize Listing</h3>
+              <button onClick={() => setOptimizeListing(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px' }}><X size={18} /></button>
+            </div>
+
+            {/* Current listing summary */}
+            <div style={{ display: 'flex', gap: '12px', marginBottom: '1.25rem', padding: '12px', background: 'rgba(255,255,255,0.04)', borderRadius: '8px' }}>
+              {optimizeListing.images?.[0] && <img src={optimizeListing.images[0]} alt="" style={{ width: '64px', height: '64px', objectFit: 'cover', borderRadius: '6px', flexShrink: 0 }} />}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ margin: '0 0 4px 0', fontWeight: 500, fontSize: '0.9rem' }}>{optimizeListing.title}</p>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>${optimizeListing.priceRecommendation}</span>
+                  <HealthBadge listing={optimizeListing} />
+                  {optimizeListing.ebayDraftId && <span style={{ fontSize: '0.75rem', background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', padding: '1px 7px', borderRadius: '4px' }}>eBay listed</span>}
+                  {optimizeListing.shopifyProductId && optimizeListing.shopifyStatus === 'listed' && <span style={{ fontSize: '0.75rem', background: 'rgba(150,191,72,0.2)', color: '#96bf48', padding: '1px 7px', borderRadius: '4px' }}>Shopify listed</span>}
+                </div>
+              </div>
+            </div>
+
+            {/* Instructions */}
+            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>Optimization Instructions (optional)</label>
+            <textarea className="input-base" rows={3} placeholder="e.g. 'Focus on collectible value', 'Target vintage buyers', 'Improve condition description'…"
+              value={optimizeInstructions} onChange={e => setOptimizeInstructions(e.target.value)}
+              style={{ marginBottom: '1rem', resize: 'vertical', width: '100%' }} />
+
+            {!optimizeResult ? (
+              <button className="btn-primary" onClick={handleOptimize} disabled={optimizing}
+                style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', justifyContent: 'center', padding: '10px' }}>
+                {optimizing ? <><RefreshCw size={15} style={{ animation: 'spin 1s linear infinite' }} /> Analyzing images & generating…</> : <><Wand2 size={15} /> Generate Optimized Listing</>}
+              </button>
+            ) : (
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '1rem' }}>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--success)', fontWeight: 600 }}>✓ Optimization ready</span>
+                  <button onClick={handleOptimize} disabled={optimizing} style={{ fontSize: '0.75rem', padding: '3px 10px', background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border-color)', color: 'var(--text-secondary)', borderRadius: '6px', cursor: 'pointer' }}>
+                    {optimizing ? 'Re-generating…' : 'Regenerate'}
+                  </button>
+                </div>
+
+                {/* Title */}
+                <div style={{ marginBottom: '0.75rem' }}>
+                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '3px' }}>Title ({(optimizeResult.title || '').length}/80)</label>
+                  <input className="input-base" value={optimizeResult.title || ''} onChange={e => setOptimizeResult((r: any) => ({ ...r, title: e.target.value }))} style={{ width: '100%' }} />
+                </div>
+
+                {/* Price + Category row */}
+                <div style={{ display: 'flex', gap: '12px', marginBottom: '0.75rem' }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '3px' }}>Price</label>
+                    <input className="input-base" value={optimizeResult.priceRecommendation || ''} onChange={e => setOptimizeResult((r: any) => ({ ...r, priceRecommendation: e.target.value }))} style={{ width: '100%' }} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '3px' }}>Condition</label>
+                    <input className="input-base" value={optimizeResult.condition || ''} onChange={e => setOptimizeResult((r: any) => ({ ...r, condition: e.target.value }))} style={{ width: '100%' }} />
+                  </div>
+                </div>
+
+                {/* Description */}
+                <div style={{ marginBottom: '0.75rem' }}>
+                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '3px' }}>Description</label>
+                  <textarea className="input-base" rows={5} value={optimizeResult.description || ''} onChange={e => setOptimizeResult((r: any) => ({ ...r, description: e.target.value }))} style={{ width: '100%', resize: 'vertical' }} />
+                </div>
+
+                {/* Item specifics preview */}
+                {optimizeResult.itemSpecifics && Object.keys(optimizeResult.itemSpecifics).length > 0 && (
+                  <div style={{ marginBottom: '1rem', padding: '10px 12px', background: 'rgba(255,255,255,0.04)', borderRadius: '6px' }}>
+                    <p style={{ margin: '0 0 6px 0', fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 500 }}>Item Specifics</p>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      {Object.entries(optimizeResult.itemSpecifics).map(([k, v]) => (
+                        <span key={k} style={{ fontSize: '0.75rem', background: 'rgba(99,102,241,0.15)', color: '#a5b4fc', padding: '2px 8px', borderRadius: '4px' }}>{k}: {String(v)}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Action buttons */}
+                <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                  <button className="btn-secondary" style={{ flex: 1 }} disabled={optimizeSaving} onClick={() => handleSaveOptimized(false, false)}>
+                    {optimizeSaving ? 'Saving…' : 'Save Only'}
+                  </button>
+                  {optimizeListing.ebayDraftId && (
+                    <button className="btn-primary" style={{ flex: 1, background: 'rgba(99,102,241,0.25)', borderColor: 'rgba(99,102,241,0.5)' }} disabled={optimizeSaving} onClick={() => handleSaveOptimized(true, false)}>
+                      {optimizeSaving ? 'Saving…' : 'Save + Revise eBay'}
+                    </button>
+                  )}
+                  {optimizeListing.shopifyProductId && optimizeListing.shopifyStatus === 'listed' && (
+                    <button className="btn-primary" style={{ flex: 1, background: 'rgba(150,191,72,0.2)', borderColor: 'rgba(150,191,72,0.4)', color: '#96bf48' }} disabled={optimizeSaving} onClick={() => handleSaveOptimized(false, true)}>
+                      {optimizeSaving ? 'Saving…' : 'Save + Update Shopify'}
+                    </button>
+                  )}
+                  {optimizeListing.ebayDraftId && optimizeListing.shopifyProductId && optimizeListing.shopifyStatus === 'listed' && (
+                    <button className="btn-primary" style={{ flex: 1 }} disabled={optimizeSaving} onClick={() => handleSaveOptimized(true, true)}>
+                      {optimizeSaving ? 'Saving…' : 'Save + Push Both'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>, document.body
       )}

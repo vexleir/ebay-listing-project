@@ -583,6 +583,69 @@ app.post('/api/shopify/push', async (req, res) => {
   }
 });
 
+// POST /api/shopify/update/:listingId — update an existing Shopify product's title/description/price/tags
+app.post('/api/shopify/update/:listingId', async (req, res) => {
+  try {
+    const db = await getDb();
+    const existing = await db.collection('listings').findOne({ id: req.params.listingId, companyId: req.companyId });
+    if (!existing || !existing.shopifyProductId) return res.status(400).json({ error: 'Listing not found or not on Shopify' });
+
+    const listing = req.body;
+    const price = listing.priceRecommendation
+      ? parseFloat(String(listing.priceRecommendation).replace(/[^0-9.]/g, '')).toFixed(2)
+      : null;
+
+    // Update title, description, productType, tags
+    const updateResult = await shopifyAuth.shopifyGraphQL(req.companyId, `
+      mutation productUpdate($input: ProductInput!) {
+        productUpdate(input: $input) {
+          product {
+            id
+            variants(first: 1) { edges { node { id } } }
+          }
+          userErrors { field message }
+        }
+      }
+    `, {
+      input: {
+        id: existing.shopifyProductId,
+        title: listing.title || existing.title,
+        descriptionHtml: listing.description || '',
+        productType: listing.category || '',
+        tags: listing.tags || [],
+      }
+    });
+
+    const userErrors = updateResult?.productUpdate?.userErrors || [];
+    if (userErrors.length > 0) throw new Error(userErrors.map(e => e.message).join(', '));
+
+    const variantId = updateResult?.productUpdate?.product?.variants?.edges?.[0]?.node?.id;
+
+    // Update price if provided
+    if (price && price !== '0.00' && variantId) {
+      await shopifyAuth.shopifyGraphQL(req.companyId, `
+        mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+          productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+            userErrors { field message }
+          }
+        }
+      `, { productId: existing.shopifyProductId, variants: [{ id: variantId, price }] });
+    }
+
+    // Persist changes to DB
+    const { _id, ...listingFields } = listing;
+    await db.collection('listings').updateOne(
+      { id: req.params.listingId, companyId: req.companyId },
+      { $set: { ...listingFields, updatedAt: Date.now() } }
+    );
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error('[shopify/update] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /api/shopify/delist/:listingId — unpublish a Shopify product (reversible)
 app.post('/api/shopify/delist/:listingId', async (req, res) => {
   try {
