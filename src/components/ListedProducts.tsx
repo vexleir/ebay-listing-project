@@ -178,6 +178,8 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
   const [optimizing, setOptimizing] = useState(false);
   const [optimizeResult, setOptimizeResult] = useState<any>(null);
   const [optimizeSaving, setOptimizeSaving] = useState(false);
+  const [availableCollections, setAvailableCollections] = useState<{ id: string; title: string }[]>([]);
+  const [optimizeCollectionIds, setOptimizeCollectionIds] = useState<string[]>([]);
 
   const pw = appPassword || localStorage.getItem('app_password') || '';
 
@@ -300,6 +302,15 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
   // Reset to page 1 when filters/search change
   useEffect(() => { setCurrentPage(1); }, [search, statusFilter, marketplaceFilter, activeTag, sort]);
 
+  // Fetch Shopify collections once when Shopify is connected
+  useEffect(() => {
+    if (!isShopifyConnected || availableCollections.length > 0) return;
+    fetch('/api/shopify/collections', { headers: { 'Authorization': `Bearer ${pw}` } })
+      .then(r => r.json())
+      .then(data => { if (data.collections) setAvailableCollections(data.collections); })
+      .catch(() => {});
+  }, [isShopifyConnected]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const totalPages = perPage === 0 ? 1 : Math.ceil(filteredListings.length / perPage);
   const paginatedListings = perPage === 0 ? filteredListings : filteredListings.slice((currentPage - 1) * perPage, currentPage * perPage);
 
@@ -369,6 +380,8 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
       condition: optimizeResult.condition || optimizeListing.condition,
       itemSpecifics: optimizeResult.itemSpecifics || optimizeListing.itemSpecifics,
       tags: optimizeResult.tags || optimizeListing.tags,
+      seoKeywords: optimizeResult.seoKeywords || optimizeListing.seoKeywords || '',
+      shopifyCollectionIds: optimizeCollectionIds.length > 0 ? optimizeCollectionIds : optimizeListing.shopifyCollectionIds,
       updatedAt: Date.now(),
     };
     try {
@@ -501,13 +514,11 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
               <DollarSign size={17} /> Sold
             </button>
           )}
-          <button className="btn-icon" title="AI Optimize listing" onClick={() => { setOptimizeListing(listing); setOptimizeResult(null); setOptimizeInstructions(''); }}
+          <button className="btn-icon" title="AI Optimize listing" onClick={() => { setOptimizeListing(listing); setOptimizeResult(null); setOptimizeInstructions(''); setOptimizeCollectionIds(listing.shopifyCollectionIds || []); }}
             style={{ color: '#a78bfa' }}>
             <Wand2 size={18} />
           </button>
-          <button className="btn-icon" title="Edit listing" onClick={() => setEditListing(listing)}>
-            <Pencil size={18} />
-          </button>
+          <button className="btn-icon" title="Edit listing" onClick={() => setEditListing(listing)}><Pencil size={18} /></button>
           {listing.ebayDraftId && !isArchived && (
             <button className="btn-icon" title="End listing on eBay" style={{ color: '#ef4444' }} onClick={() => setEndConfirmId(listing.id)}>
               <CircleSlash size={18} />
@@ -590,7 +601,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
             <DollarSign size={17} />
           </button>
         )}
-        <button className="btn-icon" title="AI Optimize listing" onClick={() => { setOptimizeListing(listing); setOptimizeResult(null); setOptimizeInstructions(''); }}
+        <button className="btn-icon" title="AI Optimize listing" onClick={() => { setOptimizeListing(listing); setOptimizeResult(null); setOptimizeInstructions(''); setOptimizeCollectionIds(listing.shopifyCollectionIds || []); }}
           style={{ color: '#a78bfa' }}>
           <Wand2 size={17} />
         </button>
@@ -722,6 +733,30 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
               </div>
             </div>
 
+            {/* Collection picker — always visible when Shopify connected */}
+            {isShopifyConnected && availableCollections.length > 0 && (
+              <div style={{ marginBottom: '1rem' }}>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>Shopify Collections</label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '10px', background: 'rgba(255,255,255,0.04)', borderRadius: '8px', border: '1px solid var(--border-color)', maxHeight: '140px', overflowY: 'auto' }}>
+                  {availableCollections.map(col => {
+                    const selected = optimizeCollectionIds.includes(col.id);
+                    return (
+                      <button key={col.id} onClick={() => setOptimizeCollectionIds(prev => selected ? prev.filter(id => id !== col.id) : [...prev, col.id])}
+                        style={{ fontSize: '0.78rem', padding: '3px 10px', borderRadius: '14px', border: '1px solid', cursor: 'pointer', transition: 'all 0.15s',
+                          background: selected ? 'rgba(150,191,72,0.2)' : 'transparent',
+                          borderColor: selected ? '#96bf48' : 'var(--border-color)',
+                          color: selected ? '#96bf48' : 'var(--text-secondary)' }}>
+                        {selected ? '✓ ' : ''}{col.title}
+                      </button>
+                    );
+                  })}
+                </div>
+                {optimizeCollectionIds.length > 0 && (
+                  <p style={{ margin: '4px 0 0 0', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{optimizeCollectionIds.length} collection{optimizeCollectionIds.length !== 1 ? 's' : ''} selected</p>
+                )}
+              </div>
+            )}
+
             {/* Instructions */}
             <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>Optimization Instructions (optional)</label>
             <textarea className="input-base" rows={3} placeholder="e.g. 'Focus on collectible value', 'Target vintage buyers', 'Improve condition description'…"
@@ -768,7 +803,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
 
                 {/* Item specifics preview */}
                 {optimizeResult.itemSpecifics && Object.keys(optimizeResult.itemSpecifics).length > 0 && (
-                  <div style={{ marginBottom: '1rem', padding: '10px 12px', background: 'rgba(255,255,255,0.04)', borderRadius: '6px' }}>
+                  <div style={{ marginBottom: '0.75rem', padding: '10px 12px', background: 'rgba(255,255,255,0.04)', borderRadius: '6px' }}>
                     <p style={{ margin: '0 0 6px 0', fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 500 }}>Item Specifics</p>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                       {Object.entries(optimizeResult.itemSpecifics).map(([k, v]) => (
@@ -777,6 +812,46 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
                     </div>
                   </div>
                 )}
+
+                {/* Tags */}
+                <div style={{ marginBottom: '0.75rem' }}>
+                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '3px' }}>
+                    Shopify/eBay Tags <span style={{ opacity: 0.6 }}>(comma-separated)</span>
+                  </label>
+                  <input className="input-base"
+                    value={Array.isArray(optimizeResult.tags) ? optimizeResult.tags.join(', ') : (optimizeResult.tags || '')}
+                    onChange={e => setOptimizeResult((r: any) => ({ ...r, tags: e.target.value.split(',').map((t: string) => t.trim()).filter(Boolean) }))}
+                    style={{ width: '100%' }} placeholder="vintage, collectible, action-figure…" />
+                </div>
+
+                {/* SEO Keywords */}
+                <div style={{ marginBottom: '1rem' }}>
+                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '3px' }}>
+                    SEO Keywords <span style={{ opacity: 0.6 }}>(Shopify metafield · Google Shopping)</span>
+                  </label>
+                  <input className="input-base"
+                    value={optimizeResult.seoKeywords || ''}
+                    onChange={e => setOptimizeResult((r: any) => ({ ...r, seoKeywords: e.target.value }))}
+                    style={{ width: '100%' }} placeholder="vintage figure, collectible anime toy, 90s action figure…" />
+                </div>
+
+                {/* Google metafields preview */}
+                <div style={{ marginBottom: '1rem', padding: '10px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                  <p style={{ margin: '0 0 6px 0', fontSize: '0.78rem', color: 'var(--text-secondary)', fontWeight: 500 }}>Google Shopping Metafields (auto-derived)</p>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    {[
+                      { label: 'google.condition', value: (() => { const s = (optimizeResult.condition || '').toLowerCase(); return s.includes('new') && !s.includes('like') ? 'new' : s.includes('refurb') ? 'refurbished' : 'used'; })() },
+                      { label: 'google.mpn', value: optimizeResult.itemSpecifics?.MPN || optimizeResult.itemSpecifics?.['Model Number'] || '—' },
+                      { label: 'google.age_group', value: optimizeResult.itemSpecifics?.['Age Group'] || optimizeResult.itemSpecifics?.['Target Audience'] || '—' },
+                      { label: 'google.gender', value: optimizeResult.itemSpecifics?.Gender || '—' },
+                    ].map(({ label, value }) => (
+                      <span key={label} style={{ fontSize: '0.72rem', background: 'rgba(245,158,11,0.1)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.2)', padding: '2px 8px', borderRadius: '4px' }}>
+                        {label}: <strong>{value}</strong>
+                      </span>
+                    ))}
+                  </div>
+                  <p style={{ margin: '6px 0 0 0', fontSize: '0.7rem', color: 'var(--text-secondary)', opacity: 0.6 }}>These are set automatically on Shopify when you push. Edit item specifics above to change them.</p>
+                </div>
 
                 {/* Action buttons */}
                 <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>

@@ -82,8 +82,10 @@ async function generateListing(imageParts, instructions, apiKey) {
       5. "priceRecommendation": A single recommended sell price as a plain decimal number string only (e.g. "49.99"). No currency symbols, no ranges, no text — just the number.
       6. "priceJustification": A brief explanation of why that price was chosen (comparable sold listings, condition, rarity, etc.). This is for the seller's reference only.
       7. "shippingEstimate": A detailed shipping estimate including estimated weight, dimensions, recommended service, packaging, and cost.
+      8. "tags": An array of 6-10 concise, lowercase product tags for Shopify/Google Shopping (e.g. ["vintage", "action-figure", "1990s", "anime", "collectible"]). These will be used as Shopify product tags and for SEO/campaign targeting.
+      9. "seoKeywords": A comma-separated string of 5-8 high-value Google Shopping SEO keywords relevant to the product (e.g. "vintage dragonball z figure, collectible anime toy, 90s action figure"). These will populate the Shopify SEO Keywords metafield.
 
-      Respond ONLY with the raw JSON object matching the keys: condition, description, itemSpecifics, category, priceRecommendation, priceJustification, shippingEstimate. Do not include markdown code block wrappers.
+      Respond ONLY with the raw JSON object matching the keys: condition, description, itemSpecifics, category, priceRecommendation, priceJustification, shippingEstimate, tags, seoKeywords. Do not include markdown code block wrappers.
     `;
 
     const finalResult = await model.generateContent([descConditionPrompt, ...imageParts]);
@@ -120,6 +122,8 @@ async function generateListing(imageParts, instructions, apiKey) {
       priceRecommendation: parsedFinal.priceRecommendation || "0.00",
       priceJustification: parsedFinal.priceJustification || "",
       shippingEstimate: finalShipping,
+      tags: Array.isArray(parsedFinal.tags) ? parsedFinal.tags : [],
+      seoKeywords: parsedFinal.seoKeywords || "",
       tokenUsage: { promptTokens: totalPromptTokens, completionTokens: totalCompletionTokens, totalTokens: totalPromptTokens + totalCompletionTokens, model: modelName }
     };
   };
