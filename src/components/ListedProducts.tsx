@@ -250,7 +250,19 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
       const data = await resp.json();
       if (!resp.ok || data.error) throw new Error(data.error || 'Shopify push failed');
       onUpdateListing?.({ ...enriched, shopifyProductId: data.shopifyProductId, shopifyStatus: 'listed', shopifyListedAt: Date.now() });
-      toast('Listed on Shopify!', 'success');
+
+      // Report what happened with metafields / collections
+      const mfSet = data.metafieldsSet || [];
+      const mfErrors = data.metafieldErrors || [];
+      const colWarnings = data.collectionWarnings || [];
+      if (mfErrors.length > 0 || colWarnings.length > 0) {
+        const problems = [...mfErrors, ...colWarnings].join(' | ');
+        toast(`Listed on Shopify — but some fields failed: ${problems}`, 'error');
+      } else if (mfSet.length > 0) {
+        toast(`Listed on Shopify! Metafields set: ${mfSet.join(', ')}`, 'success');
+      } else {
+        toast('Listed on Shopify!', 'success');
+      }
       setPushOptionsListing(null);
     } catch (e: any) {
       toast('Shopify push failed: ' + e.message, 'error');

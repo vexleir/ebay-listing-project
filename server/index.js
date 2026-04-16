@@ -565,10 +565,20 @@ app.post('/api/shopify/push', async (req, res) => {
     }
 
     // Set Google Shopping metafields + SEO keywords
-    await applyShopifyMetafields(req.companyId, product.id, variantId, listing).catch(e => console.warn('[shopify/push] metafields warn:', e.message));
+    const metafieldResult = await applyShopifyMetafields(req.companyId, product.id, variantId, listing).catch(e => {
+      console.error('[shopify/push] metafields exception:', e.message);
+      return { set: [], errors: [{ message: e.message }] };
+    });
 
     // Add to collections if specified
-    await applyShopifyCollections(req.companyId, product.id, listing.shopifyCollectionIds).catch(e => console.warn('[shopify/push] collections warn:', e.message));
+    const collectionWarnings = [];
+    if (Array.isArray(listing.shopifyCollectionIds) && listing.shopifyCollectionIds.length > 0) {
+      const colResult = await applyShopifyCollections(req.companyId, product.id, listing.shopifyCollectionIds).catch(e => {
+        console.error('[shopify/push] collections exception:', e.message);
+        return [e.message];
+      });
+      if (Array.isArray(colResult)) collectionWarnings.push(...colResult);
+    }
 
     // Persist shopifyProductId back to the listing in DB
     const db = await getDb();
@@ -577,11 +587,13 @@ app.post('/api/shopify/push', async (req, res) => {
       { $set: { shopifyProductId: product.id, shopifyStatus: 'listed', shopifyListedAt: Date.now(), updatedAt: Date.now() } }
     );
 
-    const shopHandle = config.shop.replace('.myshopify.com', '');
     res.json({
       success: true,
       shopifyProductId: product.id,
       shopifyUrl: `https://${config.shop}/products/${product.handle}`,
+      metafieldsSet: metafieldResult?.set || [],
+      metafieldErrors: (metafieldResult?.errors || []).map(e => e.message),
+      collectionWarnings,
     });
   } catch (e) {
     console.error('[shopify/push] error:', e.message);
@@ -639,10 +651,14 @@ app.post('/api/shopify/update/:listingId', async (req, res) => {
     }
 
     // Update Google Shopping metafields + SEO keywords
-    await applyShopifyMetafields(req.companyId, existing.shopifyProductId, variantId, listing).catch(e => console.warn('[shopify/update] metafields warn:', e.message));
+    const mfResult = await applyShopifyMetafields(req.companyId, existing.shopifyProductId, variantId, listing).catch(e => {
+      console.error('[shopify/update] metafields exception:', e.message);
+      return { set: [], errors: [{ message: e.message }] };
+    });
+    if (mfResult?.errors?.length > 0) console.error('[shopify/update] metafield errors:', mfResult.errors);
 
     // Sync collections if changed
-    await applyShopifyCollections(req.companyId, existing.shopifyProductId, listing.shopifyCollectionIds).catch(e => console.warn('[shopify/update] collections warn:', e.message));
+    await applyShopifyCollections(req.companyId, existing.shopifyProductId, listing.shopifyCollectionIds).catch(e => console.error('[shopify/update] collections exception:', e.message));
 
     // Persist changes to DB
     const { _id, ...listingFields } = listing;
@@ -725,57 +741,93 @@ function pickSpecific(specifics, ...keys) {
   return null;
 }
 
+// Fetch the store's existing metafield definitions so we can use the right type for each key
+async function fetchMetafieldDefinitions(companyId) {
+  const result = await shopifyAuth.shopifyGraphQL(companyId, `
+    query getMetafieldDefs {
+      metafieldDefinitions(first: 250, ownerType: PRODUCT) {
+        edges { node { namespace key type { name } } }
+      }
+      variantDefs: metafieldDefinitions(first: 250, ownerType: PRODUCTVARIANT) {
+        edges { node { namespace key type { name } } }
+      }
+    }
+  `);
+  const productDefs = {};
+  for (const e of result?.metafieldDefinitions?.edges || []) {
+    productDefs[`${e.node.namespace}.${e.node.key}`] = e.node.type.name;
+  }
+  const variantDefs = {};
+  for (const e of result?.variantDefs?.edges || []) {
+    variantDefs[`${e.node.namespace}.${e.node.key}`] = e.node.type.name;
+  }
+  return { productDefs, variantDefs };
+}
+
 async function applyShopifyMetafields(companyId, productId, variantId, listing) {
   const specs = listing.itemSpecifics || {};
   const googleCondition = mapGoogleCondition(listing.condition);
 
-  const mpn     = pickSpecific(specs, 'MPN', 'Model Number', 'Part Number', 'Item Number');
-  const ageGroup= pickSpecific(specs, 'Age Group', 'Target Audience', 'Intended Age Group', 'Age Range');
-  const gender  = pickSpecific(specs, 'Gender', 'Target Gender');
-
-  // Build SEO keywords: explicit field, or fall back to tags joined
+  const mpn      = pickSpecific(specs, 'MPN', 'Model Number', 'Part Number', 'Item Number');
+  const ageGroup = pickSpecific(specs, 'Age Group', 'Target Audience', 'Intended Age Group', 'Age Range');
+  const gender   = pickSpecific(specs, 'Gender', 'Target Gender');
   const seoKeywords = listing.seoKeywords || (Array.isArray(listing.tags) && listing.tags.length > 0 ? listing.tags.join(', ') : null);
 
+  // Fetch existing metafield definitions so the type we send matches exactly
+  let productDefs = {}, variantDefs = {};
+  try {
+    ({ productDefs, variantDefs } = await fetchMetafieldDefinitions(companyId));
+    console.log('[shopify metafields] found definitions:', { productDefs, variantDefs });
+  } catch (e) {
+    console.warn('[shopify metafields] could not fetch definitions, using defaults:', e.message);
+  }
+
+  // Pick the type from the existing definition, falling back to single_line_text_field
+  const pType = (ns, key) => productDefs[`${ns}.${key}`] || 'single_line_text_field';
+  const vType = (ns, key) => variantDefs[`${ns}.${key}`] || 'single_line_text_field';
+
   const productMeta = [];
-  if (seoKeywords) productMeta.push({ ownerId: productId, namespace: 'custom', key: 'seo_keywords', value: seoKeywords, type: 'single_line_text_field' });
-  productMeta.push({ ownerId: productId, namespace: 'google', key: 'condition', value: googleCondition, type: 'single_line_text_field' });
-  if (mpn)      productMeta.push({ ownerId: productId, namespace: 'google', key: 'mpn', value: mpn, type: 'single_line_text_field' });
-  if (ageGroup) productMeta.push({ ownerId: productId, namespace: 'google', key: 'age_group', value: ageGroup.toLowerCase(), type: 'single_line_text_field' });
-  if (gender)   productMeta.push({ ownerId: productId, namespace: 'google', key: 'gender', value: gender.toLowerCase(), type: 'single_line_text_field' });
+  if (seoKeywords) productMeta.push({ ownerId: productId, namespace: 'custom', key: 'seo_keywords', value: seoKeywords, type: pType('custom', 'seo_keywords') });
+  productMeta.push({ ownerId: productId, namespace: 'google', key: 'condition', value: googleCondition, type: pType('google', 'condition') });
+  if (mpn)      productMeta.push({ ownerId: productId, namespace: 'google', key: 'mpn', value: mpn, type: pType('google', 'mpn') });
+  if (ageGroup) productMeta.push({ ownerId: productId, namespace: 'google', key: 'age_group', value: ageGroup.toLowerCase(), type: pType('google', 'age_group') });
+  if (gender)   productMeta.push({ ownerId: productId, namespace: 'google', key: 'gender', value: gender.toLowerCase(), type: pType('google', 'gender') });
 
   const variantMeta = variantId ? [
-    { ownerId: variantId, namespace: 'google', key: 'condition', value: googleCondition, type: 'single_line_text_field' },
-    ...(mpn      ? [{ ownerId: variantId, namespace: 'google', key: 'mpn', value: mpn, type: 'single_line_text_field' }] : []),
-    ...(ageGroup ? [{ ownerId: variantId, namespace: 'google', key: 'age_group', value: ageGroup.toLowerCase(), type: 'single_line_text_field' }] : []),
-    ...(gender   ? [{ ownerId: variantId, namespace: 'google', key: 'gender', value: gender.toLowerCase(), type: 'single_line_text_field' }] : []),
+    { ownerId: variantId, namespace: 'google', key: 'condition', value: googleCondition, type: vType('google', 'condition') },
+    ...(mpn      ? [{ ownerId: variantId, namespace: 'google', key: 'mpn',       value: mpn,                      type: vType('google', 'mpn') }]       : []),
+    ...(ageGroup ? [{ ownerId: variantId, namespace: 'google', key: 'age_group', value: ageGroup.toLowerCase(),   type: vType('google', 'age_group') }] : []),
+    ...(gender   ? [{ ownerId: variantId, namespace: 'google', key: 'gender',    value: gender.toLowerCase(),     type: vType('google', 'gender') }]    : []),
   ] : [];
 
   const allMetafields = [...productMeta, ...variantMeta];
-  if (allMetafields.length === 0) return;
-
-  console.log(`[shopify metafields] setting ${allMetafields.length} metafields for product ${productId}`);
+  console.log(`[shopify metafields] attempting to set ${allMetafields.length} metafields:`, allMetafields.map(m => `${m.namespace}.${m.key}=${m.value}(${m.type})`));
 
   const result = await shopifyAuth.shopifyGraphQL(companyId, `
     mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
       metafieldsSet(metafields: $metafields) {
         metafields { id key namespace ownerId }
-        userErrors { field message }
+        userErrors { field message elementIndex }
       }
     }
   `, { metafields: allMetafields });
 
   const metafieldErrors = result?.metafieldsSet?.userErrors || [];
+  const metafieldSet    = result?.metafieldsSet?.metafields || [];
+
+  console.log(`[shopify metafields] set ${metafieldSet.length} OK, ${metafieldErrors.length} errors`);
   if (metafieldErrors.length > 0) {
-    console.error('[shopify metafields] userErrors:', JSON.stringify(metafieldErrors));
-  } else {
-    const set = result?.metafieldsSet?.metafields || [];
-    console.log(`[shopify metafields] successfully set: ${set.map(m => `${m.namespace}.${m.key}`).join(', ')}`);
+    console.error('[shopify metafields] errors:', JSON.stringify(metafieldErrors));
   }
+
+  // Return a summary so callers can include it in their response
+  return { set: metafieldSet.map(m => `${m.namespace}.${m.key}`), errors: metafieldErrors };
 }
 
 async function applyShopifyCollections(companyId, productId, collectionIds) {
-  if (!Array.isArray(collectionIds) || collectionIds.length === 0) return;
-  console.log(`[shopify collections] adding product ${productId} to ${collectionIds.length} collection(s)`);
+  if (!Array.isArray(collectionIds) || collectionIds.length === 0) return [];
+  console.log(`[shopify collections] adding product ${productId} to collections:`, collectionIds);
+  const warnings = [];
   for (const collectionId of collectionIds) {
     try {
       const result = await shopifyAuth.shopifyGraphQL(companyId, `
@@ -788,15 +840,30 @@ async function applyShopifyCollections(companyId, productId, collectionIds) {
       `, { id: collectionId, productIds: [productId] });
       const errs = result?.collectionAddProducts?.userErrors || [];
       if (errs.length > 0) {
-        console.error('[shopify collections] userErrors for', collectionId, JSON.stringify(errs));
+        const msg = `Collection ${collectionId}: ${errs.map(e => e.message).join(', ')}`;
+        console.error('[shopify collections]', msg);
+        warnings.push(msg);
       } else {
-        console.log('[shopify collections] added to:', result?.collectionAddProducts?.collection?.title);
+        console.log('[shopify collections] added to:', result?.collectionAddProducts?.collection?.title || collectionId);
       }
     } catch (e) {
       console.error('[shopify/collections] exception for', collectionId, e.message);
+      warnings.push(`Collection ${collectionId}: ${e.message}`);
     }
   }
+  return warnings;
 }
+
+// GET /api/shopify/metafield-defs — returns all metafield definitions so we can verify types
+app.get('/api/shopify/metafield-defs', async (req, res) => {
+  try {
+    const { productDefs, variantDefs } = await fetchMetafieldDefinitions(req.companyId);
+    res.json({ productDefs, variantDefs });
+  } catch (e) {
+    console.error('[shopify/metafield-defs] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // GET /api/shopify/collections — list all collections in the connected Shopify store
 app.get('/api/shopify/collections', async (req, res) => {
