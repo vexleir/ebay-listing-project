@@ -376,7 +376,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
       const saveResp = await fetch(`/api/listings/${optimizeListing.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pw}` },
-        body: JSON.stringify(updated),
+        body: JSON.stringify({ updates: updated }),
       });
       if (!saveResp.ok) { const d = await saveResp.json(); throw new Error(d.error || 'Save failed'); }
       onUpdateListing?.(updated);
