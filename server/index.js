@@ -771,33 +771,31 @@ async function applyShopifyMetafields(companyId, productId, variantId, listing) 
   const mpn      = pickSpecific(specs, 'MPN', 'Model Number', 'Part Number', 'Item Number');
   const ageGroup = pickSpecific(specs, 'Age Group', 'Target Audience', 'Intended Age Group', 'Age Range');
   const gender   = pickSpecific(specs, 'Gender', 'Target Gender');
-  const seoKeywords = listing.seoKeywords || (Array.isArray(listing.tags) && listing.tags.length > 0 ? listing.tags.join(', ') : null);
 
-  // Fetch existing metafield definitions so the type we send matches exactly
-  let productDefs = {}, variantDefs = {};
-  try {
-    ({ productDefs, variantDefs } = await fetchMetafieldDefinitions(companyId));
-    console.log('[shopify metafields] found definitions:', { productDefs, variantDefs });
-  } catch (e) {
-    console.warn('[shopify metafields] could not fetch definitions, using defaults:', e.message);
+  // seo.keywords is list.single_line_text_field — value must be a JSON array string
+  let seoKeywordsArr = null;
+  if (listing.seoKeywords && typeof listing.seoKeywords === 'string' && listing.seoKeywords.trim()) {
+    seoKeywordsArr = listing.seoKeywords.split(',').map(k => k.trim()).filter(Boolean);
+  } else if (Array.isArray(listing.tags) && listing.tags.length > 0) {
+    seoKeywordsArr = listing.tags;
   }
-
-  // Pick the type from the existing definition, falling back to single_line_text_field
-  const pType = (ns, key) => productDefs[`${ns}.${key}`] || 'single_line_text_field';
-  const vType = (ns, key) => variantDefs[`${ns}.${key}`] || 'single_line_text_field';
+  const seoKeywordsValue = seoKeywordsArr ? JSON.stringify(seoKeywordsArr) : null;
 
   const productMeta = [];
-  if (seoKeywords) productMeta.push({ ownerId: productId, namespace: 'custom', key: 'seo_keywords', value: seoKeywords, type: pType('custom', 'seo_keywords') });
-  productMeta.push({ ownerId: productId, namespace: 'google', key: 'condition', value: googleCondition, type: pType('google', 'condition') });
-  if (mpn)      productMeta.push({ ownerId: productId, namespace: 'google', key: 'mpn', value: mpn, type: pType('google', 'mpn') });
-  if (ageGroup) productMeta.push({ ownerId: productId, namespace: 'google', key: 'age_group', value: ageGroup.toLowerCase(), type: pType('google', 'age_group') });
-  if (gender)   productMeta.push({ ownerId: productId, namespace: 'google', key: 'gender', value: gender.toLowerCase(), type: pType('google', 'gender') });
+  // seo.keywords — list.single_line_text_field
+  if (seoKeywordsValue) productMeta.push({ ownerId: productId, namespace: 'seo', key: 'keywords', value: seoKeywordsValue, type: 'list.single_line_text_field' });
+  // google.* — product-level Google Shopping channel metafields
+  productMeta.push({ ownerId: productId, namespace: 'google', key: 'condition', value: googleCondition, type: 'single_line_text_field' });
+  if (mpn)      productMeta.push({ ownerId: productId, namespace: 'google', key: 'mpn',       value: mpn,                    type: 'single_line_text_field' });
+  if (ageGroup) productMeta.push({ ownerId: productId, namespace: 'google', key: 'age_group', value: ageGroup.toLowerCase(), type: 'single_line_text_field' });
+  if (gender)   productMeta.push({ ownerId: productId, namespace: 'google', key: 'gender',    value: gender.toLowerCase(),   type: 'single_line_text_field' });
 
+  // Variant-level metafields use mm-google-shopping namespace (Metafields Manager app)
   const variantMeta = variantId ? [
-    { ownerId: variantId, namespace: 'google', key: 'condition', value: googleCondition, type: vType('google', 'condition') },
-    ...(mpn      ? [{ ownerId: variantId, namespace: 'google', key: 'mpn',       value: mpn,                      type: vType('google', 'mpn') }]       : []),
-    ...(ageGroup ? [{ ownerId: variantId, namespace: 'google', key: 'age_group', value: ageGroup.toLowerCase(),   type: vType('google', 'age_group') }] : []),
-    ...(gender   ? [{ ownerId: variantId, namespace: 'google', key: 'gender',    value: gender.toLowerCase(),     type: vType('google', 'gender') }]    : []),
+    { ownerId: variantId, namespace: 'mm-google-shopping', key: 'condition', value: googleCondition, type: 'single_line_text_field' },
+    ...(mpn      ? [{ ownerId: variantId, namespace: 'mm-google-shopping', key: 'mpn',       value: mpn,                    type: 'single_line_text_field' }] : []),
+    ...(ageGroup ? [{ ownerId: variantId, namespace: 'mm-google-shopping', key: 'age_group', value: ageGroup.toLowerCase(), type: 'single_line_text_field' }] : []),
+    ...(gender   ? [{ ownerId: variantId, namespace: 'mm-google-shopping', key: 'gender',    value: gender.toLowerCase(),   type: 'single_line_text_field' }] : []),
   ] : [];
 
   const allMetafields = [...productMeta, ...variantMeta];
