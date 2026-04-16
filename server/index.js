@@ -731,6 +731,22 @@ function mapGoogleCondition(conditionStr) {
   return 'used';
 }
 
+function mapGoogleGender(genderStr) {
+  const s = (genderStr || '').toLowerCase();
+  if (s.includes('female') || s.includes('women') || s.includes('woman') || s.includes('girl')) return 'female';
+  if (s.includes('male') || s.includes('men') || s.includes('man') || s.includes('boy')) return 'male';
+  return 'unisex';
+}
+
+function mapGoogleAgeGroup(ageStr) {
+  const s = (ageStr || '').toLowerCase();
+  if (s.includes('infant')) return 'infant';
+  if (s.includes('newborn') || s.includes('new born')) return 'newborn';
+  if (s.includes('toddler')) return 'toddler';
+  if (s.includes('kid') || s.includes('child') || s.includes('youth') || s.includes('junior')) return 'kids';
+  return 'adult';
+}
+
 // Look up a value from itemSpecifics using multiple possible key names
 function pickSpecific(specifics, ...keys) {
   if (!specifics) return null;
@@ -768,9 +784,11 @@ async function applyShopifyMetafields(companyId, productId, variantId, listing) 
   const specs = listing.itemSpecifics || {};
   const googleCondition = mapGoogleCondition(listing.condition);
 
-  const mpn      = pickSpecific(specs, 'MPN', 'Model Number', 'Part Number', 'Item Number');
-  const ageGroup = pickSpecific(specs, 'Age Group', 'Target Audience', 'Intended Age Group', 'Age Range');
-  const gender   = pickSpecific(specs, 'Gender', 'Target Gender');
+  const mpn         = pickSpecific(specs, 'MPN', 'Model Number', 'Part Number', 'Item Number', 'UPC', 'EAN');
+  const ageGroupRaw = pickSpecific(specs, 'Age Group', 'Target Audience', 'Intended Age Group', 'Age Range', 'Recommended Age Group') || 'adult';
+  const genderRaw   = pickSpecific(specs, 'Gender', 'Target Gender', 'Department') || 'unisex';
+  const ageGroup    = mapGoogleAgeGroup(ageGroupRaw);
+  const gender      = mapGoogleGender(genderRaw);
 
   // seo.keywords is list.single_line_text_field — value must be a JSON array string
   let seoKeywordsArr = null;
@@ -787,8 +805,8 @@ async function applyShopifyMetafields(companyId, productId, variantId, listing) 
   // google.* — product-level Google Shopping channel metafields
   productMeta.push({ ownerId: productId, namespace: 'google', key: 'condition', value: googleCondition, type: 'single_line_text_field' });
   if (mpn)      productMeta.push({ ownerId: productId, namespace: 'google', key: 'mpn',       value: mpn,                    type: 'single_line_text_field' });
-  if (ageGroup) productMeta.push({ ownerId: productId, namespace: 'google', key: 'age_group', value: ageGroup.toLowerCase(), type: 'single_line_text_field' });
-  if (gender)   productMeta.push({ ownerId: productId, namespace: 'google', key: 'gender',    value: gender.toLowerCase(),   type: 'single_line_text_field' });
+  if (ageGroup) productMeta.push({ ownerId: productId, namespace: 'google', key: 'age_group', value: ageGroup, type: 'single_line_text_field' });
+  if (gender)   productMeta.push({ ownerId: productId, namespace: 'google', key: 'gender',    value: gender,   type: 'single_line_text_field' });
 
   // Variant-level metafields use mm-google-shopping namespace (Metafields Manager app)
   const variantMeta = variantId ? [
