@@ -28,6 +28,7 @@ export interface StagedListing {
   shopifyListedAt?: number;
   shopifyCollectionIds?: string[];
   seoKeywords?: string;
+  collectionCodes?: string[];
 }
 
 export interface AppState {

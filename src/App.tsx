@@ -49,6 +49,7 @@ function App() {
     title: string; description: string; condition: string;
     itemSpecifics: Record<string, string>; category: string;
     priceRecommendation: string; priceJustification: string; shippingEstimate: string;
+    tags?: string[]; seoKeywords?: string; collectionCodes?: string[];
   } | null>(() => {
     try { const s = sessionStorage.getItem(DRAFT_GENERATED_KEY); return s ? JSON.parse(s) : null; } catch { return null; }
   });

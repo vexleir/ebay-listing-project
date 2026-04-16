@@ -511,7 +511,7 @@ app.post('/api/shopify/push', async (req, res) => {
       descriptionHtml: listing.description || '',
       vendor: 'Flip Side Collectibles',
       productType: listing.category || '',
-      tags: listing.tags || [],
+      tags: [...(listing.tags || []), ...(listing.collectionCodes || [])],
     };
 
     // Create the product (images added separately via productCreateMedia — required in API 2024-01+)
@@ -652,7 +652,7 @@ app.post('/api/shopify/update/:listingId', async (req, res) => {
         title: listing.title || existing.title,
         descriptionHtml: listing.description || '',
         productType: listing.category || '',
-        tags: listing.tags || [],
+        tags: [...(listing.tags || []), ...(listing.collectionCodes || [])],
       }
     });
 
@@ -952,6 +952,23 @@ app.post('/api/listings', async (req, res) => {
 app.put('/api/listings/:id', async (req, res) => {
   try {
     await updateListing(req.companyId, req.params.id, req.body.updates);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Update a listing by its eBay item ID (used by the optimizer to save collection codes)
+app.patch('/api/listings/by-ebay-id/:itemId', async (req, res) => {
+  try {
+    const { updates } = req.body;
+    if (!updates) return res.status(400).json({ error: 'updates required' });
+    const db = await getDb();
+    const result = await db.collection('listings').updateOne(
+      { ebayDraftId: req.params.itemId, companyId: req.companyId },
+      { $set: { ...updates, updatedAt: Date.now() } }
+    );
+    if (result.matchedCount === 0) return res.json({ success: false, notFound: true });
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });

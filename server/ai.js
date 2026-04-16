@@ -1,5 +1,7 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
+const COLLECTIONS_FOR_AI = 'OT999:Other, TY100:Toys, TY200:Vintage Toys, TY300:Retro Toys, TY400:Modern Toys, TY500:Collectible Toys, TC100:Trading Cards, TC200:TCG Non-Sports, PK200:Pokémon Cards, YG200:Yu-Gi-Oh Cards, MT200:Magic The Gathering, OP200:One Piece Cards, DB200:Dragon Ball Cards, DG200:Digimon Cards, SC100:Sports Cards, BB200:Baseball Cards, BK200:Basketball Cards, FB200:Football Cards, HK200:Hockey Cards, SC300:Soccer Cards, BX100:Sealed Products, BX200:Booster Boxes/Packs, SL100:Slabbed/Graded Items, FX100:Funko Pops, AC100:Action Figures, ST100:Statues & Figures, PL100:Plush, BD100:Board Games, VG100:Video Games, VG200:Retro Video Games, VG300:Modern Video Games, VC100:Video Game Consoles, CM100:Comics, BK100:Books, GN100:Graphic Novels, MG100:Magazines, AN100:Anime Merchandise, MN100:Manga, MV100:Movies DVD/Blu-ray, MS100:Music Physical Media, RC100:Vinyl Records, CS100:Cassettes, EL100:Electronics, CL100:Clothing, HT100:Hats, SH100:Shoes, JW100:Jewelry, WD100:Watches, HG100:Home Goods, DC100:Home Decor, AR100:Art, PT100:Posters & Prints, SG100:Signed/Autographed, PR100:Promotional Items, EV100:Event Exclusives, LM100:Limited Editions, CH100:Chase/Variant Items, RC200:Rare Items, UL100:High-End/Premium, BU100:Bundles/Lots, CL200:Clearance, NW100:New Arrivals, FT100:Featured Items, TR100:Trending Items, DS100:Discounted Items, VI100:Vintage Items, RT100:Retro Items';
+
 async function generateListing(imageParts, instructions, apiKey) {
   const genAI = new GoogleGenerativeAI(apiKey);
 
@@ -84,8 +86,9 @@ async function generateListing(imageParts, instructions, apiKey) {
       7. "shippingEstimate": A detailed shipping estimate including estimated weight, dimensions, recommended service, packaging, and cost.
       8. "tags": An array of 6-10 concise, lowercase product tags for Shopify/Google Shopping (e.g. ["vintage", "action-figure", "1990s", "anime", "collectible"]). These will be used as Shopify product tags and for SEO/campaign targeting.
       9. "seoKeywords": A comma-separated string of 5-8 high-value Google Shopping SEO keywords relevant to the product (e.g. "vintage dragonball z figure, collectible anime toy, 90s action figure"). These will populate the Shopify SEO Keywords metafield.
+      10. "collectionCodes": An array of 1-4 codes (strings) from the list below that best categorize this item for Shopify collection sorting. Choose the most specific applicable codes. Available codes: ${COLLECTIONS_FOR_AI}
 
-      Respond ONLY with the raw JSON object matching the keys: condition, description, itemSpecifics, category, priceRecommendation, priceJustification, shippingEstimate, tags, seoKeywords. Do not include markdown code block wrappers.
+      Respond ONLY with the raw JSON object matching the keys: condition, description, itemSpecifics, category, priceRecommendation, priceJustification, shippingEstimate, tags, seoKeywords, collectionCodes. Do not include markdown code block wrappers.
     `;
 
     const finalResult = await model.generateContent([descConditionPrompt, ...imageParts]);
@@ -124,6 +127,7 @@ async function generateListing(imageParts, instructions, apiKey) {
       shippingEstimate: finalShipping,
       tags: Array.isArray(parsedFinal.tags) ? parsedFinal.tags : [],
       seoKeywords: parsedFinal.seoKeywords || "",
+      collectionCodes: Array.isArray(parsedFinal.collectionCodes) ? parsedFinal.collectionCodes : [],
       tokenUsage: { promptTokens: totalPromptTokens, completionTokens: totalCompletionTokens, totalTokens: totalPromptTokens + totalCompletionTokens, model: modelName }
     };
   };

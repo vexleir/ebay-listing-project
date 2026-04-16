@@ -230,6 +230,8 @@ async function fetchSoldComps(keywords, categoryId) {
     }));
 }
 
+const COLLECTIONS_FOR_AI = 'OT999:Other, TY100:Toys, TY200:Vintage Toys, TY300:Retro Toys, TY400:Modern Toys, TY500:Collectible Toys, TC100:Trading Cards, TC200:TCG Non-Sports, PK200:Pokémon Cards, YG200:Yu-Gi-Oh Cards, MT200:Magic The Gathering, OP200:One Piece Cards, DB200:Dragon Ball Cards, DG200:Digimon Cards, SC100:Sports Cards, BB200:Baseball Cards, BK200:Basketball Cards, FB200:Football Cards, HK200:Hockey Cards, SC300:Soccer Cards, BX100:Sealed Products, BX200:Booster Boxes/Packs, SL100:Slabbed/Graded Items, FX100:Funko Pops, AC100:Action Figures, ST100:Statues & Figures, PL100:Plush, BD100:Board Games, VG100:Video Games, VG200:Retro Video Games, VG300:Modern Video Games, VC100:Video Game Consoles, CM100:Comics, BK100:Books, GN100:Graphic Novels, MG100:Magazines, AN100:Anime Merchandise, MN100:Manga, MV100:Movies DVD/Blu-ray, MS100:Music Physical Media, RC100:Vinyl Records, CS100:Cassettes, EL100:Electronics, CL100:Clothing, HT100:Hats, SH100:Shoes, JW100:Jewelry, WD100:Watches, HG100:Home Goods, DC100:Home Decor, AR100:Art, PT100:Posters & Prints, SG100:Signed/Autographed, PR100:Promotional Items, EV100:Event Exclusives, LM100:Limited Editions, CH100:Chase/Variant Items, RC200:Rare Items, UL100:High-End/Premium, BU100:Bundles/Lots, CL200:Clearance, NW100:New Arrivals, FT100:Featured Items, TR100:Trending Items, DS100:Discounted Items, VI100:Vintage Items, RT100:Retro Items';
+
 // ─── AI Optimize ─────────────────────────────────────────────────────────────
 
 async function aiOptimizeListing(listingData, apiKey) {
@@ -298,8 +300,11 @@ Respond ONLY with a valid JSON object (no markdown wrappers):
   "priceRationale": "why this price",
   "seoKeywords": ["keyword1", "keyword2", "keyword3", "keyword4", "keyword5"],
   "seoIssues": ["issue 1 found in original title/listing", "issue 2"],
-  "overallTips": ["actionable tip 1", "actionable tip 2", "actionable tip 3"]
-}`;
+  "overallTips": ["actionable tip 1", "actionable tip 2", "actionable tip 3"],
+  "suggestedCollectionCodes": ["CODE1", "CODE2"]
+}
+
+For "suggestedCollectionCodes", choose 1-4 codes from this list that best categorize the item: ${COLLECTIONS_FOR_AI}`;
 
   const result = await model.generateContent([prompt]);
   const usage = result.response.usageMetadata;

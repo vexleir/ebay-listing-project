@@ -3,6 +3,7 @@ import { Save, X, Eye, Code, Type, LayoutTemplate, Tag, Wand2, GripVertical } fr
 import type { StagedListing } from '../types';
 import { useToast } from '../context/ToastContext';
 import { calculateNetProfit } from '../utils/fees';
+import CollectionSelector from './CollectionSelector';
 
 interface ResultsEditorProps {
   data: {
@@ -10,6 +11,7 @@ interface ResultsEditorProps {
     itemSpecifics: Record<string, string>; category: string;
     priceRecommendation: string; priceJustification?: string; shippingEstimate: string;
     sku?: string; sellerNotes?: string; costBasis?: string; tags?: string[]; shippingLabelCost?: string;
+    collectionCodes?: string[];
   };
   images: File[];
   existingImageUrls?: string[];
@@ -34,6 +36,7 @@ export default function ResultsEditor({ data, images, existingImageUrls, onStage
   const [shippingLabelCost, setShippingLabelCost] = useState(data.shippingLabelCost || '');
   const [tags, setTags] = useState<string[]>(data.tags || []);
   const [tagInput, setTagInput] = useState('');
+  const [collectionCodes, setCollectionCodes] = useState<string[]>(data.collectionCodes || []);
   const [previewMode, setPreviewMode] = useState<boolean>(true);
 
   // Category suggestions
@@ -281,6 +284,8 @@ export default function ResultsEditor({ data, images, existingImageUrls, onStage
           </div>
         </div>
 
+        <CollectionSelector selected={collectionCodes} onChange={setCollectionCodes} />
+
         {/* Condition */}
         <div>
           <label style={{ display: 'flex', marginBottom: '8px', color: 'var(--text-secondary)', alignItems: 'center', gap: '4px' }}>
@@ -349,7 +354,7 @@ export default function ResultsEditor({ data, images, existingImageUrls, onStage
       <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
         <button className="btn-secondary" style={{ flex: 1 }} onClick={onCancel}><X size={18} /> Discard</button>
         <button className="btn-primary" style={{ flex: 2 }} disabled={title.length > 80}
-          onClick={() => onStage({ title, condition, description, category, priceRecommendation, priceJustification, shippingEstimate, itemSpecifics, images: allImages, sku, sellerNotes, costBasis, shippingLabelCost, tags })}>
+          onClick={() => onStage({ title, condition, description, category, priceRecommendation, priceJustification, shippingEstimate, itemSpecifics, images: allImages, sku, sellerNotes, costBasis, shippingLabelCost, tags, collectionCodes })}>
           <Save size={18} /> Save & Stage Listing
         </button>
       </div>

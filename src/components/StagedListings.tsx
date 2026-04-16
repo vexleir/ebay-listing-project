@@ -533,7 +533,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
     return (
       <div style={{ maxWidth: '800px', margin: '0 auto', height: '80vh' }}>
         <ResultsEditor
-          data={{ title: l.title, description: l.description, condition: l.condition, category: l.category, priceRecommendation: l.priceRecommendation, shippingEstimate: l.shippingEstimate, itemSpecifics: l.itemSpecifics, sku: l.sku, sellerNotes: l.sellerNotes, costBasis: l.costBasis, shippingLabelCost: l.shippingLabelCost, tags: l.tags }}
+          data={{ title: l.title, description: l.description, condition: l.condition, category: l.category, priceRecommendation: l.priceRecommendation, shippingEstimate: l.shippingEstimate, itemSpecifics: l.itemSpecifics, sku: l.sku, sellerNotes: l.sellerNotes, costBasis: l.costBasis, shippingLabelCost: l.shippingLabelCost, tags: l.tags, collectionCodes: l.collectionCodes }}
           images={[]}
           existingImageUrls={l.images || []}
           appPassword={appPassword}
