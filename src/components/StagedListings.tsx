@@ -7,6 +7,7 @@ import ImageSearchButton from './ImageSearchButton';
 import Lightbox from './Lightbox';
 import { useToast } from '../context/ToastContext';
 import CrossPostModal from './CrossPostModal';
+import CollectionSelector from './CollectionSelector';
 
 interface StagedListingsProps {
   listings: StagedListing[];
@@ -289,6 +290,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
   const [sortBy, setSortBy] = useState<SortOption>('date-desc');
   const [pushModal, setPushModal] = useState<PushModal | null>(null);
   const [pushExtraSpecifics, setPushExtraSpecifics] = useState<{ name: string; value: string }[]>([]);
+  const [pushCollectionCodes, setPushCollectionCodes] = useState<string[]>([]);
   const [pushErrorModal, setPushErrorModal] = useState<{ title: string; message: string } | null>(null);
   const [expandedHealthId, setExpandedHealthId] = useState<string | null>(null);
 
@@ -353,6 +355,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
     const pw = appPassword || localStorage.getItem('app_password') || '';
     const hasType = Object.keys(listing.itemSpecifics || {}).some(k => k.toLowerCase() === 'type');
     setPushExtraSpecifics(hasType ? [] : [{ name: 'Type', value: '' }]);
+    setPushCollectionCodes(listing.collectionCodes || []);
     // Pre-load: settings for default policy, categories for suggested ID
     const desiredConditionId = autoConditionId(listing.condition);
     // Default schedule: 21 days from now (eBay's max), formatted for datetime-local input
@@ -407,14 +410,15 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pw}` },
         // Append Arizona offset (-07:00) so the server parses the local time correctly
-        body: JSON.stringify({ listing: { ...listing, itemSpecifics: mergedSpecifics }, overrideConditionId: conditionId, overrideFulfillmentPolicyId: fulfillmentPolicyId || undefined, overrideCategoryId: categoryId || undefined, scheduleDate: scheduleDate ? new Date(scheduleDate + ':00-07:00').toISOString() : undefined })
+        body: JSON.stringify({ listing: { ...listing, itemSpecifics: mergedSpecifics, collectionCodes: pushCollectionCodes }, overrideConditionId: conditionId, overrideFulfillmentPolicyId: fulfillmentPolicyId || undefined, overrideCategoryId: categoryId || undefined, scheduleDate: scheduleDate ? new Date(scheduleDate + ':00-07:00').toISOString() : undefined })
       });
       const data = await resp.json();
       if (!resp.ok || data.error) throw new Error(data.error ?? 'Push failed');
       if (data.conditionFallback) {
         toast(`Pushed! eBay auto-corrected condition to "Used" for this category.`, 'info');
       }
-      onMoveToListed(listing, data.draftId);
+      const updatedListing = { ...listing, collectionCodes: pushCollectionCodes };
+      onMoveToListed(updatedListing, data.draftId);
       toast(`"${listing.title.substring(0, 40)}..." pushed to eBay!`, 'success');
     } catch (e: any) {
       // Show a persistent error modal so the full message is readable
@@ -667,7 +671,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
       {/* Push confirmation modal */}
       {pushModal && createPortal(
         <div onClick={() => setPushModal(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
-          <div className="glass-panel" onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '520px', padding: '2rem' }}>
+          <div className="glass-panel" onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '520px', padding: '2rem', maxHeight: '90vh', overflowY: 'auto' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
               <h3 style={{ margin: 0, fontSize: '1.1rem' }}>Confirm Push to eBay</h3>
               <button onClick={() => setPushModal(null)} className="btn-icon"><X size={18} /></button>
@@ -786,6 +790,17 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
                       <button className="btn-icon" style={{ color: '#ef4444', padding: '4px 8px' }} onClick={() => setPushExtraSpecifics(prev => prev.filter((_, idx) => idx !== i))}>✕</button>
                     </div>
                   ))}
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>
+                    Collections
+                    {pushCollectionCodes.length > 0 && (
+                      <span style={{ fontSize: '0.75rem', fontWeight: 400, color: 'var(--text-secondary)', marginLeft: '6px' }}>
+                        ({pushCollectionCodes.length} selected)
+                      </span>
+                    )}
+                  </label>
+                  <CollectionSelector selected={pushCollectionCodes} onChange={setPushCollectionCodes} />
                 </div>
                 <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '0.5rem' }}>
                   <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setPushModal(null)}>Cancel</button>
