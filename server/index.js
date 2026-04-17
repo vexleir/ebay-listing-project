@@ -592,14 +592,23 @@ app.post('/api/shopify/push', async (req, res) => {
       return { set: [], errors: [{ message: e.message }] };
     });
 
-    // Add to collections if specified
+    // Resolve collection codes to Shopify collection IDs, then apply
     const collectionWarnings = [];
-    if (Array.isArray(listing.shopifyCollectionIds) && listing.shopifyCollectionIds.length > 0) {
-      const colResult = await applyShopifyCollections(req.companyId, product.id, listing.shopifyCollectionIds).catch(e => {
-        console.error('[shopify/push] collections exception:', e.message);
-        return [e.message];
-      });
-      if (Array.isArray(colResult)) collectionWarnings.push(...colResult);
+    if (Array.isArray(listing.collectionCodes) && listing.collectionCodes.length > 0) {
+      try {
+        const { resolved, warnings: resolveWarnings } = await resolveCollectionCodesToIds(req.companyId, listing.collectionCodes);
+        collectionWarnings.push(...resolveWarnings);
+        if (resolved.length > 0) {
+          const colResult = await applyShopifyCollections(req.companyId, product.id, resolved).catch(e => {
+            console.error('[shopify/push] collections exception:', e.message);
+            return [e.message];
+          });
+          if (Array.isArray(colResult)) collectionWarnings.push(...colResult);
+        }
+      } catch (e) {
+        console.error('[shopify/push] collection resolution exception:', e.message);
+        collectionWarnings.push(`Collection resolution failed: ${e.message}`);
+      }
     }
 
     // Persist shopifyProductId back to the listing in DB
@@ -679,8 +688,13 @@ app.post('/api/shopify/update/:listingId', async (req, res) => {
     });
     if (mfResult?.errors?.length > 0) console.error('[shopify/update] metafield errors:', mfResult.errors);
 
-    // Sync collections if changed
-    await applyShopifyCollections(req.companyId, existing.shopifyProductId, listing.shopifyCollectionIds).catch(e => console.error('[shopify/update] collections exception:', e.message));
+    // Sync collections if changed — resolve codes to Shopify IDs first
+    if (Array.isArray(listing.collectionCodes) && listing.collectionCodes.length > 0) {
+      try {
+        const { resolved } = await resolveCollectionCodesToIds(req.companyId, listing.collectionCodes);
+        if (resolved.length > 0) await applyShopifyCollections(req.companyId, existing.shopifyProductId, resolved);
+      } catch (e) { console.error('[shopify/update] collections exception:', e.message); }
+    }
 
     // Persist changes to DB
     const { _id, ...listingFields } = listing;
@@ -860,6 +874,60 @@ async function applyShopifyMetafields(companyId, productId, variantId, listing) 
 
   // Return a summary so callers can include it in their response
   return { set: metafieldSet.map(m => `${m.namespace}.${m.key}`), errors: metafieldErrors };
+}
+
+// Collection code → name map (mirrors src/data/collections.ts)
+const COLLECTION_CODE_MAP = {
+  OT999: 'Other (Catch-All)', TY100: 'Toys', TY200: 'Vintage Toys', TY300: 'Retro Toys', TY400: 'Modern Toys', TY500: 'Collectible Toys',
+  TC100: 'Trading Cards (General)', TC200: 'TCG (Non-Sports Cards)', PK200: 'Pokémon Cards', YG200: 'Yu-Gi-Oh Cards', MT200: 'Magic: The Gathering',
+  OP200: 'One Piece Cards', DB200: 'Dragon Ball Cards', DG200: 'Digimon Cards', SC100: 'Sports Cards (General)', BB200: 'Baseball Cards',
+  BK200: 'Basketball Cards', FB200: 'Football Cards', HK200: 'Hockey Cards', SC300: 'Soccer Cards', BX100: 'Sealed Products',
+  BX200: 'Booster Boxes / Packs', SL100: 'Slabbed / Graded Items', FX100: 'Funko Pops', AC100: 'Action Figures', ST100: 'Statues & Figures',
+  PL100: 'Plush', BD100: 'Board Games', VG100: 'Video Games', VG200: 'Retro Video Games', VG300: 'Modern Video Games', VC100: 'Video Game Consoles',
+  CM100: 'Comics', BK100: 'Books', GN100: 'Graphic Novels', MG100: 'Magazines', AN100: 'Anime Merchandise', MM100: 'Media & Movies',
+  MU100: 'Music & Vinyl', EL100: 'Electronics', EL200: 'Vintage Electronics', CL100: 'Clothing', CL200: 'Vintage Clothing',
+  SH100: 'Shoes', AT100: 'Art', HW100: 'Hot Wheels / Diecast', LG100: 'LEGO', CW100: 'Coins & Currency', JW100: 'Jewelry',
+  WT100: 'Watches', HD100: 'Home Decor', KT100: 'Kitchen & Dining', SP100: 'Sporting Goods', OD100: 'Outdoor & Camping',
+  TL100: 'Tools & Hardware', AU100: 'Automotive', CR100: 'Crafts & Sewing', PT100: 'Pet Supplies', BB100: 'Baby & Kids',
+  HB100: 'Health & Beauty', OF100: 'Office Supplies', GD100: 'Garden & Patio', PN100: 'Pins & Buttons', KC100: 'Keychains & Lanyards',
+  SV100: 'Souvenirs & Travel', HM100: 'Holiday & Seasonal', PR100: 'Premium / High Value', CK100: 'Costume & Cosplay',
+  DP100: 'Disney Parks', FP100: 'Funko Pop Exclusives', GP100: 'Graphic Novels Premium', AR100: 'Art Prints',
+  HC100: 'Hats & Headwear', BG100: 'Bags & Backpacks', FG100: 'Football Cards (Graded)', SC200: 'Sports Cards (Vintage)',
+};
+
+/**
+ * Resolve collection codes (e.g. ['TY100', 'PK200']) to Shopify collection GIDs
+ * by matching the code's name against Shopify collection titles.
+ */
+async function resolveCollectionCodesToIds(companyId, codes) {
+  if (!Array.isArray(codes) || codes.length === 0) return [];
+  // Fetch all Shopify collections
+  const result = await shopifyAuth.shopifyGraphQL(companyId, `
+    query getCollections {
+      collections(first: 250, sortKey: TITLE) {
+        edges { node { id title } }
+      }
+    }
+  `);
+  const shopifyCollections = (result?.collections?.edges || []).map(e => e.node);
+  // Build a lowercase title → id map for matching
+  const titleToId = {};
+  for (const col of shopifyCollections) {
+    titleToId[col.title.toLowerCase().trim()] = col.id;
+  }
+  const resolved = [];
+  const warnings = [];
+  for (const code of codes) {
+    const name = COLLECTION_CODE_MAP[code];
+    if (!name) { warnings.push(`Unknown collection code: ${code}`); continue; }
+    const id = titleToId[name.toLowerCase().trim()];
+    if (id) {
+      resolved.push(id);
+    } else {
+      warnings.push(`No Shopify collection found matching "${name}" (code: ${code})`);
+    }
+  }
+  return { resolved, warnings };
 }
 
 async function applyShopifyCollections(companyId, productId, collectionIds) {

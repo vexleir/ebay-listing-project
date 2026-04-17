@@ -8,6 +8,7 @@ import { useToast } from '../context/ToastContext';
 import { calculateNetProfit } from '../utils/fees';
 import CrossPostModal from './CrossPostModal';
 import EditListingModal from './EditListingModal';
+import CollectionSelector from './CollectionSelector';
 
 interface ListedProductsProps {
   listings: StagedListing[];
@@ -178,11 +179,10 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
   const [optimizing, setOptimizing] = useState(false);
   const [optimizeResult, setOptimizeResult] = useState<any>(null);
   const [optimizeSaving, setOptimizeSaving] = useState(false);
-  const [availableCollections, setAvailableCollections] = useState<{ id: string; title: string }[]>([]);
-  const [optimizeCollectionIds, setOptimizeCollectionIds] = useState<string[]>([]);
+  const [optimizeCollectionCodes, setOptimizeCollectionCodes] = useState<string[]>([]);
   // Shopify push options modal
   const [pushOptionsListing, setPushOptionsListing] = useState<StagedListing | null>(null);
-  const [pushOptionsCollectionIds, setPushOptionsCollectionIds] = useState<string[]>([]);
+  const [pushOptionsCollectionCodes, setPushOptionsCollectionCodes] = useState<string[]>([]);
   const [pushOptionsTags, setPushOptionsTags] = useState<string[]>([]);
   const [pushOptionsSeoKeywords, setPushOptionsSeoKeywords] = useState('');
   const [pushOptionsPushing, setPushOptionsPushing] = useState(false);
@@ -226,7 +226,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
 
   const openShopifyPushModal = (listing: StagedListing) => {
     setPushOptionsListing(listing);
-    setPushOptionsCollectionIds(listing.shopifyCollectionIds || []);
+    setPushOptionsCollectionCodes(listing.collectionCodes || []);
     setPushOptionsTags(listing.tags || []);
     setPushOptionsSeoKeywords(listing.seoKeywords || (listing.tags || []).join(', '));
   };
@@ -235,7 +235,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
     if (!pushOptionsListing) return;
     const enriched: StagedListing = {
       ...pushOptionsListing,
-      shopifyCollectionIds: pushOptionsCollectionIds,
+      collectionCodes: pushOptionsCollectionCodes,
       tags: pushOptionsTags,
       seoKeywords: pushOptionsSeoKeywords,
     };
@@ -337,14 +337,6 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
   // Reset to page 1 when filters/search change
   useEffect(() => { setCurrentPage(1); }, [search, statusFilter, marketplaceFilter, activeTag, sort]);
 
-  // Fetch Shopify collections once when Shopify is connected
-  useEffect(() => {
-    if (!isShopifyConnected || availableCollections.length > 0) return;
-    fetch('/api/shopify/collections', { headers: { 'Authorization': `Bearer ${pw}` } })
-      .then(r => r.json())
-      .then(data => { if (data.collections) setAvailableCollections(data.collections); })
-      .catch(() => {});
-  }, [isShopifyConnected]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const totalPages = perPage === 0 ? 1 : Math.ceil(filteredListings.length / perPage);
   const paginatedListings = perPage === 0 ? filteredListings : filteredListings.slice((currentPage - 1) * perPage, currentPage * perPage);
@@ -416,7 +408,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
       itemSpecifics: optimizeResult.itemSpecifics || optimizeListing.itemSpecifics,
       tags: optimizeResult.tags || optimizeListing.tags,
       seoKeywords: optimizeResult.seoKeywords || optimizeListing.seoKeywords || '',
-      shopifyCollectionIds: optimizeCollectionIds.length > 0 ? optimizeCollectionIds : optimizeListing.shopifyCollectionIds,
+      collectionCodes: optimizeCollectionCodes.length > 0 ? optimizeCollectionCodes : optimizeListing.collectionCodes,
       updatedAt: Date.now(),
     };
     try {
@@ -550,7 +542,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
               <DollarSign size={17} /> Sold
             </button>
           )}
-          <button className="btn-icon" title="AI Optimize listing" onClick={() => { setOptimizeListing(listing); setOptimizeResult(null); setOptimizeInstructions(''); setOptimizeCollectionIds(listing.shopifyCollectionIds || []); }}
+          <button className="btn-icon" title="AI Optimize listing" onClick={() => { setOptimizeListing(listing); setOptimizeResult(null); setOptimizeInstructions(''); setOptimizeCollectionCodes(listing.collectionCodes || []); }}
             style={{ color: '#a78bfa' }}>
             <Wand2 size={18} />
           </button>
@@ -637,7 +629,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
             <DollarSign size={17} />
           </button>
         )}
-        <button className="btn-icon" title="AI Optimize listing" onClick={() => { setOptimizeListing(listing); setOptimizeResult(null); setOptimizeInstructions(''); setOptimizeCollectionIds(listing.shopifyCollectionIds || []); }}
+        <button className="btn-icon" title="AI Optimize listing" onClick={() => { setOptimizeListing(listing); setOptimizeResult(null); setOptimizeInstructions(''); setOptimizeCollectionCodes(listing.collectionCodes || []); }}
           style={{ color: '#a78bfa' }}>
           <Wand2 size={17} />
         </button>
@@ -765,30 +757,17 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
             </div>
 
             {/* Collections */}
-            {availableCollections.length > 0 && (
-              <div style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>
-                  Collections <span style={{ fontWeight: 400, opacity: 0.6 }}>(select all that apply)</span>
-                </label>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '10px', background: 'rgba(255,255,255,0.04)', borderRadius: '8px', border: '1px solid var(--border-color)', maxHeight: '160px', overflowY: 'auto' }}>
-                  {availableCollections.map(col => {
-                    const selected = pushOptionsCollectionIds.includes(col.id);
-                    return (
-                      <button key={col.id} onClick={() => setPushOptionsCollectionIds(prev => selected ? prev.filter(id => id !== col.id) : [...prev, col.id])}
-                        style={{ fontSize: '0.8rem', padding: '4px 12px', borderRadius: '14px', border: '1px solid', cursor: 'pointer', transition: 'all 0.15s',
-                          background: selected ? 'rgba(150,191,72,0.2)' : 'transparent',
-                          borderColor: selected ? '#96bf48' : 'var(--border-color)',
-                          color: selected ? '#96bf48' : 'var(--text-secondary)' }}>
-                        {selected ? '✓ ' : ''}{col.title}
-                      </button>
-                    );
-                  })}
-                </div>
-                {pushOptionsCollectionIds.length > 0 && (
-                  <p style={{ margin: '4px 0 0 0', fontSize: '0.75rem', color: '#96bf48' }}>{pushOptionsCollectionIds.length} collection{pushOptionsCollectionIds.length !== 1 ? 's' : ''} selected</p>
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>
+                Collections
+                {pushOptionsCollectionCodes.length > 0 && (
+                  <span style={{ fontSize: '0.75rem', fontWeight: 400, color: '#96bf48', marginLeft: '6px' }}>
+                    ({pushOptionsCollectionCodes.length} selected)
+                  </span>
                 )}
-              </div>
-            )}
+              </label>
+              <CollectionSelector selected={pushOptionsCollectionCodes} onChange={setPushOptionsCollectionCodes} />
+            </div>
 
             {/* Tags */}
             <div style={{ marginBottom: '1rem' }}>
@@ -845,29 +824,18 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
               </div>
             </div>
 
-            {/* Collection picker — always visible when Shopify connected */}
-            {isShopifyConnected && availableCollections.length > 0 && (
-              <div style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>Shopify Collections</label>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '10px', background: 'rgba(255,255,255,0.04)', borderRadius: '8px', border: '1px solid var(--border-color)', maxHeight: '140px', overflowY: 'auto' }}>
-                  {availableCollections.map(col => {
-                    const selected = optimizeCollectionIds.includes(col.id);
-                    return (
-                      <button key={col.id} onClick={() => setOptimizeCollectionIds(prev => selected ? prev.filter(id => id !== col.id) : [...prev, col.id])}
-                        style={{ fontSize: '0.78rem', padding: '3px 10px', borderRadius: '14px', border: '1px solid', cursor: 'pointer', transition: 'all 0.15s',
-                          background: selected ? 'rgba(150,191,72,0.2)' : 'transparent',
-                          borderColor: selected ? '#96bf48' : 'var(--border-color)',
-                          color: selected ? '#96bf48' : 'var(--text-secondary)' }}>
-                        {selected ? '✓ ' : ''}{col.title}
-                      </button>
-                    );
-                  })}
-                </div>
-                {optimizeCollectionIds.length > 0 && (
-                  <p style={{ margin: '4px 0 0 0', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{optimizeCollectionIds.length} collection{optimizeCollectionIds.length !== 1 ? 's' : ''} selected</p>
+            {/* Collection picker */}
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>
+                Collections
+                {optimizeCollectionCodes.length > 0 && (
+                  <span style={{ fontSize: '0.75rem', fontWeight: 400, color: 'var(--text-secondary)', marginLeft: '6px' }}>
+                    ({optimizeCollectionCodes.length} selected)
+                  </span>
                 )}
-              </div>
-            )}
+              </label>
+              <CollectionSelector selected={optimizeCollectionCodes} onChange={setOptimizeCollectionCodes} />
+            </div>
 
             {/* Instructions */}
             <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>Optimization Instructions (optional)</label>
