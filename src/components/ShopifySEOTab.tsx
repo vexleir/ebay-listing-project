@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import type { CSSProperties } from 'react';
 import {
   RefreshCw, CheckSquare, Square, ExternalLink, Sparkles, ArrowRight,
   X, Check, XCircle, Loader2, ChevronDown, ChevronUp, AlertCircle
@@ -193,6 +194,13 @@ export default function ShopifySEOTab({ appPassword, isShopifyConnected }: Shopi
     setSuggestions(prev => prev.map(s => {
       if (s.productId !== productId) return s;
       return { ...s, fields: s.fields.map(f => f.field === field ? { ...f, accepted } : f) };
+    }));
+  };
+
+  const setFieldAfter = (productId: string, field: SEOFieldKey, newAfter: string) => {
+    setSuggestions(prev => prev.map(s => {
+      if (s.productId !== productId) return s;
+      return { ...s, fields: s.fields.map(f => f.field === field ? { ...f, after: newAfter } : f) };
     }));
   };
 
@@ -499,6 +507,7 @@ export default function ShopifySEOTab({ appPassword, isShopifyConnected }: Shopi
           isPushing={pushingIds.has(reviewingSuggestion.productId)}
           onClose={() => setReviewingProductId(null)}
           onFieldDecision={setFieldDecision}
+          onFieldEdit={setFieldAfter}
           onAcceptAll={acceptAll}
           onRejectAll={rejectAll}
           onPush={handlePushProduct}
@@ -516,12 +525,13 @@ interface ReviewModalProps {
   isPushing: boolean;
   onClose: () => void;
   onFieldDecision: (productId: string, field: SEOFieldKey, accepted: boolean | null) => void;
+  onFieldEdit: (productId: string, field: SEOFieldKey, newAfter: string) => void;
   onAcceptAll: (productId: string) => void;
   onRejectAll: (productId: string) => void;
   onPush: (productId: string) => void;
 }
 
-function ReviewModal({ suggestion, product, isPushing, onClose, onFieldDecision, onAcceptAll, onRejectAll, onPush }: ReviewModalProps) {
+function ReviewModal({ suggestion, product, isPushing, onClose, onFieldDecision, onFieldEdit, onAcceptAll, onRejectAll, onPush }: ReviewModalProps) {
   const approvedCount = suggestion.fields.filter(f => f.accepted === true).length;
 
   return (
@@ -537,7 +547,7 @@ function ReviewModal({ suggestion, product, isPushing, onClose, onFieldDecision,
         onClick={e => e.stopPropagation()}
         style={{
           background: 'var(--bg-primary, #141419)', border: '1px solid var(--glass-border)',
-          borderRadius: '12px', maxWidth: '900px', width: '100%',
+          borderRadius: '12px', maxWidth: '1400px', width: '95vw',
           display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 4rem)',
         }}
       >
@@ -582,6 +592,7 @@ function ReviewModal({ suggestion, product, isPushing, onClose, onFieldDecision,
               key={f.field}
               field={f}
               onDecision={(accepted) => onFieldDecision(suggestion.productId, f.field, accepted)}
+              onEdit={(newAfter) => onFieldEdit(suggestion.productId, f.field, newAfter)}
             />
           ))}
         </div>
@@ -616,7 +627,7 @@ function ReviewModal({ suggestion, product, isPushing, onClose, onFieldDecision,
 
 // ─── Field Diff Row ───────────────────────────────────────────────────────────
 
-function FieldDiffRow({ field, onDecision }: { field: SEOFieldSuggestion; onDecision: (accepted: boolean | null) => void }) {
+function FieldDiffRow({ field, onDecision, onEdit }: { field: SEOFieldSuggestion; onDecision: (accepted: boolean | null) => void; onEdit: (newAfter: string) => void }) {
   const [expanded, setExpanded] = useState(false);
   const isSameValue = field.before.trim() === field.after.trim();
   const isEmptyAfter = !field.after.trim();
@@ -631,7 +642,23 @@ function FieldDiffRow({ field, onDecision }: { field: SEOFieldSuggestion; onDeci
     : 'transparent';
 
   const beforeText = displayValue(field.field, field.before);
-  const afterText = displayValue(field.field, field.after);
+  const isMultiline = field.field === 'descriptionHtml';
+  const editorStyle: CSSProperties = {
+    background: 'rgba(16,185,129,0.06)',
+    border: '1px solid rgba(16,185,129,0.3)',
+    borderRadius: '6px',
+    padding: '0.5rem 0.75rem',
+    fontSize: '0.82rem',
+    color: 'var(--text-primary)',
+    width: '100%',
+    fontFamily: isMultiline ? 'ui-monospace, SFMono-Regular, Menlo, monospace' : 'inherit',
+    outline: 'none',
+    boxSizing: 'border-box',
+    resize: isMultiline ? 'vertical' : undefined,
+    minHeight: '2.4em',
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+  };
 
   return (
     <div style={{
@@ -693,15 +720,31 @@ function FieldDiffRow({ field, onDecision }: { field: SEOFieldSuggestion; onDeci
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>
           <ArrowRight size={14} />
         </div>
-        <div style={{
-          background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.3)',
-          borderRadius: '6px', padding: '0.5rem 0.75rem', fontSize: '0.82rem',
-          whiteSpace: 'pre-wrap', wordBreak: 'break-word', minHeight: '2.4em',
-          color: afterText ? 'var(--text-primary)' : 'var(--text-secondary)',
-        }}>
-          {afterText || <em>(empty)</em>}
-        </div>
+        {isMultiline ? (
+          <textarea
+            value={field.after}
+            onChange={e => onEdit(e.target.value)}
+            rows={8}
+            placeholder="HTML description"
+            style={editorStyle}
+          />
+        ) : (
+          <input
+            type="text"
+            value={field.after}
+            onChange={e => onEdit(e.target.value)}
+            placeholder={field.field === 'tags' ? 'comma, separated, tags, TC200' : ''}
+            style={editorStyle}
+          />
+        )}
       </div>
+
+      {/* Tags catalog-code hint */}
+      {field.field === 'tags' && (
+        <div style={{ marginTop: '0.4rem', fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+          Tip: Catalog codes use <span style={{ background: 'rgba(255,255,255,0.06)', padding: '1px 6px', borderRadius: '3px', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', color: 'var(--text-primary)' }}>XX###</span> format — e.g. <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>TC200</span>, <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>TY100</span>, <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>PK200</span>. Edit above to add or change one.
+        </div>
+      )}
 
       {/* Rationale */}
       {field.rationale && (
