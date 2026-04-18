@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import {
   RefreshCw, CheckSquare, Square, ExternalLink, Sparkles, ArrowRight,
-  X, Check, XCircle, Loader2, ChevronDown, ChevronUp, AlertCircle
+  X, Check, XCircle, Loader2, ChevronDown, ChevronUp, AlertCircle, Pencil
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import type {
@@ -181,7 +181,16 @@ export default function ShopifySEOTab({ appPassword, isShopifyConnected }: Shopi
       if (errors.length > 0) toast(`Optimized ${incoming.length}, ${errors.length} failed.`, 'info');
       else toast(`Optimized ${incoming.length} product${incoming.length !== 1 ? 's' : ''}.`, 'success');
 
-      if (incoming.length > 0) setReviewingProductId(incoming[0].productId);
+      // Auto-deselect items that were successfully optimized
+      if (incoming.length > 0) {
+        const optimizedIds = new Set(incoming.map(s => s.productId));
+        setSelectedIds(prev => {
+          const next = new Set(prev);
+          for (const id of optimizedIds) next.delete(id);
+          return next;
+        });
+        setReviewingProductId(incoming[0].productId);
+      }
     } catch (e: any) {
       toast('Optimize error: ' + e.message, 'error');
     } finally {
@@ -216,6 +225,32 @@ export default function ShopifySEOTab({ appPassword, isShopifyConnected }: Shopi
       if (s.productId !== productId) return s;
       return { ...s, fields: s.fields.map(f => ({ ...f, accepted: false })) };
     }));
+  };
+
+  const startManualEdit = (product: ShopifyProduct) => {
+    if (!suggestionsMap.has(product.id)) {
+      const tagsStr = (product.tags || []).join(', ');
+      const syntheticFields: SEOFieldSuggestion[] = [
+        { field: 'title', before: product.title || '', after: product.title || '', rationale: '', accepted: null },
+        { field: 'descriptionHtml', before: product.descriptionHtml || '', after: product.descriptionHtml || '', rationale: '', accepted: null },
+        { field: 'seoTitle', before: product.seo?.title || '', after: product.seo?.title || '', rationale: '', accepted: null },
+        { field: 'seoDescription', before: product.seo?.description || '', after: product.seo?.description || '', rationale: '', accepted: null },
+        { field: 'tags', before: tagsStr, after: tagsStr, rationale: '', accepted: null },
+        { field: 'productType', before: product.productType || '', after: product.productType || '', rationale: '', accepted: null },
+        { field: 'vendor', before: product.vendor || '', after: product.vendor || '', rationale: '', accepted: null },
+      ];
+      const synthetic: SEOProductSuggestion = {
+        productId: product.id,
+        productTitle: product.title,
+        fields: syntheticFields,
+      };
+      setSuggestions(prev => {
+        const map = new Map(prev.map(s => [s.productId, s]));
+        map.set(product.id, synthetic);
+        return Array.from(map.values());
+      });
+    }
+    setReviewingProductId(product.id);
   };
 
   const handlePushProduct = async (productId: string) => {
@@ -444,7 +479,7 @@ export default function ShopifySEOTab({ appPassword, isShopifyConnected }: Shopi
                     </div>
 
                     <div onClick={e => e.stopPropagation()}>
-                      {suggestion && !wasPushed ? (
+                      {wasPushed ? null : suggestion ? (
                         <button
                           onClick={() => setReviewingProductId(p.id)}
                           disabled={isPushingThis}
@@ -458,7 +493,21 @@ export default function ShopifySEOTab({ appPassword, isShopifyConnected }: Shopi
                           {isPushingThis ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <ArrowRight size={12} />}
                           Review
                         </button>
-                      ) : null}
+                      ) : (
+                        <button
+                          onClick={() => startManualEdit(p)}
+                          disabled={isPushingThis || isOptimizingThis}
+                          title="Edit fields manually and push to Shopify"
+                          style={{
+                            padding: '4px 10px', borderRadius: '6px',
+                            background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(59,130,246,0.35)',
+                            color: '#3b82f6', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', gap: '4px',
+                          }}
+                        >
+                          <Pencil size={12} /> Edit
+                        </button>
+                      )}
                     </div>
 
                     <div style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>

@@ -36,7 +36,7 @@ export default function CatalogCodesTab({ appPassword }: CatalogCodesTabProps) {
       const resp = await fetch('/api/catalog-codes', { headers: bearerHeaders() });
       if (!resp.ok) throw new Error('Failed to load catalog codes');
       const data = await resp.json();
-      setCodes((data.codes || []).sort((a: CatalogCode, b: CatalogCode) => a.code.localeCompare(b.code)));
+      setCodes((data.codes || []).sort((a: CatalogCode, b: CatalogCode) => a.name.localeCompare(b.name)));
     } catch (e: any) {
       toast('Load error: ' + e.message, 'error');
     } finally {
