@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, ShoppingBag, Shield, DollarSign, Zap, Download, Sparkles } from 'lucide-react';
+import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, ShoppingBag, Shield, DollarSign, Zap, Download, Sparkles, ChevronLeft, ChevronRight } from 'lucide-react';
 import './index.css';
 
 import Uploader from './components/Uploader';
@@ -59,6 +59,9 @@ function App() {
   const [activeTab, setActiveTab] = useState<'new' | 'staged' | 'listed' | 'sold' | 'analytics' | 'settings' | 'source' | 'optimizer' | 'admin' | 'ebay-import' | 'shopify-seo'>('new');
   const [listedProducts, setListedProducts] = useState<StagedListing[]>([]);
   const [isLoadingListings, setIsLoadingListings] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => localStorage.getItem('sidebar_collapsed') === '1');
+
+  useEffect(() => { localStorage.setItem('sidebar_collapsed', sidebarCollapsed ? '1' : '0'); }, [sidebarCollapsed]);
 
   // Draft autosave
   useEffect(() => { sessionStorage.setItem(DRAFT_INSTRUCTIONS_KEY, instructions); }, [instructions]);
@@ -419,43 +422,98 @@ function App() {
     ? (tokenDaysLeft <= 2 ? '#ef4444' : tokenDaysLeft <= 7 ? '#f59e0b' : 'var(--success)')
     : 'var(--success)';
 
-  const tabBtnStyle = (tab: string): React.CSSProperties => ({
+  const sidebarBtnStyle = (tab: string): React.CSSProperties => ({
     background: activeTab === tab ? 'var(--glass-bg)' : 'transparent',
     border: '1px solid',
     borderColor: activeTab === tab ? 'var(--glass-border)' : 'transparent',
     color: 'var(--text-primary)',
-    padding: '8px 16px', borderRadius: '6px', cursor: 'pointer',
-    display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 500, transition: 'all 0.2s ease'
+    padding: sidebarCollapsed ? '10px 0' : '10px 12px',
+    borderRadius: '8px', cursor: 'pointer',
+    display: 'flex', alignItems: 'center',
+    justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
+    gap: '10px', fontWeight: 500, fontSize: '0.9rem',
+    transition: 'all 0.2s ease',
+    width: '100%',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
   });
+
+  const sidebarWidth = sidebarCollapsed ? 64 : 220;
 
   if (isVerifying) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><p>Authenticating...</p></div>;
   if (!isAuthenticated) return <LoginScreen onLogin={handleLogin} />;
 
+  const sidebarLabel = (text: string) => sidebarCollapsed ? null : <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{text}</span>;
+
   return (
-    <div style={{ minHeight: '100vh', padding: '1rem' }}>
-      <nav style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 2rem', background: 'var(--glass-bg)', backdropFilter: 'blur(10px)', borderRadius: '1rem', border: '1px solid var(--border-color)', marginBottom: '2rem', flexWrap: 'wrap', gap: '1rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'linear-gradient(135deg, #a855f7, #6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '1.2rem' }}>eB</div>
-          <h1 style={{ margin: 0, fontSize: '1.5rem' }}>Listing<span className="text-gradient">Stager</span></h1>
+    <div style={{ minHeight: '100vh', display: 'flex' }}>
+      {/* Sidebar */}
+      <aside style={{
+        width: sidebarWidth,
+        flexShrink: 0,
+        minHeight: '100vh',
+        padding: '1rem 0.5rem',
+        background: 'var(--glass-bg)',
+        backdropFilter: 'blur(10px)',
+        borderRight: '1px solid var(--border-color)',
+        display: 'flex', flexDirection: 'column',
+        position: 'sticky', top: 0, alignSelf: 'flex-start',
+        height: '100vh',
+        transition: 'width 0.2s ease',
+        overflowY: 'auto',
+      }}>
+        {/* Brand */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: sidebarCollapsed ? '0.5rem 0' : '0.5rem 0.6rem', justifyContent: sidebarCollapsed ? 'center' : 'flex-start', marginBottom: '1rem' }}>
+          <div style={{ width: '36px', height: '36px', borderRadius: '9px', background: 'linear-gradient(135deg, #a855f7, #6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '1rem', flexShrink: 0 }}>eB</div>
+          {!sidebarCollapsed && <h1 style={{ margin: 0, fontSize: '1.15rem', whiteSpace: 'nowrap', overflow: 'hidden' }}>Listing<span className="text-gradient">Stager</span></h1>}
         </div>
-        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-          <button style={tabBtnStyle('new')} onClick={() => setActiveTab('new')}><PlusCircle size={18} /> New Listing</button>
-          <button style={tabBtnStyle('staged')} onClick={() => setActiveTab('staged')}><List size={18} /> Staged ({stagedListings.length})</button>
-          <button style={tabBtnStyle('listed')} onClick={() => setActiveTab('listed')}><Check size={18} /> Listed ({listedProducts.filter(l => !l.soldAt).length})</button>
-          <button style={{ ...tabBtnStyle('ebay-import'), borderStyle: activeTab === 'ebay-import' ? 'solid' : 'dashed', opacity: activeTab === 'ebay-import' ? 1 : 0.75 }} onClick={() => setActiveTab('ebay-import')}><Download size={18} /> eBay Import</button>
-          <button style={tabBtnStyle('sold')} onClick={() => setActiveTab('sold')}><DollarSign size={18} /> Sold ({listedProducts.filter(l => !!l.soldAt).length})</button>
-          <button style={tabBtnStyle('analytics')} onClick={() => setActiveTab('analytics')}><BarChart2 size={18} /> Analytics</button>
-          <button style={tabBtnStyle('source')} onClick={() => setActiveTab('source')}><ShoppingBag size={18} /> Source</button>
-          <button style={tabBtnStyle('optimizer')} onClick={() => setActiveTab('optimizer')}><Zap size={18} /> Optimizer</button>
+
+        {/* Nav buttons */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
+          <button title="New Listing" style={sidebarBtnStyle('new')} onClick={() => setActiveTab('new')}><PlusCircle size={18} />{sidebarLabel('New Listing')}</button>
+          <button title="Staged" style={sidebarBtnStyle('staged')} onClick={() => setActiveTab('staged')}><List size={18} />{sidebarLabel(`Staged (${stagedListings.length})`)}</button>
+          <button title="Listed" style={sidebarBtnStyle('listed')} onClick={() => setActiveTab('listed')}><Check size={18} />{sidebarLabel(`Listed (${listedProducts.filter(l => !l.soldAt).length})`)}</button>
+          <button title="eBay Import" style={{ ...sidebarBtnStyle('ebay-import'), borderStyle: activeTab === 'ebay-import' ? 'solid' : 'dashed', opacity: activeTab === 'ebay-import' ? 1 : 0.75 }} onClick={() => setActiveTab('ebay-import')}><Download size={18} />{sidebarLabel('eBay Import')}</button>
+          <button title="Sold" style={sidebarBtnStyle('sold')} onClick={() => setActiveTab('sold')}><DollarSign size={18} />{sidebarLabel(`Sold (${listedProducts.filter(l => !!l.soldAt).length})`)}</button>
+          <button title="Analytics" style={sidebarBtnStyle('analytics')} onClick={() => setActiveTab('analytics')}><BarChart2 size={18} />{sidebarLabel('Analytics')}</button>
+          <button title="Source" style={sidebarBtnStyle('source')} onClick={() => setActiveTab('source')}><ShoppingBag size={18} />{sidebarLabel('Source')}</button>
+          <button title="Optimizer" style={sidebarBtnStyle('optimizer')} onClick={() => setActiveTab('optimizer')}><Zap size={18} />{sidebarLabel('Optimizer')}</button>
           {isShopifyConnected && (
-            <button style={tabBtnStyle('shopify-seo')} onClick={() => setActiveTab('shopify-seo')}><Sparkles size={18} /> Shopify SEO</button>
+            <button title="Shopify SEO" style={sidebarBtnStyle('shopify-seo')} onClick={() => setActiveTab('shopify-seo')}><Sparkles size={18} />{sidebarLabel('Shopify SEO')}</button>
           )}
           {currentUser?.role === 'superadmin' && (
-            <button style={tabBtnStyle('admin')} onClick={() => setActiveTab('admin')}><Shield size={18} /> Admin</button>
+            <button title="Admin" style={sidebarBtnStyle('admin')} onClick={() => setActiveTab('admin')}><Shield size={18} />{sidebarLabel('Admin')}</button>
           )}
-          <button style={tabBtnStyle('settings')} onClick={() => setActiveTab('settings')}><Settings size={18} /> Settings</button>
+          <button title="Settings" style={sidebarBtnStyle('settings')} onClick={() => setActiveTab('settings')}><Settings size={18} />{sidebarLabel('Settings')}</button>
         </div>
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+
+        {/* Collapse toggle */}
+        <button
+          onClick={() => setSidebarCollapsed(c => !c)}
+          title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          style={{
+            marginTop: '0.5rem',
+            background: 'transparent', border: '1px solid var(--border-color)',
+            color: 'var(--text-secondary)',
+            padding: '8px', borderRadius: '8px', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            gap: '8px', fontSize: '0.8rem',
+          }}
+        >
+          {sidebarCollapsed ? <ChevronRight size={16} /> : <><ChevronLeft size={16} />{sidebarLabel('Collapse')}</>}
+        </button>
+      </aside>
+
+      {/* Main column (topbar + content) */}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        {/* Topbar */}
+        <header style={{
+          display: 'flex', justifyContent: 'flex-end', alignItems: 'center',
+          padding: '0.75rem 1.5rem', gap: '1rem',
+          background: 'var(--glass-bg)', backdropFilter: 'blur(10px)',
+          borderBottom: '1px solid var(--border-color)',
+          flexWrap: 'wrap',
+        }}>
           {isEbayConnected ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
               <span style={{ color: tokenExpiryColor, fontSize: '0.9rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
@@ -485,10 +543,9 @@ function App() {
               Logout
             </button>
           </div>
-        </div>
-      </nav>
+        </header>
 
-      <main style={{ padding: '0 1rem 2rem 1rem', flex: 1, maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
+      <main style={{ padding: '1.5rem 1.5rem 2rem', flex: 1, maxWidth: '1400px', margin: '0 auto', width: '100%' }}>
         {isLoadingListings ? (
           <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>Loading listings...</div>
         ) : activeTab === 'new' ? (
@@ -549,6 +606,7 @@ function App() {
           </div>
         )}
       </main>
+      </div>
     </div>
   );
 }
