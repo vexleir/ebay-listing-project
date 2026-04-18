@@ -991,6 +991,282 @@ app.get('/api/shopify/collections', async (req, res) => {
   }
 });
 
+// ─── Shopify SEO Optimizer ────────────────────────────────────────────────────
+
+// GET /api/shopify/products?after=<cursor> — paginate Shopify products with SEO-relevant fields
+app.get('/api/shopify/products', async (req, res) => {
+  try {
+    const connected = await shopifyAuth.hasShopifySession(req.companyId);
+    if (!connected) return res.status(400).json({ error: 'Shopify not connected' });
+
+    const after = req.query.after && req.query.after !== 'null' ? req.query.after : null;
+    const first = Math.min(parseInt(req.query.first) || 20, 50);
+
+    const result = await shopifyAuth.shopifyGraphQL(req.companyId, `
+      query getProducts($first: Int!, $after: String) {
+        products(first: $first, after: $after, sortKey: UPDATED_AT, reverse: true) {
+          pageInfo { hasNextPage endCursor }
+          edges {
+            node {
+              id
+              title
+              descriptionHtml
+              productType
+              vendor
+              tags
+              updatedAt
+              seo { title description }
+              images(first: 5) { edges { node { url altText } } }
+            }
+          }
+        }
+      }
+    `, { first, after });
+
+    const products = (result?.products?.edges || []).map(e => ({
+      id: e.node.id,
+      title: e.node.title || '',
+      descriptionHtml: e.node.descriptionHtml || '',
+      productType: e.node.productType || '',
+      vendor: e.node.vendor || '',
+      tags: e.node.tags || [],
+      updatedAt: e.node.updatedAt,
+      seo: {
+        title: e.node.seo?.title || '',
+        description: e.node.seo?.description || '',
+      },
+      images: (e.node.images?.edges || []).map(ie => ({
+        url: ie.node.url,
+        altText: ie.node.altText || null,
+      })),
+    }));
+
+    res.json({
+      products,
+      pageInfo: result?.products?.pageInfo || { hasNextPage: false, endCursor: null },
+    });
+  } catch (e) {
+    console.error('[shopify/products] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/shopify/seo-optimize — run Gemini on a batch of Shopify products and return before/after suggestions
+app.post('/api/shopify/seo-optimize', async (req, res) => {
+  try {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey || apiKey === 'YOUR_GEMINI_KEY_HERE') {
+      return res.status(500).json({ error: 'Server missing GEMINI_API_KEY' });
+    }
+    const products = Array.isArray(req.body?.products) ? req.body.products : [];
+    if (!products.length) return res.status(400).json({ error: 'products array required' });
+
+    const { GoogleGenerativeAI } = require('@google/generative-ai');
+    const genAI = new GoogleGenerativeAI(apiKey);
+
+    // Pick best available model (flash-first)
+    let modelName = 'gemini-1.5-flash';
+    try {
+      const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        const models = (data.models || [])
+          .filter(m => m.supportedGenerationMethods?.includes('generateContent') && m.name?.includes('gemini'))
+          .map(m => m.name.replace('models/', ''));
+        models.sort((a, b) => {
+          if (a.includes('flash') && !b.includes('flash')) return -1;
+          if (!a.includes('flash') && b.includes('flash')) return 1;
+          return 0;
+        });
+        if (models.length > 0) modelName = models[0];
+      }
+    } catch (e) { /* fall through */ }
+    const model = genAI.getGenerativeModel({ model: modelName });
+
+    const mimeFromUrl = (url) => {
+      const u = (url || '').toLowerCase().split('?')[0];
+      if (u.endsWith('.png')) return 'image/png';
+      if (u.endsWith('.webp')) return 'image/webp';
+      if (u.endsWith('.gif')) return 'image/gif';
+      return 'image/jpeg';
+    };
+
+    const fetchImagePart = async (url) => {
+      try {
+        const resp = await axios.get(url, { responseType: 'arraybuffer', timeout: 10000 });
+        const b64 = Buffer.from(resp.data).toString('base64');
+        return { inlineData: { data: b64, mimeType: mimeFromUrl(url) } };
+      } catch (e) {
+        return null;
+      }
+    };
+
+    const callGemini = async (parts) => {
+      const result = await model.generateContent(parts);
+      let text = result.response.text().replace(/```json/g, '').replace(/```/g, '').trim();
+      const jsonStart = text.indexOf('{');
+      const jsonEnd = text.lastIndexOf('}');
+      if (jsonStart !== -1 && jsonEnd !== -1) text = text.substring(jsonStart, jsonEnd + 1);
+      return { parsed: JSON.parse(text), usage: result.response.usageMetadata };
+    };
+
+    const suggestions = [];
+    const errors = [];
+
+    for (let i = 0; i < products.length; i++) {
+      const p = products[i];
+      try {
+        const descPlain = (p.descriptionHtml || '')
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        const descExcerpt = descPlain.substring(0, 600);
+
+        const imageParts = [];
+        const imageUrls = (p.images || []).slice(0, 3).map(img => img.url).filter(Boolean);
+        for (const url of imageUrls) {
+          const part = await fetchImagePart(url);
+          if (part) imageParts.push(part);
+        }
+
+        const tagsStr = Array.isArray(p.tags) ? p.tags.join(', ') : '';
+        const prompt = `You are a Shopify SEO expert. Optimize this product for Shopify search and Google Shopping.
+
+CURRENT DATA:
+Title: "${p.title || ''}"
+Description (plaintext excerpt, first 600 chars): "${descExcerpt}"
+SEO Meta Title: "${p.seo?.title || '(not set)'}"
+SEO Meta Description: "${p.seo?.description || '(not set)'}"
+Tags: ${tagsStr || '(none)'}
+Product Type: "${p.productType || '(not set)'}"
+Vendor: "${p.vendor || '(not set)'}"
+
+RULES:
+1. Title: 50-70 chars, front-load keywords (brand + product type + key feature), no filler words ("amazing", "look", "great deal")
+2. Description HTML: 300+ plain chars, simple inline-CSS HTML, short intro + bullet list + clear CTA, preserve factual product details
+3. SEO Meta Title: 50-60 chars, differs from product title, targets Google search intent (brand + product type + 1 key differentiator)
+4. SEO Meta Description: 140-160 chars, benefit statement + CTA, naturally includes top 1-2 keywords
+5. Tags: 5-10 lowercase hyphenated tags, keep useful existing ones, add high-value missing ones (category, brand, feature, era/style, use case)
+6. Product Type: Title Case, max 50 chars, accurate category (e.g. "Action Figure", "Trading Card")
+7. Vendor: Brand/manufacturer name, Title Case, max 50 chars
+
+Respond ONLY with a valid JSON object (no markdown wrappers):
+{
+  "title": "...", "titleRationale": "...",
+  "descriptionHtml": "...", "descriptionRationale": "...",
+  "seoTitle": "...", "seoTitleRationale": "...",
+  "seoDescription": "...", "seoDescriptionRationale": "...",
+  "tags": ["tag1","tag2"], "tagsRationale": "...",
+  "productType": "...", "productTypeRationale": "...",
+  "vendor": "...", "vendorRationale": "..."
+}`;
+
+        const parts = [...imageParts, prompt];
+        let result;
+        try {
+          result = await callGemini(parts);
+        } catch (err) {
+          const msg = String(err?.message || err);
+          if (msg.includes('429') || msg.toLowerCase().includes('rate')) {
+            await new Promise(r => setTimeout(r, 5000));
+            result = await callGemini(parts);
+          } else {
+            throw err;
+          }
+        }
+
+        const ai = result.parsed || {};
+        const beforeTags = (p.tags || []).join(', ');
+        const afterTagsArr = Array.isArray(ai.tags) ? ai.tags : [];
+        const afterTags = afterTagsArr.join(', ');
+
+        const fields = [
+          { field: 'title', before: p.title || '', after: ai.title || '', rationale: ai.titleRationale || '', accepted: null },
+          { field: 'descriptionHtml', before: p.descriptionHtml || '', after: ai.descriptionHtml || '', rationale: ai.descriptionRationale || '', accepted: null },
+          { field: 'seoTitle', before: p.seo?.title || '', after: ai.seoTitle || '', rationale: ai.seoTitleRationale || '', accepted: null },
+          { field: 'seoDescription', before: p.seo?.description || '', after: ai.seoDescription || '', rationale: ai.seoDescriptionRationale || '', accepted: null },
+          { field: 'tags', before: beforeTags, after: afterTags, rationale: ai.tagsRationale || '', accepted: null },
+          { field: 'productType', before: p.productType || '', after: ai.productType || '', rationale: ai.productTypeRationale || '', accepted: null },
+          { field: 'vendor', before: p.vendor || '', after: ai.vendor || '', rationale: ai.vendorRationale || '', accepted: null },
+        ];
+
+        suggestions.push({
+          productId: p.id,
+          productTitle: p.title || '',
+          fields,
+          tokenUsage: {
+            totalTokens: (result.usage?.promptTokenCount || 0) + (result.usage?.candidatesTokenCount || 0),
+            model: modelName,
+          },
+        });
+      } catch (err) {
+        console.error(`[shopify/seo-optimize] product ${p.id} error:`, err.message);
+        errors.push(`${p.title || p.id}: ${err.message}`);
+      }
+
+      // Delay between products to avoid rate limits
+      if (i < products.length - 1) await new Promise(r => setTimeout(r, 500));
+    }
+
+    res.json({ suggestions, errors });
+  } catch (e) {
+    console.error('[shopify/seo-optimize] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /api/shopify/products/:shopifyProductId — update a Shopify product with approved SEO changes
+app.put('/api/shopify/products/:shopifyProductId', async (req, res) => {
+  try {
+    const connected = await shopifyAuth.hasShopifySession(req.companyId);
+    if (!connected) return res.status(400).json({ error: 'Shopify not connected' });
+
+    const rawId = req.params.shopifyProductId || '';
+    const numericId = rawId.includes('/') ? rawId.split('/').pop() : rawId;
+    const gid = `gid://shopify/Product/${numericId}`;
+
+    const body = req.body || {};
+    const input = { id: gid };
+
+    if (typeof body.title === 'string') input.title = body.title;
+    if (typeof body.descriptionHtml === 'string') input.descriptionHtml = body.descriptionHtml;
+    if (typeof body.productType === 'string') input.productType = body.productType.substring(0, 50);
+    if (typeof body.vendor === 'string') input.vendor = body.vendor.substring(0, 50);
+    if (Array.isArray(body.tags)) input.tags = body.tags;
+
+    if (typeof body.seoTitle === 'string' || typeof body.seoDescription === 'string') {
+      input.seo = {};
+      if (typeof body.seoTitle === 'string') input.seo.title = body.seoTitle.substring(0, 70);
+      if (typeof body.seoDescription === 'string') input.seo.description = body.seoDescription.substring(0, 320);
+    }
+
+    const result = await shopifyAuth.shopifyGraphQL(req.companyId, `
+      mutation productUpdate($input: ProductInput!) {
+        productUpdate(input: $input) {
+          product {
+            id title descriptionHtml productType vendor tags
+            seo { title description }
+          }
+          userErrors { field message }
+        }
+      }
+    `, { input });
+
+    const userErrors = result?.productUpdate?.userErrors || [];
+    if (userErrors.length > 0) {
+      return res.status(400).json({ error: userErrors.map(e => e.message).join(', ') });
+    }
+
+    const product = result?.productUpdate?.product;
+    if (!product) return res.status(500).json({ error: 'No product returned from Shopify' });
+
+    res.json({ success: true, product });
+  } catch (e) {
+    console.error('[shopify/products PUT] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── Listings ─────────────────────────────────────────────────────────────────
 
 app.get('/api/listings', async (req, res) => {

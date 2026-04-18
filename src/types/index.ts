@@ -62,3 +62,57 @@ export interface EbayPolicies {
   paymentPolicies: EbayPolicy[];
   returnPolicies: EbayPolicy[];
 }
+
+// ─── Shopify SEO Optimizer ─────────────────────────────────────────────────
+
+export interface ShopifyProduct {
+  id: string;                    // "gid://shopify/Product/123"
+  title: string;
+  descriptionHtml: string;
+  seo: { title: string; description: string };
+  tags: string[];
+  productType: string;
+  vendor: string;
+  images: Array<{ url: string; altText: string | null }>;
+  updatedAt: string;
+}
+
+export interface ShopifyProductPage {
+  products: ShopifyProduct[];
+  pageInfo: { hasNextPage: boolean; endCursor: string | null };
+}
+
+export type SEOFieldKey =
+  | 'title'
+  | 'descriptionHtml'
+  | 'seoTitle'
+  | 'seoDescription'
+  | 'tags'
+  | 'productType'
+  | 'vendor';
+
+export interface SEOFieldSuggestion {
+  field: SEOFieldKey;
+  before: string;
+  after: string;
+  rationale: string;
+  accepted: boolean | null;  // null = pending
+}
+
+export interface SEOProductSuggestion {
+  productId: string;
+  productTitle: string;
+  fields: SEOFieldSuggestion[];
+}
+
+export interface ShopifySEOScore {
+  total: number;  // 0-100
+  grade: 'A' | 'B' | 'C' | 'D' | 'F';
+  breakdown: {
+    titleLength: number;       // 0-25
+    descriptionLength: number; // 0-25
+    hasSeoTitle: number;       // 0-20
+    hasSeoDescription: number; // 0-20
+    tagCount: number;          // 0-10
+  };
+}

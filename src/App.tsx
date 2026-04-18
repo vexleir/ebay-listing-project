@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, ShoppingBag, Shield, DollarSign, Zap, Download } from 'lucide-react';
+import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, ShoppingBag, Shield, DollarSign, Zap, Download, Sparkles } from 'lucide-react';
 import './index.css';
 
 import Uploader from './components/Uploader';
@@ -13,6 +13,7 @@ import SourcingTool from './components/SourcingTool';
 import ListingOptimizer from './components/ListingOptimizer';
 import AdminPanel from './components/AdminPanel';
 import EbayImportTab from './components/EbayImportTab';
+import ShopifySEOTab from './components/ShopifySEOTab';
 import LoginScreen from './components/LoginScreen';
 import { generateListing } from './services/ai';
 import type { StagedListing } from './types';
@@ -55,7 +56,7 @@ function App() {
   });
 
   const [stagedListings, setStagedListings] = useState<StagedListing[]>([]);
-  const [activeTab, setActiveTab] = useState<'new' | 'staged' | 'listed' | 'sold' | 'analytics' | 'settings' | 'source' | 'optimizer' | 'admin' | 'ebay-import'>('new');
+  const [activeTab, setActiveTab] = useState<'new' | 'staged' | 'listed' | 'sold' | 'analytics' | 'settings' | 'source' | 'optimizer' | 'admin' | 'ebay-import' | 'shopify-seo'>('new');
   const [listedProducts, setListedProducts] = useState<StagedListing[]>([]);
   const [isLoadingListings, setIsLoadingListings] = useState(false);
 
@@ -446,6 +447,9 @@ function App() {
           <button style={tabBtnStyle('analytics')} onClick={() => setActiveTab('analytics')}><BarChart2 size={18} /> Analytics</button>
           <button style={tabBtnStyle('source')} onClick={() => setActiveTab('source')}><ShoppingBag size={18} /> Source</button>
           <button style={tabBtnStyle('optimizer')} onClick={() => setActiveTab('optimizer')}><Zap size={18} /> Optimizer</button>
+          {isShopifyConnected && (
+            <button style={tabBtnStyle('shopify-seo')} onClick={() => setActiveTab('shopify-seo')}><Sparkles size={18} /> Shopify SEO</button>
+          )}
           {currentUser?.role === 'superadmin' && (
             <button style={tabBtnStyle('admin')} onClick={() => setActiveTab('admin')}><Shield size={18} /> Admin</button>
           )}
@@ -530,6 +534,10 @@ function App() {
               onImported={handleEbayImported}
               existingEbayIds={new Set(listedProducts.map(l => l.ebayDraftId).filter((id): id is string => !!id))}
             />
+          </div>
+        ) : activeTab === 'shopify-seo' ? (
+          <div className="animate-fade-in">
+            <ShopifySEOTab appPassword={appPassword} isShopifyConnected={isShopifyConnected} />
           </div>
         ) : activeTab === 'admin' && currentUser?.role === 'superadmin' ? (
           <div className="animate-fade-in">
