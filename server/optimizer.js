@@ -333,4 +333,4 @@ For "suggestedCollectionCodes", choose 1-4 codes from this list that best catego
   };
 }
 
-module.exports = { fetchListingForOptimizer, fetchSoldComps, aiOptimizeListing };
+module.exports = { fetchListingForOptimizer, fetchSoldComps, aiOptimizeListing, COLLECTIONS_FOR_AI };

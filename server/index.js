@@ -7,7 +7,7 @@ const { generateListing, generateListingFromUrls } = require('./ai');
 const { getAuthUrl, exchangeCodeForToken, getValidAccessToken, hasValidSession, getTokenExpiry } = require('./ebayAuth');
 const shopifyAuth = require('./shopifyAuth');
 const { getListings, createListing, updateListing, deleteListing, getAllListingsMeta, getActiveListings, getSettings, saveSettings, incrementTokenUsage, getTokenUsage } = require('./listings');
-const { fetchListingForOptimizer, fetchSoldComps, aiOptimizeListing } = require('./optimizer');
+const { fetchListingForOptimizer, fetchSoldComps, aiOptimizeListing, COLLECTIONS_FOR_AI } = require('./optimizer');
 const { uploadImage } = require('./cloudinary');
 const { getDb } = require('./db');
 const { signToken, authMiddleware, requireSuperAdmin } = require('./auth');
@@ -1146,7 +1146,7 @@ RULES:
 2. Description HTML: 300+ plain chars, simple inline-CSS HTML, short intro + bullet list + clear CTA, preserve factual product details
 3. SEO Meta Title: 50-60 chars, differs from product title, targets Google search intent (brand + product type + 1 key differentiator)
 4. SEO Meta Description: 140-160 chars, benefit statement + CTA, naturally includes top 1-2 keywords
-5. Tags: 5-10 lowercase hyphenated tags, keep useful existing ones, add high-value missing ones (category, brand, feature, era/style, use case)
+5. Tags: 5-10 lowercase hyphenated tags, keep useful existing ones, add high-value missing ones (category, brand, feature, era/style, use case). CRITICAL catalog code rule: the output MUST include exactly one catalog code tag (two uppercase letters followed by three digits, e.g. "TC200"). If the input tags already contain one, keep it verbatim. If none is present, pick the single best-fit code from this list and include it in the tags array: ${COLLECTIONS_FOR_AI}
 6. Product Type: Title Case, max 50 chars, accurate category (e.g. "Action Figure", "Trading Card")
 7. Vendor: Brand/manufacturer name, Title Case, max 50 chars
 
@@ -1176,8 +1176,19 @@ Respond ONLY with a valid JSON object (no markdown wrappers):
         }
 
         const ai = result.parsed || {};
-        const beforeTags = (p.tags || []).join(', ');
-        const afterTagsArr = Array.isArray(ai.tags) ? ai.tags : [];
+        const beforeTagsArr = p.tags || [];
+        const beforeTags = beforeTagsArr.join(', ');
+        let afterTagsArr = Array.isArray(ai.tags) ? ai.tags : [];
+
+        // Safety net: preserve catalog codes (e.g. TC200, TY100) that AI may have dropped
+        const CATALOG_CODE_RE = /^[A-Z]{2}\d{3}$/;
+        const preservedCodes = beforeTagsArr.filter(t => CATALOG_CODE_RE.test(String(t).trim()));
+        if (preservedCodes.length > 0) {
+          const existingUpper = new Set(afterTagsArr.map(t => String(t).trim().toUpperCase()));
+          for (const code of preservedCodes) {
+            if (!existingUpper.has(code.toUpperCase())) afterTagsArr.push(code);
+          }
+        }
         const afterTags = afterTagsArr.join(', ');
 
         const fields = [
