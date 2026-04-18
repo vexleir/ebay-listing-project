@@ -740,11 +740,9 @@ function FieldDiffRow({ field, onDecision, onEdit }: { field: SEOFieldSuggestion
         )}
       </div>
 
-      {/* Tags catalog-code hint */}
+      {/* Tags catalog-code control */}
       {field.field === 'tags' && (
-        <div style={{ marginTop: '0.4rem', fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
-          Tip: Catalog codes use <span style={{ background: 'rgba(255,255,255,0.06)', padding: '1px 6px', borderRadius: '3px', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', color: 'var(--text-primary)' }}>XX###</span> format — e.g. <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>TC200</span>, <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>TY100</span>, <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>PK200</span>. Edit above to add or change one.
-        </div>
+        <CatalogCodeControl currentTags={field.after} onUpdate={onEdit} />
       )}
 
       {/* Rationale */}
@@ -764,6 +762,122 @@ function FieldDiffRow({ field, onDecision, onEdit }: { field: SEOFieldSuggestion
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Catalog Code Control ─────────────────────────────────────────────────────
+
+const CATALOG_CODE_RE = /^[A-Z]{2}\d{3}$/;
+
+function CatalogCodeControl({ currentTags, onUpdate }: { currentTags: string; onUpdate: (newTags: string) => void }) {
+  const [draft, setDraft] = useState('');
+  const tagsArr = currentTags.split(',').map(t => t.trim()).filter(Boolean);
+  const currentCode = tagsArr.find(t => CATALOG_CODE_RE.test(t.toUpperCase())) || '';
+  const draftUpper = draft.trim().toUpperCase();
+  const draftValid = CATALOG_CODE_RE.test(draftUpper);
+
+  const apply = () => {
+    if (!draftValid) return;
+    const cleaned = tagsArr.filter(t => !CATALOG_CODE_RE.test(t.toUpperCase()));
+    cleaned.push(draftUpper);
+    onUpdate(cleaned.join(', '));
+    setDraft('');
+  };
+
+  const clear = () => {
+    const cleaned = tagsArr.filter(t => !CATALOG_CODE_RE.test(t.toUpperCase()));
+    onUpdate(cleaned.join(', '));
+  };
+
+  return (
+    <div style={{
+      marginTop: '0.6rem',
+      padding: '0.55rem 0.75rem',
+      background: 'rgba(168,85,247,0.06)',
+      border: '1px solid rgba(168,85,247,0.25)',
+      borderRadius: '6px',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '10px',
+      flexWrap: 'wrap',
+    }}>
+      <div style={{ fontSize: '0.76rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <Sparkles size={12} style={{ color: '#a855f7' }} />
+        <strong>Catalog code:</strong>
+        {currentCode ? (
+          <span style={{
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+            background: 'rgba(16,185,129,0.15)',
+            border: '1px solid rgba(16,185,129,0.4)',
+            color: '#10b981',
+            padding: '1px 8px',
+            borderRadius: '4px',
+            fontSize: '0.74rem',
+            fontWeight: 600,
+          }}>{currentCode}</span>
+        ) : (
+          <span style={{ color: '#f59e0b', fontStyle: 'italic' }}>none set</span>
+        )}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: '200px' }}>
+        <input
+          type="text"
+          value={draft}
+          onChange={e => setDraft(e.target.value.toUpperCase().slice(0, 5))}
+          onKeyDown={e => { if (e.key === 'Enter') apply(); }}
+          placeholder="e.g. DV100"
+          maxLength={5}
+          style={{
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+            background: 'var(--glass-bg)',
+            border: `1px solid ${draft && !draftValid ? 'rgba(239,68,68,0.4)' : 'var(--border-color)'}`,
+            borderRadius: '4px',
+            padding: '4px 8px',
+            fontSize: '0.78rem',
+            color: 'var(--text-primary)',
+            width: '90px',
+            outline: 'none',
+            textTransform: 'uppercase',
+          }}
+        />
+        <button
+          onClick={apply}
+          disabled={!draftValid}
+          style={{
+            padding: '4px 10px',
+            borderRadius: '4px',
+            background: draftValid ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.04)',
+            border: `1px solid ${draftValid ? 'rgba(168,85,247,0.5)' : 'var(--border-color)'}`,
+            color: draftValid ? '#a855f7' : 'var(--text-secondary)',
+            fontSize: '0.74rem',
+            fontWeight: 600,
+            cursor: draftValid ? 'pointer' : 'not-allowed',
+          }}
+        >
+          {currentCode ? 'Replace' : 'Add'}
+        </button>
+        {currentCode && (
+          <button
+            onClick={clear}
+            style={{
+              padding: '4px 10px',
+              borderRadius: '4px',
+              background: 'rgba(239,68,68,0.08)',
+              border: '1px solid rgba(239,68,68,0.3)',
+              color: '#ef4444',
+              fontSize: '0.74rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            Remove
+          </button>
+        )}
+        <span style={{ fontSize: '0.68rem', color: 'var(--text-secondary)' }}>
+          Format: <code style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>XX###</code> (2 letters + 3 digits)
+        </span>
+      </div>
     </div>
   );
 }
