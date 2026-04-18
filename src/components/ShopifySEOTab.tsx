@@ -539,7 +539,7 @@ function ReviewModal({ suggestion, product, isPushing, onClose, onFieldDecision,
       onClick={onClose}
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
-        zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
         padding: '2rem 1rem', backdropFilter: 'blur(4px)',
       }}
     >
@@ -548,7 +548,8 @@ function ReviewModal({ suggestion, product, isPushing, onClose, onFieldDecision,
         style={{
           background: 'var(--bg-primary, #141419)', border: '1px solid var(--glass-border)',
           borderRadius: '12px', maxWidth: '1400px', width: '95vw',
-          display: 'flex', flexDirection: 'column', height: 'calc(100vh - 4rem)',
+          display: 'flex', flexDirection: 'column',
+          maxHeight: 'calc(100vh - 4rem)', height: 'calc(100vh - 4rem)',
         }}
       >
         {/* Header */}
