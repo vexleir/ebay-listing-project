@@ -539,8 +539,8 @@ function ReviewModal({ suggestion, product, isPushing, onClose, onFieldDecision,
       onClick={onClose}
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
-        zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
-        padding: '2rem 1rem', overflowY: 'auto', backdropFilter: 'blur(4px)',
+        zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '2rem 1rem', backdropFilter: 'blur(4px)',
       }}
     >
       <div
@@ -548,7 +548,7 @@ function ReviewModal({ suggestion, product, isPushing, onClose, onFieldDecision,
         style={{
           background: 'var(--bg-primary, #141419)', border: '1px solid var(--glass-border)',
           borderRadius: '12px', maxWidth: '1400px', width: '95vw',
-          display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 4rem)',
+          display: 'flex', flexDirection: 'column', height: 'calc(100vh - 4rem)',
         }}
       >
         {/* Header */}
@@ -586,7 +586,7 @@ function ReviewModal({ suggestion, product, isPushing, onClose, onFieldDecision,
         </div>
 
         {/* Field Diffs */}
-        <div style={{ overflowY: 'auto', padding: '1rem 1.5rem' }}>
+        <div style={{ overflowY: 'auto', padding: '1rem 1.5rem', flex: 1, minHeight: 0 }}>
           {suggestion.fields.map(f => (
             <FieldDiffRow
               key={f.field}
@@ -724,7 +724,7 @@ function FieldDiffRow({ field, onDecision, onEdit }: { field: SEOFieldSuggestion
           <textarea
             value={field.after}
             onChange={e => onEdit(e.target.value)}
-            rows={8}
+            rows={14}
             placeholder="HTML description"
             style={editorStyle}
           />
