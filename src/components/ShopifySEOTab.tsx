@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import type { CSSProperties } from 'react';
 import {
   RefreshCw, CheckSquare, Square, ExternalLink, Sparkles, ArrowRight,
@@ -76,9 +76,26 @@ export default function ShopifySEOTab({ appPassword, isShopifyConnected }: Shopi
   const [pushingIds, setPushingIds] = useState<Set<string>>(new Set());
   const [pushedIds, setPushedIds] = useState<Set<string>>(new Set());
   const [hidePerfectScore, setHidePerfectScore] = useState(true);
+  const [catalogCodes, setCatalogCodes] = useState<Array<{ code: string; name: string }>>([]);
 
   const bearerHeaders = () => ({ Authorization: `Bearer ${appPassword}` });
   const apiHeaders = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${appPassword}` });
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const resp = await fetch('/api/catalog-codes', { headers: bearerHeaders() });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const codes = (data.codes || []) as Array<{ code: string; name: string }>;
+        codes.sort((a, b) => a.name.localeCompare(b.name));
+        setCatalogCodes(codes);
+      } catch {
+        // non-fatal — control falls back to free-text mode
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const suggestionsMap = useMemo(() => {
     const m = new Map<string, SEOProductSuggestion>();
@@ -554,6 +571,7 @@ export default function ShopifySEOTab({ appPassword, isShopifyConnected }: Shopi
           suggestion={reviewingSuggestion}
           product={reviewingProduct}
           isPushing={pushingIds.has(reviewingSuggestion.productId)}
+          catalogCodes={catalogCodes}
           onClose={() => setReviewingProductId(null)}
           onFieldDecision={setFieldDecision}
           onFieldEdit={setFieldAfter}
@@ -572,6 +590,7 @@ interface ReviewModalProps {
   suggestion: SEOProductSuggestion;
   product: ShopifyProduct;
   isPushing: boolean;
+  catalogCodes: Array<{ code: string; name: string }>;
   onClose: () => void;
   onFieldDecision: (productId: string, field: SEOFieldKey, accepted: boolean | null) => void;
   onFieldEdit: (productId: string, field: SEOFieldKey, newAfter: string) => void;
@@ -580,7 +599,7 @@ interface ReviewModalProps {
   onPush: (productId: string) => void;
 }
 
-function ReviewModal({ suggestion, product, isPushing, onClose, onFieldDecision, onFieldEdit, onAcceptAll, onRejectAll, onPush }: ReviewModalProps) {
+function ReviewModal({ suggestion, product, isPushing, catalogCodes, onClose, onFieldDecision, onFieldEdit, onAcceptAll, onRejectAll, onPush }: ReviewModalProps) {
   const approvedCount = suggestion.fields.filter(f => f.accepted === true).length;
 
   return (
@@ -641,6 +660,7 @@ function ReviewModal({ suggestion, product, isPushing, onClose, onFieldDecision,
             <FieldDiffRow
               key={f.field}
               field={f}
+              catalogCodes={catalogCodes}
               onDecision={(accepted) => onFieldDecision(suggestion.productId, f.field, accepted)}
               onEdit={(newAfter) => onFieldEdit(suggestion.productId, f.field, newAfter)}
             />
@@ -677,7 +697,7 @@ function ReviewModal({ suggestion, product, isPushing, onClose, onFieldDecision,
 
 // ─── Field Diff Row ───────────────────────────────────────────────────────────
 
-function FieldDiffRow({ field, onDecision, onEdit }: { field: SEOFieldSuggestion; onDecision: (accepted: boolean | null) => void; onEdit: (newAfter: string) => void }) {
+function FieldDiffRow({ field, catalogCodes, onDecision, onEdit }: { field: SEOFieldSuggestion; catalogCodes: Array<{ code: string; name: string }>; onDecision: (accepted: boolean | null) => void; onEdit: (newAfter: string) => void }) {
   const [expanded, setExpanded] = useState(false);
   const isSameValue = field.before.trim() === field.after.trim();
   const isEmptyAfter = !field.after.trim();
@@ -791,7 +811,7 @@ function FieldDiffRow({ field, onDecision, onEdit }: { field: SEOFieldSuggestion
 
       {/* Tags catalog-code control */}
       {field.field === 'tags' && (
-        <CatalogCodeControl currentTags={field.after} onUpdate={onEdit} />
+        <CatalogCodeControl currentTags={field.after} catalogCodes={catalogCodes} onUpdate={onEdit} />
       )}
 
       {/* Rationale */}
@@ -819,19 +839,22 @@ function FieldDiffRow({ field, onDecision, onEdit }: { field: SEOFieldSuggestion
 
 const CATALOG_CODE_RE = /^[A-Z]{2}\d{3}$/;
 
-function CatalogCodeControl({ currentTags, onUpdate }: { currentTags: string; onUpdate: (newTags: string) => void }) {
-  const [draft, setDraft] = useState('');
+function CatalogCodeControl({ currentTags, catalogCodes, onUpdate }: { currentTags: string; catalogCodes: Array<{ code: string; name: string }>; onUpdate: (newTags: string) => void }) {
+  const [selected, setSelected] = useState('');
   const tagsArr = currentTags.split(',').map(t => t.trim()).filter(Boolean);
   const currentCodes = tagsArr.filter(t => CATALOG_CODE_RE.test(t.toUpperCase())).map(t => t.toUpperCase());
-  const draftUpper = draft.trim().toUpperCase();
-  const draftValid = CATALOG_CODE_RE.test(draftUpper);
-  const isDuplicate = currentCodes.includes(draftUpper);
+
+  const availableOptions = useMemo(
+    () => catalogCodes.filter(c => !currentCodes.includes(c.code.toUpperCase())),
+    [catalogCodes, currentCodes]
+  );
+  const selectedIsValid = CATALOG_CODE_RE.test(selected) && !currentCodes.includes(selected);
 
   const addCode = () => {
-    if (!draftValid || isDuplicate) return;
-    const next = [...tagsArr, draftUpper];
+    if (!selectedIsValid) return;
+    const next = [...tagsArr, selected];
     onUpdate(next.join(', '));
-    setDraft('');
+    setSelected('');
   };
 
   const removeCode = (code: string) => {
@@ -893,46 +916,44 @@ function CatalogCodeControl({ currentTags, onUpdate }: { currentTags: string; on
           ))
         )}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: '200px', flexWrap: 'wrap' }}>
-        <input
-          type="text"
-          value={draft}
-          onChange={e => setDraft(e.target.value.toUpperCase().slice(0, 5))}
-          onKeyDown={e => { if (e.key === 'Enter') addCode(); }}
-          placeholder="e.g. DV100"
-          maxLength={5}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: '260px', flexWrap: 'wrap' }}>
+        <select
+          value={selected}
+          onChange={e => setSelected(e.target.value)}
           style={{
-            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
             background: 'var(--glass-bg)',
-            border: `1px solid ${draft && (!draftValid || isDuplicate) ? 'rgba(239,68,68,0.4)' : 'var(--border-color)'}`,
+            border: '1px solid var(--border-color)',
             borderRadius: '4px',
             padding: '4px 8px',
             fontSize: '0.78rem',
             color: 'var(--text-primary)',
-            width: '90px',
+            minWidth: '240px',
             outline: 'none',
-            textTransform: 'uppercase',
           }}
-        />
+        >
+          <option value="">{availableOptions.length === 0 ? 'No more codes available' : 'Select a catalog…'}</option>
+          {availableOptions.map(c => (
+            <option key={c.code} value={c.code}>{c.name} ({c.code})</option>
+          ))}
+        </select>
         <button
           onClick={addCode}
-          disabled={!draftValid || isDuplicate}
-          title={isDuplicate ? `${draftUpper} already added` : ''}
+          disabled={!selectedIsValid}
           style={{
             padding: '4px 10px',
             borderRadius: '4px',
-            background: (draftValid && !isDuplicate) ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.04)',
-            border: `1px solid ${(draftValid && !isDuplicate) ? 'rgba(168,85,247,0.5)' : 'var(--border-color)'}`,
-            color: (draftValid && !isDuplicate) ? '#a855f7' : 'var(--text-secondary)',
+            background: selectedIsValid ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.04)',
+            border: `1px solid ${selectedIsValid ? 'rgba(168,85,247,0.5)' : 'var(--border-color)'}`,
+            color: selectedIsValid ? '#a855f7' : 'var(--text-secondary)',
             fontSize: '0.74rem',
             fontWeight: 600,
-            cursor: (draftValid && !isDuplicate) ? 'pointer' : 'not-allowed',
+            cursor: selectedIsValid ? 'pointer' : 'not-allowed',
           }}
         >
           Add
         </button>
         <span style={{ fontSize: '0.68rem', color: 'var(--text-secondary)' }}>
-          Format: <code style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>XX###</code> · add as many as needed (e.g. Fashion Dolls + Toys)
+          Add as many as needed (e.g. Fashion Dolls + Toys). Manage the list in the Catalog Codes tab.
         </span>
       </div>
     </div>
