@@ -7,7 +7,8 @@ const { generateListing, generateListingFromUrls } = require('./ai');
 const { getAuthUrl, exchangeCodeForToken, getValidAccessToken, hasValidSession, getTokenExpiry } = require('./ebayAuth');
 const shopifyAuth = require('./shopifyAuth');
 const { getListings, createListing, updateListing, deleteListing, getAllListingsMeta, getActiveListings, getSettings, saveSettings, incrementTokenUsage, getTokenUsage } = require('./listings');
-const { fetchListingForOptimizer, fetchSoldComps, aiOptimizeListing, COLLECTIONS_FOR_AI } = require('./optimizer');
+const { fetchListingForOptimizer, fetchSoldComps, aiOptimizeListing } = require('./optimizer');
+const catalog = require('./collections');
 const { uploadImage } = require('./cloudinary');
 const { getDb } = require('./db');
 const { signToken, authMiddleware, requireSuperAdmin } = require('./auth');
@@ -1061,6 +1062,8 @@ app.post('/api/shopify/seo-optimize', async (req, res) => {
     const products = Array.isArray(req.body?.products) ? req.body.products : [];
     if (!products.length) return res.status(400).json({ error: 'products array required' });
 
+    const collectionsForAi = await catalog.getCollectionsForAI(req.companyId);
+
     const { GoogleGenerativeAI } = require('@google/generative-ai');
     const genAI = new GoogleGenerativeAI(apiKey);
 
@@ -1146,7 +1149,7 @@ RULES:
 2. Description HTML: 300+ plain chars, simple inline-CSS HTML, short intro + bullet list + clear CTA, preserve factual product details
 3. SEO Meta Title: 50-60 chars, differs from product title, targets Google search intent (brand + product type + 1 key differentiator)
 4. SEO Meta Description: 140-160 chars, benefit statement + CTA, naturally includes top 1-2 keywords
-5. Tags: 5-10 lowercase hyphenated tags, keep useful existing ones, add high-value missing ones (category, brand, feature, era/style, use case). CRITICAL catalog code rule: the output MUST include exactly one catalog code tag (two uppercase letters followed by three digits, e.g. "TC200"). If the input tags already contain one, keep it verbatim. If none is present, pick the single best-fit code from this list and include it in the tags array: ${COLLECTIONS_FOR_AI}
+5. Tags: 5-10 lowercase hyphenated tags, keep useful existing ones, add high-value missing ones (category, brand, feature, era/style, use case). CRITICAL catalog code rule: catalog codes are two uppercase letters followed by three digits, e.g. "TC200". If the input tags already contain one OR MORE catalog codes, keep ALL of them verbatim (a product can belong to multiple catalogs — e.g. a Barbie doll may need both a Fashion Dolls and a Toys code). If none are present, pick the single best-fit code from this list: ${collectionsForAi}. Never invent codes that aren't in the input or in that list.
 6. Product Type: Title Case, max 50 chars, accurate category (e.g. "Action Figure", "Trading Card")
 7. Vendor: Brand/manufacturer name, Title Case, max 50 chars
 
@@ -1278,6 +1281,50 @@ app.put('/api/shopify/products/:shopifyProductId', async (req, res) => {
   }
 });
 
+// ─── Catalog Codes ────────────────────────────────────────────────────────────
+
+app.get('/api/catalog-codes', async (req, res) => {
+  try {
+    const codes = await catalog.listCollections(req.companyId);
+    res.json({ codes });
+  } catch (e) {
+    console.error('[catalog-codes] GET error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/catalog-codes', async (req, res) => {
+  try {
+    const { code, name } = req.body || {};
+    const saved = await catalog.addCollection(req.companyId, code, name);
+    res.json({ success: true, code: saved });
+  } catch (e) {
+    console.error('[catalog-codes] POST error:', e.message);
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.put('/api/catalog-codes/:code', async (req, res) => {
+  try {
+    const { code, name } = req.body || {};
+    const saved = await catalog.updateCollection(req.companyId, req.params.code, code, name);
+    res.json({ success: true, code: saved });
+  } catch (e) {
+    console.error('[catalog-codes] PUT error:', e.message);
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.delete('/api/catalog-codes/:code', async (req, res) => {
+  try {
+    await catalog.deleteCollection(req.companyId, req.params.code);
+    res.json({ success: true });
+  } catch (e) {
+    console.error('[catalog-codes] DELETE error:', e.message);
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // ─── Listings ─────────────────────────────────────────────────────────────────
 
 app.get('/api/listings', async (req, res) => {
@@ -1400,7 +1447,8 @@ app.post('/api/generate', async (req, res) => {
     if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === 'YOUR_GEMINI_KEY_HERE') {
       return res.status(500).json({ error: 'Server missing GEMINI_API_KEY.' });
     }
-    const result = await generateListing(imageParts, instructions, process.env.GEMINI_API_KEY);
+    const collectionsForAi = await catalog.getCollectionsForAI(req.companyId);
+    const result = await generateListing(imageParts, instructions, process.env.GEMINI_API_KEY, collectionsForAi);
     if (result.tokenUsage) {
       incrementTokenUsage(req.companyId, result.tokenUsage.promptTokens, result.tokenUsage.completionTokens).catch(() => {});
     }
@@ -1415,7 +1463,8 @@ app.post('/api/generate-from-urls', async (req, res) => {
   try {
     const { imageUrls, instructions } = req.body;
     if (!process.env.GEMINI_API_KEY) return res.status(500).json({ error: 'Server missing GEMINI_API_KEY' });
-    const result = await generateListingFromUrls(imageUrls || [], instructions || '', process.env.GEMINI_API_KEY);
+    const collectionsForAi = await catalog.getCollectionsForAI(req.companyId);
+    const result = await generateListingFromUrls(imageUrls || [], instructions || '', process.env.GEMINI_API_KEY, collectionsForAi);
     if (result.tokenUsage) {
       incrementTokenUsage(req.companyId, result.tokenUsage.promptTokens, result.tokenUsage.completionTokens).catch(() => {});
     }
@@ -2241,7 +2290,8 @@ app.post('/api/optimizer/ai-optimize', async (req, res) => {
   if (!listingData) return res.status(400).json({ error: 'listingData required' });
   if (!process.env.GEMINI_API_KEY) return res.status(500).json({ error: 'Server missing GEMINI_API_KEY' });
   try {
-    const result = await aiOptimizeListing(listingData, process.env.GEMINI_API_KEY);
+    const collectionsForAi = await catalog.getCollectionsForAI(req.companyId);
+    const result = await aiOptimizeListing(listingData, process.env.GEMINI_API_KEY, collectionsForAi);
     if (result.tokenUsage) {
       incrementTokenUsage(req.companyId, result.tokenUsage.promptTokens, result.tokenUsage.completionTokens).catch(() => {});
     }

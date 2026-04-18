@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, ShoppingBag, Shield, DollarSign, Zap, Download, Sparkles, ChevronLeft, ChevronRight } from 'lucide-react';
+import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, ShoppingBag, Shield, DollarSign, Zap, Download, Sparkles, ChevronLeft, ChevronRight, BookMarked } from 'lucide-react';
 import './index.css';
 
 import Uploader from './components/Uploader';
@@ -14,6 +14,7 @@ import ListingOptimizer from './components/ListingOptimizer';
 import AdminPanel from './components/AdminPanel';
 import EbayImportTab from './components/EbayImportTab';
 import ShopifySEOTab from './components/ShopifySEOTab';
+import CatalogCodesTab from './components/CatalogCodesTab';
 import LoginScreen from './components/LoginScreen';
 import { generateListing } from './services/ai';
 import type { StagedListing } from './types';
@@ -56,7 +57,7 @@ function App() {
   });
 
   const [stagedListings, setStagedListings] = useState<StagedListing[]>([]);
-  const [activeTab, setActiveTab] = useState<'new' | 'staged' | 'listed' | 'sold' | 'analytics' | 'settings' | 'source' | 'optimizer' | 'admin' | 'ebay-import' | 'shopify-seo'>('new');
+  const [activeTab, setActiveTab] = useState<'new' | 'staged' | 'listed' | 'sold' | 'analytics' | 'settings' | 'source' | 'optimizer' | 'admin' | 'ebay-import' | 'shopify-seo' | 'catalog-codes'>('new');
   const [listedProducts, setListedProducts] = useState<StagedListing[]>([]);
   const [isLoadingListings, setIsLoadingListings] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => localStorage.getItem('sidebar_collapsed') === '1');
@@ -481,6 +482,7 @@ function App() {
           {isShopifyConnected && (
             <button title="Shopify SEO" style={sidebarBtnStyle('shopify-seo')} onClick={() => setActiveTab('shopify-seo')}><Sparkles size={18} />{sidebarLabel('Shopify SEO')}</button>
           )}
+          <button title="Catalog Codes" style={sidebarBtnStyle('catalog-codes')} onClick={() => setActiveTab('catalog-codes')}><BookMarked size={18} />{sidebarLabel('Catalog Codes')}</button>
           {currentUser?.role === 'superadmin' && (
             <button title="Admin" style={sidebarBtnStyle('admin')} onClick={() => setActiveTab('admin')}><Shield size={18} />{sidebarLabel('Admin')}</button>
           )}
@@ -595,6 +597,10 @@ function App() {
         ) : activeTab === 'shopify-seo' ? (
           <div className="animate-fade-in">
             <ShopifySEOTab appPassword={appPassword} isShopifyConnected={isShopifyConnected} />
+          </div>
+        ) : activeTab === 'catalog-codes' ? (
+          <div className="animate-fade-in">
+            <CatalogCodesTab appPassword={appPassword} />
           </div>
         ) : activeTab === 'admin' && currentUser?.role === 'superadmin' ? (
           <div className="animate-fade-in">

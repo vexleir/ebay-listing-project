@@ -773,21 +773,35 @@ const CATALOG_CODE_RE = /^[A-Z]{2}\d{3}$/;
 function CatalogCodeControl({ currentTags, onUpdate }: { currentTags: string; onUpdate: (newTags: string) => void }) {
   const [draft, setDraft] = useState('');
   const tagsArr = currentTags.split(',').map(t => t.trim()).filter(Boolean);
-  const currentCode = tagsArr.find(t => CATALOG_CODE_RE.test(t.toUpperCase())) || '';
+  const currentCodes = tagsArr.filter(t => CATALOG_CODE_RE.test(t.toUpperCase())).map(t => t.toUpperCase());
   const draftUpper = draft.trim().toUpperCase();
   const draftValid = CATALOG_CODE_RE.test(draftUpper);
+  const isDuplicate = currentCodes.includes(draftUpper);
 
-  const apply = () => {
-    if (!draftValid) return;
-    const cleaned = tagsArr.filter(t => !CATALOG_CODE_RE.test(t.toUpperCase()));
-    cleaned.push(draftUpper);
-    onUpdate(cleaned.join(', '));
+  const addCode = () => {
+    if (!draftValid || isDuplicate) return;
+    const next = [...tagsArr, draftUpper];
+    onUpdate(next.join(', '));
     setDraft('');
   };
 
-  const clear = () => {
-    const cleaned = tagsArr.filter(t => !CATALOG_CODE_RE.test(t.toUpperCase()));
-    onUpdate(cleaned.join(', '));
+  const removeCode = (code: string) => {
+    const next = tagsArr.filter(t => t.toUpperCase() !== code.toUpperCase());
+    onUpdate(next.join(', '));
+  };
+
+  const pillStyle: CSSProperties = {
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+    background: 'rgba(16,185,129,0.15)',
+    border: '1px solid rgba(16,185,129,0.4)',
+    color: '#10b981',
+    padding: '2px 4px 2px 8px',
+    borderRadius: '4px',
+    fontSize: '0.74rem',
+    fontWeight: 600,
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
   };
 
   return (
@@ -802,36 +816,46 @@ function CatalogCodeControl({ currentTags, onUpdate }: { currentTags: string; on
       gap: '10px',
       flexWrap: 'wrap',
     }}>
-      <div style={{ fontSize: '0.76rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+      <div style={{ fontSize: '0.76rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
         <Sparkles size={12} style={{ color: '#a855f7' }} />
-        <strong>Catalog code:</strong>
-        {currentCode ? (
-          <span style={{
-            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-            background: 'rgba(16,185,129,0.15)',
-            border: '1px solid rgba(16,185,129,0.4)',
-            color: '#10b981',
-            padding: '1px 8px',
-            borderRadius: '4px',
-            fontSize: '0.74rem',
-            fontWeight: 600,
-          }}>{currentCode}</span>
-        ) : (
+        <strong>Catalog codes:</strong>
+        {currentCodes.length === 0 ? (
           <span style={{ color: '#f59e0b', fontStyle: 'italic' }}>none set</span>
+        ) : (
+          currentCodes.map(code => (
+            <span key={code} style={pillStyle}>
+              {code}
+              <button
+                onClick={() => removeCode(code)}
+                title={`Remove ${code}`}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#10b981',
+                  cursor: 'pointer',
+                  padding: '0 2px',
+                  display: 'flex',
+                  alignItems: 'center',
+                }}
+              >
+                <X size={11} />
+              </button>
+            </span>
+          ))
         )}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: '200px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: '200px', flexWrap: 'wrap' }}>
         <input
           type="text"
           value={draft}
           onChange={e => setDraft(e.target.value.toUpperCase().slice(0, 5))}
-          onKeyDown={e => { if (e.key === 'Enter') apply(); }}
+          onKeyDown={e => { if (e.key === 'Enter') addCode(); }}
           placeholder="e.g. DV100"
           maxLength={5}
           style={{
             fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
             background: 'var(--glass-bg)',
-            border: `1px solid ${draft && !draftValid ? 'rgba(239,68,68,0.4)' : 'var(--border-color)'}`,
+            border: `1px solid ${draft && (!draftValid || isDuplicate) ? 'rgba(239,68,68,0.4)' : 'var(--border-color)'}`,
             borderRadius: '4px',
             padding: '4px 8px',
             fontSize: '0.78rem',
@@ -842,40 +866,24 @@ function CatalogCodeControl({ currentTags, onUpdate }: { currentTags: string; on
           }}
         />
         <button
-          onClick={apply}
-          disabled={!draftValid}
+          onClick={addCode}
+          disabled={!draftValid || isDuplicate}
+          title={isDuplicate ? `${draftUpper} already added` : ''}
           style={{
             padding: '4px 10px',
             borderRadius: '4px',
-            background: draftValid ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.04)',
-            border: `1px solid ${draftValid ? 'rgba(168,85,247,0.5)' : 'var(--border-color)'}`,
-            color: draftValid ? '#a855f7' : 'var(--text-secondary)',
+            background: (draftValid && !isDuplicate) ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.04)',
+            border: `1px solid ${(draftValid && !isDuplicate) ? 'rgba(168,85,247,0.5)' : 'var(--border-color)'}`,
+            color: (draftValid && !isDuplicate) ? '#a855f7' : 'var(--text-secondary)',
             fontSize: '0.74rem',
             fontWeight: 600,
-            cursor: draftValid ? 'pointer' : 'not-allowed',
+            cursor: (draftValid && !isDuplicate) ? 'pointer' : 'not-allowed',
           }}
         >
-          {currentCode ? 'Replace' : 'Add'}
+          Add
         </button>
-        {currentCode && (
-          <button
-            onClick={clear}
-            style={{
-              padding: '4px 10px',
-              borderRadius: '4px',
-              background: 'rgba(239,68,68,0.08)',
-              border: '1px solid rgba(239,68,68,0.3)',
-              color: '#ef4444',
-              fontSize: '0.74rem',
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            Remove
-          </button>
-        )}
         <span style={{ fontSize: '0.68rem', color: 'var(--text-secondary)' }}>
-          Format: <code style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>XX###</code> (2 letters + 3 digits)
+          Format: <code style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>XX###</code> · add as many as needed (e.g. Fashion Dolls + Toys)
         </span>
       </div>
     </div>
