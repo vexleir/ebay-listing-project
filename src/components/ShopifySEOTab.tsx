@@ -74,6 +74,7 @@ export default function ShopifySEOTab({ appPassword, isShopifyConnected }: Shopi
   const [reviewingProductId, setReviewingProductId] = useState<string | null>(null);
   const [pushingIds, setPushingIds] = useState<Set<string>>(new Set());
   const [pushedIds, setPushedIds] = useState<Set<string>>(new Set());
+  const [hidePerfectScore, setHidePerfectScore] = useState(true);
 
   const bearerHeaders = () => ({ Authorization: `Bearer ${appPassword}` });
   const apiHeaders = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${appPassword}` });
@@ -85,15 +86,26 @@ export default function ShopifySEOTab({ appPassword, isShopifyConnected }: Shopi
   }, [suggestions]);
 
   const filteredProducts = useMemo(() => {
-    if (!searchQuery.trim()) return products;
-    const q = searchQuery.toLowerCase();
-    return products.filter(p =>
-      p.title.toLowerCase().includes(q) ||
-      (p.productType || '').toLowerCase().includes(q) ||
-      (p.vendor || '').toLowerCase().includes(q) ||
-      (p.tags || []).some(t => t.toLowerCase().includes(q))
-    );
-  }, [products, searchQuery]);
+    let result = products;
+    if (hidePerfectScore) {
+      result = result.filter(p => computeShopifySEOScore(p).total < 100);
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(p =>
+        p.title.toLowerCase().includes(q) ||
+        (p.productType || '').toLowerCase().includes(q) ||
+        (p.vendor || '').toLowerCase().includes(q) ||
+        (p.tags || []).some(t => t.toLowerCase().includes(q))
+      );
+    }
+    return result;
+  }, [products, searchQuery, hidePerfectScore]);
+
+  const perfectScoreCount = useMemo(
+    () => products.filter(p => computeShopifySEOScore(p).total === 100).length,
+    [products]
+  );
 
   const handleLoadProducts = async (cursor: string | null = null) => {
     if (!isShopifyConnected) { toast('Connect Shopify in Settings first.', 'error'); return; }
@@ -317,6 +329,15 @@ export default function ShopifySEOTab({ appPassword, isShopifyConnected }: Shopi
               <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
                 {selectedIds.size} of {products.length} selected
               </span>
+              {perfectScoreCount > 0 && (
+                <button
+                  onClick={() => setHidePerfectScore(h => !h)}
+                  style={{ background: hidePerfectScore ? 'rgba(16,185,129,0.15)' : 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.4)', borderRadius: '6px', padding: '3px 10px', cursor: 'pointer', color: '#10b981', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px' }}
+                >
+                  {hidePerfectScore ? <Square size={13} /> : <CheckSquare size={13} />}
+                  {perfectScoreCount} perfect 100 — {hidePerfectScore ? 'show' : 'hide'}
+                </button>
+              )}
             </div>
             <input
               type="text"
