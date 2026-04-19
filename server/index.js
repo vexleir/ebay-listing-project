@@ -1240,7 +1240,7 @@ app.put('/api/shopify/products/:shopifyProductId', async (req, res) => {
     const gid = `gid://shopify/Product/${numericId}`;
 
     const body = req.body || {};
-    const input = { id: gid };
+    const input = { id: gid, status: 'ACTIVE' };
 
     if (typeof body.title === 'string') input.title = body.title;
     if (typeof body.descriptionHtml === 'string') input.descriptionHtml = body.descriptionHtml;
@@ -1258,7 +1258,7 @@ app.put('/api/shopify/products/:shopifyProductId', async (req, res) => {
       mutation productUpdate($input: ProductInput!) {
         productUpdate(input: $input) {
           product {
-            id title descriptionHtml productType vendor tags
+            id title descriptionHtml productType vendor tags status
             seo { title description }
           }
           userErrors { field message }
@@ -1274,12 +1274,84 @@ app.put('/api/shopify/products/:shopifyProductId', async (req, res) => {
     const product = result?.productUpdate?.product;
     if (!product) return res.status(500).json({ error: 'No product returned from Shopify' });
 
-    res.json({ success: true, product });
+    // Publish to default sales channels: Online Store, YouTube, Facebook, TikTok
+    const channelStatuses = await publishToDefaultChannels(req.companyId, gid);
+
+    res.json({ success: true, product, channels: channelStatuses });
   } catch (e) {
     console.error('[shopify/products PUT] error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
+
+// Match substrings (case-insensitive) against Shopify publication names.
+// Shopify surfaces sales channels as publications; actual names vary by install
+// (e.g. "Facebook & Instagram", "Google & YouTube", "TikTok Shop") so we match
+// on keywords rather than exact names.
+const DEFAULT_PUBLISH_CHANNELS = [
+  { key: 'Online Store', matches: ['online store'] },
+  { key: 'YouTube', matches: ['youtube', 'google & youtube', 'google and youtube'] },
+  { key: 'Facebook', matches: ['facebook', 'meta', 'instagram'] },
+  { key: 'TikTok', matches: ['tiktok', 'tik tok'] },
+];
+
+async function publishToDefaultChannels(companyId, productGid) {
+  const statuses = DEFAULT_PUBLISH_CHANNELS.map(c => ({ channel: c.key, status: 'pending' }));
+  try {
+    const pubResult = await shopifyAuth.shopifyGraphQL(companyId, `
+      query publications {
+        publications(first: 25) {
+          edges { node { id name } }
+        }
+      }
+    `, {});
+    const publications = (pubResult?.publications?.edges || []).map(e => e.node);
+
+    const targetIds = [];
+    for (let i = 0; i < DEFAULT_PUBLISH_CHANNELS.length; i++) {
+      const channel = DEFAULT_PUBLISH_CHANNELS[i];
+      const match = publications.find(pub => {
+        const n = String(pub.name || '').toLowerCase();
+        return channel.matches.some(m => n.includes(m));
+      });
+      if (match) {
+        targetIds.push({ publicationId: match.id });
+        statuses[i].status = 'queued';
+        statuses[i].matchedName = match.name;
+      } else {
+        statuses[i].status = 'not-installed';
+      }
+    }
+
+    if (targetIds.length === 0) return statuses;
+
+    const publishResult = await shopifyAuth.shopifyGraphQL(companyId, `
+      mutation publishablePublish($id: ID!, $input: [PublicationInput!]!) {
+        publishablePublish(id: $id, input: $input) {
+          userErrors { field message }
+        }
+      }
+    `, { id: productGid, input: targetIds });
+
+    const errs = publishResult?.publishablePublish?.userErrors || [];
+    if (errs.length > 0) {
+      const errMsg = errs.map(e => e.message).join('; ');
+      for (const s of statuses) {
+        if (s.status === 'queued') { s.status = 'error'; s.error = errMsg; }
+      }
+    } else {
+      for (const s of statuses) {
+        if (s.status === 'queued') s.status = 'published';
+      }
+    }
+  } catch (e) {
+    console.error('[publishToDefaultChannels] error:', e.message);
+    for (const s of statuses) {
+      if (s.status === 'pending' || s.status === 'queued') { s.status = 'error'; s.error = e.message; }
+    }
+  }
+  return statuses;
+}
 
 // ─── Catalog Codes ────────────────────────────────────────────────────────────
 
