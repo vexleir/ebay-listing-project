@@ -336,6 +336,28 @@ export default function ShopifySEOTab({ appPassword, isShopifyConnected }: Shopi
     }
   };
 
+  const handleDiagnoseChannels = async () => {
+    try {
+      const resp = await fetch('/api/shopify/diagnose-publications', { headers: bearerHeaders() });
+      const data = await resp.json();
+      if (!resp.ok) { toast('Diagnose error: ' + (data.error || resp.statusText), 'error'); return; }
+      const lines = [
+        `Scope: ${data.currentScope}`,
+        `Has publication scope: ${data.hasPublicationScope ? 'YES' : 'NO — reconnect Shopify'}`,
+        '',
+        `Publications on shop (${data.publications.length}):`,
+        ...(data.publications.length ? data.publications.map((p: any) => `  • ${p.name}`) : ['  (none — scope issue or no channels installed)']),
+        '',
+        `Channel matches:`,
+        ...data.channelMatches.map((c: any) => `  ${c.matched ? '✓' : '✗'} ${c.channel}${c.matchedName ? ` → ${c.matchedName}` : ''}`),
+      ];
+      if (data.queryError) lines.push('', `Query error: ${data.queryError}`);
+      window.alert(lines.join('\n'));
+    } catch (e: any) {
+      toast('Diagnose error: ' + e.message, 'error');
+    }
+  };
+
   const handleBulkAcceptAndPush = async () => {
     const pending = suggestions.filter(s => !pushedIds.has(s.productId));
     if (pending.length === 0) { toast('No optimized products to push.', 'error'); return; }
@@ -463,6 +485,20 @@ export default function ShopifySEOTab({ appPassword, isShopifyConnected }: Shopi
             >
               <Sparkles size={16} style={{ animation: isOptimizing ? 'spin 1s linear infinite' : 'none' }} />
               {isOptimizing ? 'Optimizing…' : `Optimize ${selectedIds.size} Selected`}
+            </button>
+          )}
+          {isShopifyConnected && (
+            <button
+              onClick={handleDiagnoseChannels}
+              title="Show current Shopify scope, available publications, and channel-match results"
+              style={{
+                padding: '6px 12px', borderRadius: '6px',
+                background: 'var(--glass-bg)', border: '1px solid var(--glass-border)',
+                color: 'var(--text-primary)', fontSize: '0.82rem', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: '6px',
+              }}
+            >
+              <AlertCircle size={14} /> Diagnose Channels
             </button>
           )}
           {hasFetched && pendingPushCount > 0 && (

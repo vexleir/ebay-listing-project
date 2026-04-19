@@ -1284,6 +1284,59 @@ app.put('/api/shopify/products/:shopifyProductId', async (req, res) => {
   }
 });
 
+// GET /api/shopify/diagnose-publications — list all publications on the shop and show the current stored scope
+app.get('/api/shopify/diagnose-publications', async (req, res) => {
+  try {
+    const connected = await shopifyAuth.hasShopifySession(req.companyId);
+    if (!connected) return res.status(400).json({ error: 'Shopify not connected' });
+
+    const config = await shopifyAuth.getShopifyConfig(req.companyId);
+    const currentScope = config?.scope || '(unknown)';
+    const hasPublicationScope =
+      String(currentScope).includes('read_publications') &&
+      String(currentScope).includes('write_publications');
+
+    let publications = [];
+    let queryError = null;
+    try {
+      const pubResult = await shopifyAuth.shopifyGraphQL(req.companyId, `
+        query publications {
+          publications(first: 25) {
+            edges { node { id name } }
+          }
+        }
+      `, {});
+      publications = (pubResult?.publications?.edges || []).map(e => e.node);
+    } catch (e) {
+      queryError = e.message;
+    }
+
+    const channelMatches = DEFAULT_PUBLISH_CHANNELS.map(channel => {
+      const match = publications.find(pub => {
+        const n = String(pub.name || '').toLowerCase();
+        return channel.matches.some(m => n.includes(m));
+      });
+      return {
+        channel: channel.key,
+        matched: !!match,
+        matchedName: match?.name || null,
+      };
+    });
+
+    res.json({
+      currentScope,
+      hasPublicationScope,
+      needsReconnect: !hasPublicationScope,
+      publications: publications.map(p => ({ id: p.id, name: p.name })),
+      channelMatches,
+      queryError,
+    });
+  } catch (e) {
+    console.error('[shopify/diagnose-publications] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Match substrings (case-insensitive) against Shopify publication names.
 // Shopify surfaces sales channels as publications; actual names vary by install
 // (e.g. "Facebook & Instagram", "Google & YouTube", "TikTok Shop") so we match
