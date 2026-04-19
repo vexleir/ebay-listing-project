@@ -301,6 +301,7 @@ export default function ShopifySEOTab({ appPassword, isShopifyConnected }: Shopi
         const err = await resp.json().catch(() => ({ error: resp.statusText }));
         throw new Error(err.error || 'Push failed');
       }
+      const respData = await resp.json().catch(() => ({}));
       // Update local product state so score refreshes
       setProducts(prev => prev.map(p => {
         if (p.id !== productId) return p;
@@ -318,7 +319,15 @@ export default function ShopifySEOTab({ appPassword, isShopifyConnected }: Shopi
         };
       }));
       setPushedIds(prev => new Set([...prev, productId]));
-      toast(`Pushed ${approved.length} change${approved.length !== 1 ? 's' : ''} to Shopify.`, 'success');
+      const channels: Array<{ channel: string; status: string; matchedName?: string; error?: string }> = respData?.channels || [];
+      const published = channels.filter(c => c.status === 'published').map(c => c.channel);
+      const notInstalled = channels.filter(c => c.status === 'not-installed').map(c => c.channel);
+      const channelErrors = channels.filter(c => c.status === 'error');
+      let msg = `Pushed ${approved.length} change${approved.length !== 1 ? 's' : ''} to Shopify.`;
+      if (published.length > 0) msg += ` Published to: ${published.join(', ')}.`;
+      if (notInstalled.length > 0) msg += ` Not installed: ${notInstalled.join(', ')}.`;
+      if (channelErrors.length > 0) msg += ` Channel errors: ${channelErrors.map(c => c.channel).join(', ')} — reconnect Shopify.`;
+      toast(msg, channelErrors.length > 0 ? 'info' : 'success');
       setReviewingProductId(null);
     } catch (e: any) {
       toast('Push error: ' + e.message, 'error');

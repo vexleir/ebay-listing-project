@@ -1306,6 +1306,8 @@ async function publishToDefaultChannels(companyId, productGid) {
       }
     `, {});
     const publications = (pubResult?.publications?.edges || []).map(e => e.node);
+    console.log(`[publishToDefaultChannels] Found ${publications.length} publications on shop:`,
+      publications.map(p => p.name).join(' | ') || '(none)');
 
     const targetIds = [];
     for (let i = 0; i < DEFAULT_PUBLISH_CHANNELS.length; i++) {
@@ -1322,8 +1324,13 @@ async function publishToDefaultChannels(companyId, productGid) {
         statuses[i].status = 'not-installed';
       }
     }
+    console.log(`[publishToDefaultChannels] Channel match result:`,
+      statuses.map(s => `${s.channel}=${s.status}${s.matchedName ? ` (${s.matchedName})` : ''}`).join(' | '));
 
-    if (targetIds.length === 0) return statuses;
+    if (targetIds.length === 0) {
+      console.warn('[publishToDefaultChannels] No matching publications found — skipping publishablePublish');
+      return statuses;
+    }
 
     const publishResult = await shopifyAuth.shopifyGraphQL(companyId, `
       mutation publishablePublish($id: ID!, $input: [PublicationInput!]!) {
@@ -1336,6 +1343,7 @@ async function publishToDefaultChannels(companyId, productGid) {
     const errs = publishResult?.publishablePublish?.userErrors || [];
     if (errs.length > 0) {
       const errMsg = errs.map(e => e.message).join('; ');
+      console.error('[publishToDefaultChannels] publishablePublish userErrors:', errMsg);
       for (const s of statuses) {
         if (s.status === 'queued') { s.status = 'error'; s.error = errMsg; }
       }
@@ -1343,11 +1351,16 @@ async function publishToDefaultChannels(companyId, productGid) {
       for (const s of statuses) {
         if (s.status === 'queued') s.status = 'published';
       }
+      console.log(`[publishToDefaultChannels] Published ${productGid} to ${targetIds.length} channel(s)`);
     }
   } catch (e) {
-    console.error('[publishToDefaultChannels] error:', e.message);
+    const msg = e?.message || String(e);
+    console.error('[publishToDefaultChannels] error:', msg);
+    if (msg.toLowerCase().includes('access denied') || msg.toLowerCase().includes('scope')) {
+      console.error('[publishToDefaultChannels] Likely missing read_publications/write_publications scope. Reconnect Shopify from Settings.');
+    }
     for (const s of statuses) {
-      if (s.status === 'pending' || s.status === 'queued') { s.status = 'error'; s.error = e.message; }
+      if (s.status === 'pending' || s.status === 'queued') { s.status = 'error'; s.error = msg; }
     }
   }
   return statuses;
