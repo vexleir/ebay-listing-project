@@ -75,6 +75,8 @@ export default function ShopifySEOTab({ appPassword, isShopifyConnected }: Shopi
   const [reviewingProductId, setReviewingProductId] = useState<string | null>(null);
   const [pushingIds, setPushingIds] = useState<Set<string>>(new Set());
   const [pushedIds, setPushedIds] = useState<Set<string>>(new Set());
+  const [isBulkPushing, setIsBulkPushing] = useState(false);
+  const [bulkPushProgress, setBulkPushProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
   const [hidePerfectScore, setHidePerfectScore] = useState(true);
   const [catalogCodes, setCatalogCodes] = useState<Array<{ code: string; name: string }>>([]);
 
@@ -325,6 +327,97 @@ export default function ShopifySEOTab({ appPassword, isShopifyConnected }: Shopi
     }
   };
 
+  const handleBulkAcceptAndPush = async () => {
+    const pending = suggestions.filter(s => !pushedIds.has(s.productId));
+    if (pending.length === 0) { toast('No optimized products to push.', 'error'); return; }
+
+    const confirmed = window.confirm(
+      `Accept ALL changes and push ${pending.length} product${pending.length !== 1 ? 's' : ''} to Shopify? This cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    setIsBulkPushing(true);
+    setBulkPushProgress({ done: 0, total: pending.length });
+
+    let successCount = 0;
+    let failCount = 0;
+    const updatedProductsLocal: Record<string, Partial<ShopifyProduct>> = {};
+
+    for (let i = 0; i < pending.length; i++) {
+      const s = pending[i];
+      const payload: Record<string, any> = {};
+      for (const f of s.fields) {
+        if (!f.after.trim()) continue;
+        if (f.after.trim() === f.before.trim()) continue;
+        if (f.field === 'tags') {
+          payload.tags = f.after.split(',').map(t => t.trim()).filter(Boolean);
+        } else {
+          payload[f.field] = f.after;
+        }
+      }
+
+      if (Object.keys(payload).length === 0) {
+        setBulkPushProgress({ done: i + 1, total: pending.length });
+        continue;
+      }
+
+      const numericId = s.productId.includes('/') ? s.productId.split('/').pop() : s.productId;
+      setPushingIds(prev => new Set([...prev, s.productId]));
+      try {
+        const resp = await fetch(`/api/shopify/products/${numericId}`, {
+          method: 'PUT',
+          headers: apiHeaders(),
+          body: JSON.stringify(payload),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({ error: resp.statusText }));
+          throw new Error(err.error || 'Push failed');
+        }
+        updatedProductsLocal[s.productId] = payload;
+        setPushedIds(prev => new Set([...prev, s.productId]));
+        successCount++;
+      } catch (e: any) {
+        console.error(`Bulk push error for ${s.productId}:`, e.message);
+        failCount++;
+      } finally {
+        setPushingIds(prev => { const n = new Set(prev); n.delete(s.productId); return n; });
+        setBulkPushProgress({ done: i + 1, total: pending.length });
+      }
+    }
+
+    // Apply all successful updates to products state at once
+    setProducts(prev => prev.map(p => {
+      const upd = updatedProductsLocal[p.id];
+      if (!upd) return p;
+      return {
+        ...p,
+        title: upd.title ?? p.title,
+        descriptionHtml: upd.descriptionHtml ?? p.descriptionHtml,
+        seo: {
+          title: (upd as any).seoTitle ?? p.seo.title,
+          description: (upd as any).seoDescription ?? p.seo.description,
+        },
+        tags: (upd as any).tags ?? p.tags,
+        productType: upd.productType ?? p.productType,
+        vendor: upd.vendor ?? p.vendor,
+      };
+    }));
+
+    setIsBulkPushing(false);
+    setReviewingProductId(null);
+
+    if (failCount === 0) {
+      toast(`Pushed ${successCount} product${successCount !== 1 ? 's' : ''} to Shopify.`, 'success');
+    } else {
+      toast(`Pushed ${successCount}, ${failCount} failed. Check console for details.`, 'info');
+    }
+  };
+
+  const pendingPushCount = useMemo(
+    () => suggestions.filter(s => !pushedIds.has(s.productId)).length,
+    [suggestions, pushedIds]
+  );
+
   const allFilteredSelected = filteredProducts.length > 0 && filteredProducts.every(p => selectedIds.has(p.id));
   const reviewingSuggestion = reviewingProductId ? suggestionsMap.get(reviewingProductId) : null;
   const reviewingProduct = reviewingProductId ? products.find(p => p.id === reviewingProductId) : null;
@@ -356,11 +449,39 @@ export default function ShopifySEOTab({ appPassword, isShopifyConnected }: Shopi
             <button
               className="btn-primary"
               onClick={handleOptimize}
-              disabled={isOptimizing || selectedIds.size === 0}
+              disabled={isOptimizing || isBulkPushing || selectedIds.size === 0}
               style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'linear-gradient(135deg, #10b981, #059669)' }}
             >
               <Sparkles size={16} style={{ animation: isOptimizing ? 'spin 1s linear infinite' : 'none' }} />
               {isOptimizing ? 'Optimizing…' : `Optimize ${selectedIds.size} Selected`}
+            </button>
+          )}
+          {hasFetched && pendingPushCount > 0 && (
+            <button
+              onClick={handleBulkAcceptAndPush}
+              disabled={isBulkPushing || isOptimizing}
+              title="Accept every AI-suggested change for all optimized products and push them to Shopify without per-product review"
+              style={{
+                display: 'flex', alignItems: 'center', gap: '6px',
+                padding: '8px 14px', borderRadius: '6px',
+                background: isBulkPushing ? 'rgba(168,85,247,0.2)' : 'linear-gradient(135deg, #a855f7, #7c3aed)',
+                border: '1px solid rgba(168,85,247,0.5)',
+                color: '#fff', fontSize: '0.88rem', fontWeight: 600,
+                cursor: isBulkPushing || isOptimizing ? 'not-allowed' : 'pointer',
+                opacity: isOptimizing ? 0.5 : 1,
+              }}
+            >
+              {isBulkPushing ? (
+                <>
+                  <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+                  Pushing {bulkPushProgress.done}/{bulkPushProgress.total}…
+                </>
+              ) : (
+                <>
+                  <Check size={16} />
+                  Accept All & Push {pendingPushCount}
+                </>
+              )}
             </button>
           )}
         </div>
