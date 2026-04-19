@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, ShoppingBag, Shield, DollarSign, Zap, Download, Sparkles, ChevronLeft, ChevronRight, BookMarked } from 'lucide-react';
+import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, ShoppingBag, Shield, DollarSign, Zap, Download, Sparkles, ChevronLeft, ChevronRight, BookMarked, Layers } from 'lucide-react';
 import './index.css';
 
 import Uploader from './components/Uploader';
+import BulkUploader from './components/BulkUploader';
 import ResultsEditor from './components/ResultsEditor';
 import StagedListings from './components/StagedListings';
 import ListedProducts from './components/ListedProducts';
@@ -57,7 +58,7 @@ function App() {
   });
 
   const [stagedListings, setStagedListings] = useState<StagedListing[]>([]);
-  const [activeTab, setActiveTab] = useState<'new' | 'staged' | 'listed' | 'sold' | 'analytics' | 'settings' | 'source' | 'optimizer' | 'admin' | 'ebay-import' | 'shopify-seo' | 'catalog-codes'>('new');
+  const [activeTab, setActiveTab] = useState<'new' | 'bulk' | 'staged' | 'listed' | 'sold' | 'analytics' | 'settings' | 'source' | 'optimizer' | 'admin' | 'ebay-import' | 'shopify-seo' | 'catalog-codes'>('new');
   const [listedProducts, setListedProducts] = useState<StagedListing[]>([]);
   const [isLoadingListings, setIsLoadingListings] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => localStorage.getItem('sidebar_collapsed') === '1');
@@ -236,7 +237,7 @@ function App() {
     }
   };
 
-  const handleStageListing = async (listing: Omit<StagedListing, 'id' | 'createdAt'>) => {
+  const stageListingCore = async (listing: Omit<StagedListing, 'id' | 'createdAt'>) => {
     const id = crypto.randomUUID();
     const { images: rawImages, ...meta } = listing as any;
     const base64Images: string[] = (rawImages || []).filter((img: string) => img.startsWith('data:'));
@@ -247,12 +248,22 @@ function App() {
     const newListing: StagedListing = { ...meta, id, createdAt: now, updatedAt: now, status: 'staged', images: finalImages };
     if (finalImages.some(img => img.startsWith('data:'))) saveImages(id, finalImages);
     setStagedListings(prev => [newListing, ...prev]);
+    const resp = await fetch('/api/listings', { method: 'POST', headers: apiHeaders(appPassword), body: JSON.stringify({ listing: newListing }) });
+    if (!resp.ok) console.error('Failed to save listing to server:', await resp.text());
+  };
+
+  const handleStageListing = async (listing: Omit<StagedListing, 'id' | 'createdAt'>) => {
+    await stageListingCore(listing);
     setImages([]);
     setInstructions('');
     setGeneratedData(null);
     setActiveTab('staged');
-    const resp = await fetch('/api/listings', { method: 'POST', headers: apiHeaders(appPassword), body: JSON.stringify({ listing: newListing }) });
-    if (!resp.ok) console.error('Failed to save listing to server:', await resp.text());
+  };
+
+  // Bulk variant: stages without clearing single-uploader state or switching tabs mid-loop.
+  // BulkUploader stays mounted so its per-group "Staged" badges render as each one completes.
+  const handleBulkStageListing = async (listing: Omit<StagedListing, 'id' | 'createdAt'>) => {
+    await stageListingCore(listing);
   };
 
   const handleUpdateStagedListing = async (updatedListing: StagedListing) => {
@@ -472,6 +483,7 @@ function App() {
         {/* Nav buttons */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
           <button title="New Listing" style={sidebarBtnStyle('new')} onClick={() => setActiveTab('new')}><PlusCircle size={18} />{sidebarLabel('New Listing')}</button>
+          <button title="Bulk Create" style={sidebarBtnStyle('bulk')} onClick={() => setActiveTab('bulk')}><Layers size={18} />{sidebarLabel('Bulk Create')}</button>
           <button title="Staged" style={sidebarBtnStyle('staged')} onClick={() => setActiveTab('staged')}><List size={18} />{sidebarLabel(`Staged (${stagedListings.length})`)}</button>
           <button title="Listed" style={sidebarBtnStyle('listed')} onClick={() => setActiveTab('listed')}><Check size={18} />{sidebarLabel(`Listed (${listedProducts.filter(l => !l.soldAt).length})`)}</button>
           <button title="eBay Import" style={{ ...sidebarBtnStyle('ebay-import'), borderStyle: activeTab === 'ebay-import' ? 'solid' : 'dashed', opacity: activeTab === 'ebay-import' ? 1 : 0.75 }} onClick={() => setActiveTab('ebay-import')}><Download size={18} />{sidebarLabel('eBay Import')}</button>
@@ -560,6 +572,10 @@ function App() {
                 <ResultsEditor data={generatedData} images={images} onStage={handleStageListing} onCancel={() => setGeneratedData(null)} appPassword={appPassword} />
               </div>
             )}
+          </div>
+        ) : activeTab === 'bulk' ? (
+          <div className="animate-fade-in">
+            <BulkUploader onStage={handleBulkStageListing} appPassword={appPassword} />
           </div>
         ) : activeTab === 'staged' ? (
           <div className="animate-fade-in">
