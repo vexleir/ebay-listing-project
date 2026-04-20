@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { ExternalLink, Calendar, CheckCircle, Trash2, Archive, ArchiveRestore, Search, ChevronDown, LayoutGrid, List, Download, RefreshCw, Eye, RotateCcw, CircleSlash, Share2, DollarSign, Pencil, ShoppingBag, Check, X, Wand2, ShieldCheck, ShieldAlert, ShieldX } from 'lucide-react';
+import { ExternalLink, Calendar, CheckCircle, Trash2, Archive, ArchiveRestore, Search, ChevronDown, LayoutGrid, List, Download, RefreshCw, Eye, RotateCcw, CircleSlash, Share2, DollarSign, Pencil, ShoppingBag, Check, X, Wand2, ShieldCheck, ShieldAlert, ShieldX, Undo2 } from 'lucide-react';
 import type { StagedListing } from '../types';
 import ImageSearchButton from './ImageSearchButton';
 import Lightbox from './Lightbox';
@@ -16,6 +16,7 @@ interface ListedProductsProps {
   onArchive: (id: string) => void;
   onSyncSold?: () => void;
   onRelist?: (listing: StagedListing) => void;
+  onMoveToStaged?: (listing: StagedListing) => void;
   onMarkSold?: (id: string, soldPrice: string, soldAt: number) => void;
   onUpdateListing?: (updated: StagedListing) => void;
   isEbayConnected?: boolean;
@@ -147,7 +148,7 @@ function HealthBadge({ listing }: { listing: StagedListing }) {
   );
 }
 
-export default function ListedProductsView({ listings, onDelete, onArchive, onSyncSold, onRelist, onMarkSold, onUpdateListing, isEbayConnected, isShopifyConnected, appPassword = '' }: ListedProductsProps) {
+export default function ListedProductsView({ listings, onDelete, onArchive, onSyncSold, onRelist, onMoveToStaged, onMarkSold, onUpdateListing, isEbayConnected, isShopifyConnected, appPassword = '' }: ListedProductsProps) {
   const { toast } = useToast();
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortOption>('date-desc');
@@ -536,6 +537,20 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
               <RotateCcw size={18} />
             </button>
           )}
+          {onMoveToStaged && (
+            <button
+              className="btn-icon"
+              title="Move back to Staged (use if the eBay listing was deleted and needs to be pushed again)"
+              onClick={() => {
+                if (window.confirm(`Move "${listing.title.substring(0, 50)}..." back to Staged?\n\nThis clears the eBay item ID and sold/archive status so you can push it to eBay again. Use this after deleting the listing on eBay.`)) {
+                  onMoveToStaged(listing);
+                }
+              }}
+              style={{ color: 'var(--accent-color)' }}
+            >
+              <Undo2 size={18} />
+            </button>
+          )}
           {!isArchived && onMarkSold && (
             <button className="btn-icon" title="Mark as sold" onClick={() => setMarkSoldModal({ listing, price: listing.priceRecommendation || '', date: new Date().toISOString().split('T')[0] })}
               style={{ color: 'var(--success)', fontSize: '0.75rem', gap: '4px' }}>
@@ -657,6 +672,20 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
         <button className="btn-icon" title="Cross-post to other platforms" onClick={() => setCrossPostListing(listing)}>
           <Share2 size={18} />
         </button>
+        {onMoveToStaged && (
+          <button
+            className="btn-icon"
+            title="Move back to Staged (use if the eBay listing was deleted and needs to be pushed again)"
+            onClick={() => {
+              if (window.confirm(`Move "${listing.title.substring(0, 50)}..." back to Staged?\n\nThis clears the eBay item ID and sold/archive status so you can push it to eBay again. Use this after deleting the listing on eBay.`)) {
+                onMoveToStaged(listing);
+              }
+            }}
+            style={{ color: 'var(--accent-color)' }}
+          >
+            <Undo2 size={17} />
+          </button>
+        )}
         <button className="btn-icon" title={isArchived ? 'Unarchive' : 'Archive'} onClick={() => { onArchive(listing.id); toast(isArchived ? 'Listing unarchived.' : 'Listing archived.', 'success'); }}>
           {isArchived ? <ArchiveRestore size={18} /> : <Archive size={18} />}
         </button>

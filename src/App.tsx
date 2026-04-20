@@ -366,6 +366,41 @@ function App() {
     return () => clearInterval(id);
   }, [isEbayConnected, isAuthenticated, appPassword]);
 
+  // Moves a Listed record back to Staged in place — same id, clears eBay-specific fields.
+  // Used when a listing was deleted on eBay and needs to be pushed again from our DB.
+  const handleMoveToStaged = async (listing: StagedListing) => {
+    const now = Date.now();
+    const moved: StagedListing = {
+      ...listing,
+      status: 'staged',
+      ebayDraftId: undefined,
+      archived: false,
+      soldAt: undefined,
+      soldPrice: undefined,
+      soldPlatform: undefined,
+      updatedAt: now,
+    };
+    setListedProducts(prev => prev.filter(l => l.id !== listing.id));
+    setStagedListings(prev => [moved, ...prev]);
+    setActiveTab('staged');
+    await fetch(`/api/listings/${listing.id}`, {
+      method: 'PUT',
+      headers: apiHeaders(appPassword),
+      body: JSON.stringify({
+        updates: {
+          status: 'staged',
+          ebayDraftId: null,
+          archived: false,
+          soldAt: null,
+          soldPrice: null,
+          soldPlatform: null,
+          updatedAt: now,
+        },
+      }),
+    });
+    toast(`"${listing.title.substring(0, 35)}..." moved back to Staged.`, 'success');
+  };
+
   const handleRelistListing = async (listing: StagedListing) => {
     const id = crypto.randomUUID();
     const now = Date.now();
@@ -583,7 +618,7 @@ function App() {
           </div>
         ) : activeTab === 'listed' ? (
           <div className="animate-fade-in">
-            <ListedProducts listings={listedProducts} onDelete={handleDeleteListedListing} onArchive={handleArchiveListedListing} onSyncSold={handleSyncSold} onRelist={handleRelistListing} onMarkSold={handleMarkSold} onUpdateListing={handleUpdateListing} isEbayConnected={isEbayConnected} isShopifyConnected={isShopifyConnected} appPassword={appPassword} />
+            <ListedProducts listings={listedProducts} onDelete={handleDeleteListedListing} onArchive={handleArchiveListedListing} onSyncSold={handleSyncSold} onRelist={handleRelistListing} onMoveToStaged={handleMoveToStaged} onMarkSold={handleMarkSold} onUpdateListing={handleUpdateListing} isEbayConnected={isEbayConnected} isShopifyConnected={isShopifyConnected} appPassword={appPassword} />
           </div>
         ) : activeTab === 'sold' ? (
           <div className="animate-fade-in">
