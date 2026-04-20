@@ -432,6 +432,17 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
     if (!isEbayConnected) { toast('Connect to eBay first.', 'error'); return; }
     const ids = Array.from(selectedIds);
     const toListing = listings.filter(l => ids.includes(l.id));
+
+    // Match single-push default: schedule 21 days out unless user opts to list immediately.
+    const scheduleIso = new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString();
+    const scheduleLabel = new Date(scheduleIso).toLocaleString();
+    const mode = window.confirm(
+      `Push ${toListing.length} listing${toListing.length !== 1 ? 's' : ''} to eBay?\n\n` +
+      `OK     → Schedule all for ${scheduleLabel} (eBay's 21-day max)\n` +
+      `Cancel → Don't push (use per-listing push for immediate / custom schedule)`
+    );
+    if (!mode) return;
+
     setBulkPushingIds(new Set(ids));
     let success = 0;
     let fail = 0;
@@ -441,7 +452,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
         const resp = await fetch('/api/ebay/draft', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pw}` },
-          body: JSON.stringify({ listing, overrideConditionId: autoConditionId(listing.condition) })
+          body: JSON.stringify({ listing, overrideConditionId: autoConditionId(listing.condition), scheduleDate: scheduleIso })
         });
         if (!resp.ok) throw new Error(await resp.text());
         const data = await resp.json();
@@ -454,7 +465,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
     }
     setBulkPushingIds(new Set());
     setSelectedIds(new Set());
-    if (success > 0) toast(`${success} pushed${fail > 0 ? `, ${fail} failed` : ''}.`, success > 0 ? 'success' : 'error');
+    if (success > 0) toast(`${success} scheduled for ${scheduleLabel}${fail > 0 ? `, ${fail} failed` : ''}.`, success > 0 ? 'success' : 'error');
   };
 
   const handleBulkDelete = () => {
