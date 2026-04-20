@@ -87,9 +87,35 @@ async function getActiveListings(companyId) {
   ).toArray();
 }
 
+// ─── Consignors ─────────────────────────────────────────────────────────────
+
+async function getConsignors(companyId) {
+  const db = await getDb();
+  return db.collection('consignors').find({ companyId }).sort({ name: 1 }).toArray();
+}
+
+async function createConsignor(companyId, consignor) {
+  const db = await getDb();
+  const { _id, ...doc } = consignor;
+  doc.companyId = companyId;
+  await db.collection('consignors').insertOne(doc);
+}
+
+async function updateConsignor(companyId, id, updates) {
+  const db = await getDb();
+  const { _id, ...safeUpdates } = updates;
+  await db.collection('consignors').updateOne({ companyId, id }, { $set: safeUpdates });
+}
+
+async function deleteConsignor(companyId, id) {
+  const db = await getDb();
+  await db.collection('consignors').deleteOne({ companyId, id });
+}
+
 module.exports = {
   getListings, createListing, updateListing, deleteListing,
   getAllListingsMeta, getActiveListings,
   getSettings, saveSettings,
   incrementTokenUsage, getTokenUsage,
+  getConsignors, createConsignor, updateConsignor, deleteConsignor,
 };

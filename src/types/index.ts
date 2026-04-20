@@ -29,12 +29,29 @@ export interface StagedListing {
   shopifyCollectionIds?: string[];
   seoKeywords?: string;
   collectionCodes?: string[];
+  // Consignment
+  isConsignment?: boolean;
+  consignorId?: string;
+  consignmentFeePct?: number; // Our commission % (0-100); consignor gets the remainder
+  consignorPaidAt?: number;
+  consignorPayoutAmount?: string; // Dollar amount paid out to consignor (computed at mark-paid time)
+}
+
+export interface Consignor {
+  id: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  notes?: string;
+  defaultSplitPct?: number; // Our default commission % for this consignor
+  createdAt: number;
+  updatedAt?: number;
 }
 
 export interface AppState {
   apiKey: string;
   ebayToken: string;
-  activeTab: 'new' | 'staged' | 'listed';
+  activeTab: 'new' | 'staged' | 'listed' | 'consignment';
   isSettingsOpen: boolean;
 }
 

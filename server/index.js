@@ -6,7 +6,7 @@ const path = require('path');
 const { generateListing, generateListingFromUrls } = require('./ai');
 const { getAuthUrl, exchangeCodeForToken, getValidAccessToken, hasValidSession, getTokenExpiry } = require('./ebayAuth');
 const shopifyAuth = require('./shopifyAuth');
-const { getListings, createListing, updateListing, deleteListing, getAllListingsMeta, getActiveListings, getSettings, saveSettings, incrementTokenUsage, getTokenUsage } = require('./listings');
+const { getListings, createListing, updateListing, deleteListing, getAllListingsMeta, getActiveListings, getSettings, saveSettings, incrementTokenUsage, getTokenUsage, getConsignors, createConsignor, updateConsignor, deleteConsignor } = require('./listings');
 const { fetchListingForOptimizer, fetchSoldComps, aiOptimizeListing } = require('./optimizer');
 const catalog = require('./collections');
 const { uploadImage } = require('./cloudinary');
@@ -1527,6 +1527,50 @@ app.get('/api/listings/debug', async (req, res) => {
 app.delete('/api/listings/:id', async (req, res) => {
   try {
     await deleteListing(req.companyId, req.params.id);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Consignors ───────────────────────────────────────────────────────────────
+
+app.get('/api/consignors', async (req, res) => {
+  try {
+    const consignors = await getConsignors(req.companyId);
+    res.json(consignors);
+  } catch (e) {
+    console.error('[consignors] GET error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/consignors', async (req, res) => {
+  try {
+    const consignor = req.body.consignor;
+    if (!consignor?.id || !consignor?.name) {
+      return res.status(400).json({ error: 'id and name required' });
+    }
+    await createConsignor(req.companyId, consignor);
+    res.json({ success: true });
+  } catch (e) {
+    console.error('[consignors] POST error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.put('/api/consignors/:id', async (req, res) => {
+  try {
+    await updateConsignor(req.companyId, req.params.id, req.body.updates || {});
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/consignors/:id', async (req, res) => {
+  try {
+    await deleteConsignor(req.companyId, req.params.id);
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
