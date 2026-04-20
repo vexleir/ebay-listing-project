@@ -302,7 +302,7 @@ app.get('/api/ebay/policies', async (req, res) => {
 });
 
 app.post('/api/ebay/revise', async (req, res) => {
-  const { itemId, newPrice, newTitle, description, conditionId, itemSpecifics } = req.body;
+  const { itemId, newPrice, newTitle, description, conditionId, itemSpecifics, quantity } = req.body;
   if (!itemId) return res.status(400).json({ error: 'itemId required' });
   try {
     const token = await getValidAccessToken(req.companyId);
@@ -310,6 +310,8 @@ app.post('/api/ebay/revise', async (req, res) => {
     const titleXml      = newTitle     ? `<Title><![CDATA[${String(newTitle).substring(0, 80)}]]></Title>` : '';
     const descXml       = description  ? `<Description><![CDATA[${description}]]></Description>` : '';
     const condXml       = conditionId  ? `<ConditionID>${conditionId}</ConditionID>` : '';
+    const qtyNum        = quantity != null ? Math.max(1, parseInt(quantity, 10) || 1) : null;
+    const qtyXml        = qtyNum != null ? `<Quantity>${qtyNum}</Quantity>` : '';
     const specificsXml  = Array.isArray(itemSpecifics) && itemSpecifics.length
       ? '<ItemSpecifics>' + itemSpecifics.map(s => `<NameValueList><Name><![CDATA[${s.name}]]></Name><Value><![CDATA[${s.value}]]></Value></NameValueList>`).join('') + '</ItemSpecifics>'
       : '';
@@ -319,6 +321,7 @@ app.post('/api/ebay/revise', async (req, res) => {
     <ItemID>${itemId}</ItemID>
     ${titleXml}
     ${priceXml}
+    ${qtyXml}
     ${descXml}
     ${condXml}
     ${specificsXml}
@@ -337,6 +340,7 @@ app.post('/api/ebay/revise', async (req, res) => {
   <Item>
     <ItemID>${itemId}</ItemID>
     ${titleXml}
+    ${qtyXml}
     ${descXml}
     ${condXml}
     ${specificsXml}
@@ -2291,6 +2295,7 @@ app.post('/api/ebay/draft', async (req, res) => {
     <Description><![CDATA[${wrappedDescription}]]></Description>
     <PrimaryCategory><CategoryID>${config.categoryId}</CategoryID></PrimaryCategory>
     <StartPrice currencyID="USD">${validPrice}</StartPrice>
+    <Quantity>${Math.max(1, parseInt(listing.quantity, 10) || 1)}</Quantity>
     <ConditionID>${conditionId}</ConditionID>
     <Country>US</Country>
     <Currency>USD</Currency>

@@ -11,7 +11,7 @@ interface ResultsEditorProps {
     itemSpecifics: Record<string, string>; category: string;
     priceRecommendation: string; priceJustification?: string; shippingEstimate: string;
     sku?: string; sellerNotes?: string; costBasis?: string; tags?: string[]; shippingLabelCost?: string;
-    collectionCodes?: string[];
+    collectionCodes?: string[]; quantity?: number;
   };
   images: File[];
   existingImageUrls?: string[];
@@ -31,6 +31,7 @@ export default function ResultsEditor({ data, images, existingImageUrls, onStage
   const [shippingEstimate, setShippingEstimate] = useState(data.shippingEstimate);
   const [itemSpecifics, setItemSpecifics] = useState<Record<string, string>>(data.itemSpecifics);
   const [sku, setSku] = useState(data.sku || '');
+  const [quantity, setQuantity] = useState<string>(data.quantity ? String(data.quantity) : '1');
   const [sellerNotes, setSellerNotes] = useState(data.sellerNotes || '');
   const [costBasis, setCostBasis] = useState(data.costBasis || '');
   const [shippingLabelCost, setShippingLabelCost] = useState(data.shippingLabelCost || '');
@@ -213,6 +214,10 @@ export default function ResultsEditor({ data, images, existingImageUrls, onStage
             <input type="text" className="input-base" value={sku} onChange={e => setSku(e.target.value)} placeholder="e.g. ITEM-001" />
           </div>
           <div>
+            <label style={{ display: 'flex', marginBottom: '8px', color: 'var(--text-secondary)' }}>Quantity <span style={{ fontSize: '0.75rem', opacity: 0.6, marginLeft: '4px' }}>(how many available)</span></label>
+            <input type="number" min="1" step="1" className="input-base" value={quantity} onChange={e => setQuantity(e.target.value)} placeholder="1" />
+          </div>
+          <div>
             <label style={{ display: 'flex', marginBottom: '8px', color: 'var(--text-secondary)' }}>
               Cost Basis (USD) <span style={{ fontSize: '0.75rem', opacity: 0.6, marginLeft: '4px' }}>(internal — what you paid)</span>
             </label>
@@ -354,7 +359,10 @@ export default function ResultsEditor({ data, images, existingImageUrls, onStage
       <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
         <button className="btn-secondary" style={{ flex: 1 }} onClick={onCancel}><X size={18} /> Discard</button>
         <button className="btn-primary" style={{ flex: 2 }} disabled={title.length > 80}
-          onClick={() => onStage({ title, condition, description, category, priceRecommendation, priceJustification, shippingEstimate, itemSpecifics, images: allImages, sku, sellerNotes, costBasis, shippingLabelCost, tags, collectionCodes })}>
+          onClick={() => {
+            const qtyNum = Math.max(1, parseInt(quantity, 10) || 1);
+            onStage({ title, condition, description, category, priceRecommendation, priceJustification, shippingEstimate, itemSpecifics, images: allImages, sku, sellerNotes, costBasis, shippingLabelCost, tags, collectionCodes, quantity: qtyNum });
+          }}>
           <Save size={18} /> Save & Stage Listing
         </button>
       </div>

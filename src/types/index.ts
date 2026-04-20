@@ -12,6 +12,7 @@ export interface StagedListing {
   priceJustification?: string;
   sku?: string;
   sellerNotes?: string;
+  quantity?: number; // defaults to 1 on push
   ebayDraftId?: string;
   archived?: boolean;
   status?: 'staged' | 'listed';

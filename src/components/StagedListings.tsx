@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Trash2, Edit2, Copy, Check, Calendar, LayoutGrid, List, Wand2, TrendingUp, X, RefreshCw, ImagePlus, GripVertical, UploadCloud, Search, ChevronDown, ShieldCheck, ShieldAlert, ShieldX, Share2, AlertTriangle } from 'lucide-react';
+import { Trash2, Edit2, Copy, Check, Calendar, LayoutGrid, List, Wand2, TrendingUp, X, RefreshCw, ImagePlus, GripVertical, UploadCloud, Search, ChevronDown, ShieldCheck, ShieldAlert, ShieldX, Share2, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import type { StagedListing, EbayPolicy } from '../types';
 import ResultsEditor from './ResultsEditor';
 import ImageSearchButton from './ImageSearchButton';
@@ -548,7 +548,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
     return (
       <div style={{ maxWidth: '800px', margin: '0 auto', height: '80vh' }}>
         <ResultsEditor
-          data={{ title: l.title, description: l.description, condition: l.condition, category: l.category, priceRecommendation: l.priceRecommendation, shippingEstimate: l.shippingEstimate, itemSpecifics: l.itemSpecifics, sku: l.sku, sellerNotes: l.sellerNotes, costBasis: l.costBasis, shippingLabelCost: l.shippingLabelCost, tags: l.tags, collectionCodes: l.collectionCodes }}
+          data={{ title: l.title, description: l.description, condition: l.condition, category: l.category, priceRecommendation: l.priceRecommendation, shippingEstimate: l.shippingEstimate, itemSpecifics: l.itemSpecifics, sku: l.sku, sellerNotes: l.sellerNotes, costBasis: l.costBasis, shippingLabelCost: l.shippingLabelCost, tags: l.tags, collectionCodes: l.collectionCodes, quantity: l.quantity }}
           images={[]}
           existingImageUrls={l.images || []}
           appPassword={appPassword}
@@ -611,6 +611,21 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
       </button>
       <button className="btn-icon" title="Cross-post to other platforms" onClick={() => setCrossPostListing(listing)}>
         <Share2 size={18} />
+      </button>
+      <button
+        className="btn-icon"
+        title="Mark as Listed without pushing to eBay (for items already on eBay)"
+        onClick={() => {
+          const id = window.prompt(
+            `Mark "${listing.title.substring(0, 40)}..." as Listed without pushing to eBay?\n\nEnter the eBay item ID for this listing (or leave blank if unknown):`,
+            ''
+          );
+          if (id === null) return; // user cancelled
+          onMoveToListed(listing, id.trim());
+          toast('Listing moved to Listed.', 'success');
+        }}
+      >
+        <CheckCircle2 size={18} />
       </button>
       <button className="btn-icon" style={{ color: '#ef4444' }}
         onClick={() => onDelete(listing.id)}

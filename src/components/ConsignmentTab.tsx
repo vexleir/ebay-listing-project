@@ -109,7 +109,7 @@ export default function ConsignmentTab(props: ConsignmentTabProps) {
             shippingEstimate: l.shippingEstimate, itemSpecifics: l.itemSpecifics,
             sku: l.sku, sellerNotes: l.sellerNotes, costBasis: l.costBasis,
             shippingLabelCost: l.shippingLabelCost, tags: l.tags,
-            collectionCodes: l.collectionCodes,
+            collectionCodes: l.collectionCodes, quantity: l.quantity,
           }}
           images={[]}
           existingImageUrls={l.images || []}

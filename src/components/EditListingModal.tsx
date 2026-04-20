@@ -48,6 +48,7 @@ export default function EditListingModal({ listing, appPassword, onClose, onSave
   const [condition, setCondition] = useState(() => conditionTextToId(listing.condition || ''));
   const [description, setDescription] = useState(listing.description || '');
   const [sku, setSku] = useState(listing.sku || '');
+  const [quantity, setQuantity] = useState<string>(listing.quantity ? String(listing.quantity) : '1');
   const [sellerNotes, setSellerNotes] = useState(listing.sellerNotes || '');
   const [specifics, setSpecifics] = useState<{ name: string; value: string }[]>(
     Object.entries(listing.itemSpecifics || {}).map(([name, value]) => ({ name, value }))
@@ -64,6 +65,7 @@ export default function EditListingModal({ listing, appPassword, onClose, onSave
     condition: CONDITIONS.find(c => c.id === condition)?.label || listing.condition,
     description,
     sku: sku || undefined,
+    quantity: Math.max(1, parseInt(quantity, 10) || 1),
     sellerNotes: sellerNotes || undefined,
     itemSpecifics: Object.fromEntries(
       specifics.filter(s => s.name.trim() && s.value.trim()).map(s => [s.name.trim(), s.value.trim()])
@@ -107,6 +109,7 @@ export default function EditListingModal({ listing, appPassword, onClose, onSave
           description: updates.description,
           conditionId: condition,
           itemSpecifics: specifics.filter(s => s.name.trim() && s.value.trim()),
+          quantity: updates.quantity,
         })
       });
       const data = await resp.json();
@@ -204,9 +207,13 @@ export default function EditListingModal({ listing, appPassword, onClose, onSave
               <input className="input-base" value={sku} onChange={e => setSku(e.target.value)} />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>Seller Notes (internal)</label>
-              <input className="input-base" value={sellerNotes} onChange={e => setSellerNotes(e.target.value)} />
+              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>Quantity</label>
+              <input className="input-base" type="number" min="1" step="1" value={quantity} onChange={e => setQuantity(e.target.value)} />
             </div>
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>Seller Notes (internal)</label>
+            <input className="input-base" value={sellerNotes} onChange={e => setSellerNotes(e.target.value)} />
           </div>
         </div>
 
