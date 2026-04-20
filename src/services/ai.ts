@@ -17,7 +17,7 @@ export async function fileToGenerativePart(file: File): Promise<Part> {
   });
 }
 
-export async function generateListing(images: File[], instructions: string, appPassword: string) {
+export async function generateListing(images: File[], instructions: string, appPassword: string, signal?: AbortSignal) {
   const imageParts = await Promise.all(images.map(fileToGenerativePart));
 
   const resp = await fetch('/api/generate', {
@@ -26,7 +26,8 @@ export async function generateListing(images: File[], instructions: string, appP
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${appPassword}`
     },
-    body: JSON.stringify({ imageParts, instructions })
+    body: JSON.stringify({ imageParts, instructions }),
+    signal
   });
 
   if (!resp.ok) {

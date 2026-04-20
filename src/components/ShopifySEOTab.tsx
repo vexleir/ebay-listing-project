@@ -37,14 +37,28 @@ function displayValue(field: SEOFieldKey, value: string): string {
   return value || '';
 }
 
-function ScoreBadge({ score, grade }: { score: number; grade: string }) {
+function ScoreBadge({ score }: { score: import('../types').ShopifySEOScore }) {
+  const [hover, setHover] = useState(false);
   const color =
-    grade === 'A' || grade === 'B' ? '#10b981'
-    : grade === 'C' ? '#f59e0b'
+    score.grade === 'A' || score.grade === 'B' ? '#10b981'
+    : score.grade === 'C' ? '#f59e0b'
     : '#ef4444';
-  const deg = Math.max(0, Math.min(360, score * 3.6));
+  const deg = Math.max(0, Math.min(360, score.total * 3.6));
+
+  const rows: Array<{ label: string; got: number; max: number; hint: string }> = [
+    { label: 'Title length', got: score.breakdown.titleLength, max: 25, hint: '50–70 chars = 25 pts · 40–80 = 18 · ≥20 = 10' },
+    { label: 'Description length', got: score.breakdown.descriptionLength, max: 25, hint: '≥300 chars = 25 pts · ≥100 = 12 · any = 4' },
+    { label: 'SEO meta title', got: score.breakdown.hasSeoTitle, max: 20, hint: 'Present = 20 pts · missing = 0' },
+    { label: 'SEO meta description', got: score.breakdown.hasSeoDescription, max: 20, hint: 'Present = 20 pts · missing = 0' },
+    { label: 'Tags', got: score.breakdown.tagCount, max: 10, hint: '≥3 tags = 10 pts · ≥1 = 5' },
+  ];
+
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+    <div
+      style={{ display: 'flex', alignItems: 'center', gap: '8px', position: 'relative', cursor: 'help' }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
       <div style={{
         width: 36, height: 36, borderRadius: '50%',
         background: `conic-gradient(${color} ${deg}deg, rgba(255,255,255,0.08) 0deg)`,
@@ -54,9 +68,44 @@ function ScoreBadge({ score, grade }: { score: number; grade: string }) {
           position: 'absolute', inset: 3, borderRadius: '50%', background: 'var(--bg-primary, #0f0f14)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: '0.72rem', fontWeight: 700, color,
-        }}>{grade}</div>
+        }}>{score.grade}</div>
       </div>
-      <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>{score}</span>
+      <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>{score.total}</span>
+
+      {hover && (
+        <div
+          role="tooltip"
+          style={{
+            position: 'absolute', top: '100%', left: 0, marginTop: '6px', zIndex: 50,
+            background: 'rgba(15,15,20,0.98)', border: '1px solid var(--border-color)',
+            borderRadius: '8px', padding: '10px 12px', minWidth: '280px',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.45)', pointerEvents: 'none',
+          }}
+        >
+          <div style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: '8px', color: 'var(--text-primary)', display: 'flex', justifyContent: 'space-between' }}>
+            <span>SEO score breakdown</span>
+            <span style={{ color }}>{score.total} / 100 &middot; {score.grade}</span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {rows.map(r => {
+              const pct = r.max > 0 ? (r.got / r.max) * 100 : 0;
+              const rowColor = pct === 100 ? '#10b981' : pct >= 50 ? '#f59e0b' : '#ef4444';
+              return (
+                <div key={r.label}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-primary)' }}>
+                    <span>{r.label}</span>
+                    <span style={{ color: rowColor, fontWeight: 600 }}>{r.got} / {r.max}</span>
+                  </div>
+                  <div style={{ height: '3px', background: 'rgba(255,255,255,0.08)', borderRadius: '2px', overflow: 'hidden', margin: '3px 0' }}>
+                    <div style={{ width: `${pct}%`, height: '100%', background: rowColor }} />
+                  </div>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)' }}>{r.hint}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -636,7 +685,7 @@ export default function ShopifySEOTab({ appPassword, isShopifyConnected }: Shopi
                     </div>
 
                     <div onClick={e => e.stopPropagation()}>
-                      <ScoreBadge score={score.total} grade={score.grade} />
+                      <ScoreBadge score={score} />
                     </div>
 
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>

@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect, useMemo } from 'react';
-import { UploadCloud, X, Sparkles, CheckCircle2, Circle, Plus, Layers, Trash2, RotateCw, AlertTriangle, Check } from 'lucide-react';
+import { UploadCloud, X, Sparkles, CheckCircle2, Circle, Plus, Layers, Trash2, RotateCw, AlertTriangle, Check, Ban } from 'lucide-react';
 import { generateListing } from '../services/ai';
 import type { StagedListing } from '../types';
 import { useToast } from '../context/ToastContext';
@@ -35,6 +35,7 @@ interface BulkUploaderProps {
 }
 
 const CONCURRENCY = 3;
+const GENERATE_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes per group before auto-abort
 
 const fileToDataUrl = (file: File) =>
   new Promise<string>((resolve, reject) => {
@@ -152,13 +153,37 @@ export default function BulkUploader({ onStage, appPassword }: BulkUploaderProps
     setGroups(prev => prev.filter(g => g.id !== groupId));
   };
 
-  const generateOne = async (group: Group): Promise<Partial<Group>> => {
+  // Per-group AbortControllers so stuck/hung groups can be cancelled individually.
+  const abortersRef = useRef<Map<string, AbortController>>(new Map());
+  // Keep a ref of groups so the worker loop reads the freshest files when it starts a job.
+  const groupsRef = useRef<Group[]>([]);
+  useEffect(() => { groupsRef.current = groups; }, [groups]);
+
+  const generateOne = async (group: Group, signal: AbortSignal): Promise<Partial<Group>> => {
     try {
-      const result = await generateListing(group.files, '', appPassword);
+      const result = await generateListing(group.files, '', appPassword, signal);
       return { status: 'success', result, error: undefined };
     } catch (e: any) {
-      return { status: 'failed', error: e?.message || 'Generation failed' };
+      const msg = e?.name === 'AbortError' ? 'Cancelled (timed out or manually stopped)' : (e?.message || 'Generation failed');
+      return { status: 'failed', error: msg };
     }
+  };
+
+  const runOne = async (id: string) => {
+    const controller = new AbortController();
+    abortersRef.current.set(id, controller);
+    const timer = setTimeout(() => controller.abort(), GENERATE_TIMEOUT_MS);
+    setGroups(prev => prev.map(g => g.id === id ? { ...g, status: 'generating', error: undefined } : g));
+    const current = groupsRef.current.find(g => g.id === id);
+    if (!current) {
+      clearTimeout(timer);
+      abortersRef.current.delete(id);
+      return;
+    }
+    const patch = await generateOne(current, controller.signal);
+    clearTimeout(timer);
+    abortersRef.current.delete(id);
+    setGroups(prev => prev.map(g => g.id === id ? { ...g, ...patch } : g));
   };
 
   const runPool = async (targetIds: string[]) => {
@@ -167,23 +192,14 @@ export default function BulkUploader({ onStage, appPassword }: BulkUploaderProps
       while (queue.length > 0) {
         const id = queue.shift();
         if (!id) continue;
-        setGroups(prev => prev.map(g => g.id === id ? { ...g, status: 'generating', error: undefined } : g));
-        // Read fresh group from state via ref workaround — we capture at call time
-        const current = groupsRef.current.find(g => g.id === id);
-        if (!current) continue;
-        const patch = await generateOne(current);
-        setGroups(prev => prev.map(g => g.id === id ? { ...g, ...patch } : g));
+        await runOne(id);
       }
     });
     await Promise.all(workers);
   };
 
-  // Keep a ref of groups so the worker loop reads fresh files when it starts a job
-  const groupsRef = useRef<Group[]>([]);
-  useEffect(() => { groupsRef.current = groups; }, [groups]);
-
   const handleGenerateAll = async () => {
-    const pending = groups.filter(g => g.status === 'pending' || g.status === 'failed').filter(g => !g.staged);
+    const pending = groups.filter(g => (g.status === 'pending' || g.status === 'failed') && !g.staged);
     if (pending.length === 0) {
       toast('No groups to generate. Create at least one group first.', 'info');
       return;
@@ -196,12 +212,17 @@ export default function BulkUploader({ onStage, appPassword }: BulkUploaderProps
     }
   };
 
-  const handleRetryGroup = async (groupId: string) => {
-    setIsGenerating(true);
-    try {
-      await runPool([groupId]);
-    } finally {
-      setIsGenerating(false);
+  const handleRetryGroup = (groupId: string) => {
+    // Fire independently — doesn't block on the global batch pool.
+    void runOne(groupId);
+  };
+
+  const handleCancelGroup = (groupId: string) => {
+    const controller = abortersRef.current.get(groupId);
+    if (controller) controller.abort();
+    else {
+      // No in-flight request (shouldn't happen, but be defensive): mark failed directly.
+      setGroups(prev => prev.map(g => g.id === groupId ? { ...g, status: 'failed', error: 'Cancelled' } : g));
     }
   };
 
@@ -391,7 +412,7 @@ export default function BulkUploader({ onStage, appPassword }: BulkUploaderProps
               <button
                 className="btn-primary"
                 onClick={handleStageAll}
-                disabled={isGenerating || isStaging || stageableCount === 0}
+                disabled={isStaging || stageableCount === 0}
                 style={{ padding: '10px 16px' }}
               >
                 {isStaging ? 'Staging…' : <>Stage {stageableCount} successful</>}
@@ -411,7 +432,8 @@ export default function BulkUploader({ onStage, appPassword }: BulkUploaderProps
                 onRemoveFile={(f) => removeFileFromGroup(g.id, f)}
                 onRemove={() => removeGroup(g.id)}
                 onRetry={() => handleRetryGroup(g.id)}
-                busy={isGenerating || isStaging}
+                onCancel={() => handleCancelGroup(g.id)}
+                isStaging={isStaging}
               />
             ))}
           </div>
@@ -438,10 +460,13 @@ interface GroupCardProps {
   onRemoveFile: (f: File) => void;
   onRemove: () => void;
   onRetry: () => void;
-  busy: boolean;
+  onCancel: () => void;
+  isStaging: boolean;
 }
 
-function GroupCard({ group, index, getUrl, canAddSelection, onAddSelection, onRemoveFile, onRemove, onRetry, busy }: GroupCardProps) {
+function GroupCard({ group, index, getUrl, canAddSelection, onAddSelection, onRemoveFile, onRemove, onRetry, onCancel, isStaging }: GroupCardProps) {
+  const isGenerating = group.status === 'generating';
+  const editDisabled = isGenerating || isStaging || group.staged;
   const statusBadge = () => {
     if (group.staged) return <Badge color="#10b981" icon={<Check size={12} />} label="Staged" />;
     switch (group.status) {
@@ -461,18 +486,23 @@ function GroupCard({ group, index, getUrl, canAddSelection, onAddSelection, onRe
           {statusBadge()}
         </div>
         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-          {canAddSelection && (
-            <button onClick={onAddSelection} disabled={busy} style={{ fontSize: '0.8rem', padding: '4px 10px', background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.4)', color: 'var(--text-primary)', borderRadius: '6px', cursor: 'pointer' }}>
+          {canAddSelection && !group.staged && !isGenerating && (
+            <button onClick={onAddSelection} disabled={isStaging} style={{ fontSize: '0.8rem', padding: '4px 10px', background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.4)', color: 'var(--text-primary)', borderRadius: '6px', cursor: 'pointer' }}>
               <Plus size={12} style={{ verticalAlign: 'middle' }} /> Add selected
             </button>
           )}
           {group.status === 'failed' && !group.staged && (
-            <button onClick={onRetry} disabled={busy} style={{ fontSize: '0.8rem', padding: '4px 10px', background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.4)', color: 'var(--text-primary)', borderRadius: '6px', cursor: 'pointer' }}>
+            <button onClick={onRetry} disabled={isStaging} style={{ fontSize: '0.8rem', padding: '4px 10px', background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.4)', color: 'var(--text-primary)', borderRadius: '6px', cursor: 'pointer' }}>
               <RotateCw size={12} style={{ verticalAlign: 'middle' }} /> Retry
             </button>
           )}
-          {!group.staged && (
-            <button onClick={onRemove} disabled={busy} title="Remove group (returns images to ungrouped)" style={{ fontSize: '0.8rem', padding: '4px 10px', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.4)', color: '#fca5a5', borderRadius: '6px', cursor: 'pointer' }}>
+          {isGenerating && (
+            <button onClick={onCancel} title="Cancel this generation" style={{ fontSize: '0.8rem', padding: '4px 10px', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.4)', color: '#fca5a5', borderRadius: '6px', cursor: 'pointer' }}>
+              <Ban size={12} style={{ verticalAlign: 'middle' }} /> Cancel
+            </button>
+          )}
+          {!group.staged && !isGenerating && (
+            <button onClick={onRemove} disabled={editDisabled} title="Remove group (returns images to ungrouped)" style={{ fontSize: '0.8rem', padding: '4px 10px', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.4)', color: '#fca5a5', borderRadius: '6px', cursor: 'pointer' }}>
               <Trash2 size={12} style={{ verticalAlign: 'middle' }} /> Ungroup
             </button>
           )}
@@ -483,10 +513,10 @@ function GroupCard({ group, index, getUrl, canAddSelection, onAddSelection, onRe
         {group.files.map((f, i) => (
           <div key={i} style={{ position: 'relative', width: '72px', height: '72px', borderRadius: '6px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
             <img src={getUrl(f)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            {!group.staged && (
+            {!group.staged && !isGenerating && (
               <button
                 onClick={() => onRemoveFile(f)}
-                disabled={busy}
+                disabled={isStaging}
                 style={{ position: 'absolute', top: '3px', right: '3px', background: 'rgba(0,0,0,0.75)', border: 'none', color: 'white', borderRadius: '50%', width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
               >
                 <X size={10} />
