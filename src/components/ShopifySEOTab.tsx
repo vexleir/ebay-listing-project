@@ -1,8 +1,8 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import {
   RefreshCw, CheckSquare, Square, ExternalLink, Sparkles, ArrowRight,
-  X, Check, XCircle, Loader2, ChevronDown, ChevronUp, AlertCircle, Pencil
+  X, Check, XCircle, Loader2, ChevronDown, ChevronUp, AlertCircle, Pencil, Zap, StopCircle
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import type {
@@ -35,6 +35,15 @@ function displayValue(field: SEOFieldKey, value: string): string {
     return plain.length > 280 ? plain.substring(0, 280) + '…' : plain;
   }
   return value || '';
+}
+
+function StatTile({ label, value, color }: { label: string; value: number; color?: string }) {
+  return (
+    <div style={{ padding: '8px 10px', background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-color)', borderRadius: '6px' }}>
+      <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</div>
+      <div style={{ fontSize: '1.2rem', fontWeight: 600, color: color || 'var(--text-primary)', marginTop: '2px' }}>{value}</div>
+    </div>
+  );
 }
 
 function ScoreBadge({ score }: { score: import('../types').ShopifySEOScore }) {
@@ -128,6 +137,24 @@ export default function ShopifySEOTab({ appPassword, isShopifyConnected }: Shopi
   const [bulkPushProgress, setBulkPushProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
   const [hidePerfectScore, setHidePerfectScore] = useState(true);
   const [catalogCodes, setCatalogCodes] = useState<Array<{ code: string; name: string }>>([]);
+
+  // Auto mode state — loads every product, optimizes any scoring below the threshold, and pushes.
+  const [isAutoRunning, setIsAutoRunning] = useState(false);
+  const [autoThreshold, setAutoThreshold] = useState(90);
+  const [autoPhase, setAutoPhase] = useState('');
+  const [autoLog, setAutoLog] = useState<string[]>([]);
+  const [autoStats, setAutoStats] = useState({
+    totalProducts: 0, needsOptimization: 0,
+    optimized: 0, optimizeFailed: 0,
+    pushed: 0, pushSkipped: 0, pushFailed: 0,
+  });
+  const autoAbortRef = useRef(false);
+  const autoLogRef = useRef<HTMLDivElement | null>(null);
+  const appendAutoLog = (line: string) =>
+    setAutoLog(prev => [...prev.slice(-199), `[${new Date().toLocaleTimeString()}] ${line}`]);
+  useEffect(() => {
+    if (autoLogRef.current) autoLogRef.current.scrollTop = autoLogRef.current.scrollHeight;
+  }, [autoLog]);
 
   const bearerHeaders = () => ({ Authorization: `Bearer ${appPassword}` });
   const apiHeaders = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${appPassword}` });
@@ -493,6 +520,174 @@ export default function ShopifySEOTab({ appPassword, isShopifyConnected }: Shopi
     }
   };
 
+  const stopAutoRun = () => {
+    autoAbortRef.current = true;
+    appendAutoLog('Stop requested — finishing current operation…');
+  };
+
+  const handleAutoRun = async () => {
+    if (!isShopifyConnected) { toast('Connect Shopify first.', 'error'); return; }
+    const confirmed = window.confirm(
+      `Auto mode will:\n\n` +
+      `1. Load every product from Shopify\n` +
+      `2. Find products scoring below ${autoThreshold}\n` +
+      `3. Run AI optimization on each\n` +
+      `4. Push changes back to Shopify\n\n` +
+      `This cannot be undone. Continue?`
+    );
+    if (!confirmed) return;
+
+    autoAbortRef.current = false;
+    setIsAutoRunning(true);
+    setAutoLog([]);
+    setAutoStats({ totalProducts: 0, needsOptimization: 0, optimized: 0, optimizeFailed: 0, pushed: 0, pushSkipped: 0, pushFailed: 0 });
+
+    const OPTIMIZE_BATCH = 10;
+    const local = { optimized: 0, optimizeFailed: 0, pushed: 0, pushSkipped: 0, pushFailed: 0 };
+
+    try {
+      // Phase 1: Load all pages
+      setAutoPhase('Loading products');
+      appendAutoLog('Fetching all Shopify products…');
+      let allProducts: ShopifyProduct[] = [];
+      let cursor: string | null = null;
+      let page = 0;
+      while (true) {
+        if (autoAbortRef.current) { appendAutoLog('Aborted during load.'); return; }
+        page++;
+        const url = `/api/shopify/products${cursor ? `?after=${encodeURIComponent(cursor)}` : ''}`;
+        const resp = await fetch(url, { headers: bearerHeaders() });
+        if (!resp.ok) throw new Error(`Load failed on page ${page}: ${resp.statusText}`);
+        const data = await resp.json();
+        const batch: ShopifyProduct[] = data.products || [];
+        allProducts = [...allProducts, ...batch];
+        appendAutoLog(`Loaded page ${page} — ${batch.length} products (total: ${allProducts.length})`);
+        if (!data.pageInfo?.hasNextPage) break;
+        cursor = data.pageInfo.endCursor;
+      }
+      setProducts(allProducts);
+      setHasFetched(true);
+      setAutoStats(s => ({ ...s, totalProducts: allProducts.length }));
+
+      // Phase 2: Filter by score
+      setAutoPhase('Filtering below threshold');
+      const targets = allProducts.filter(p => computeShopifySEOScore(p).total < autoThreshold);
+      setAutoStats(s => ({ ...s, needsOptimization: targets.length }));
+      appendAutoLog(`${targets.length} of ${allProducts.length} products score below ${autoThreshold}.`);
+      if (targets.length === 0) {
+        appendAutoLog('Nothing to do — all products meet the threshold.');
+        toast('All products already meet the SEO threshold.', 'success');
+        setAutoPhase('Complete');
+        return;
+      }
+
+      // Phase 3: Optimize + push in batches
+      for (let i = 0; i < targets.length; i += OPTIMIZE_BATCH) {
+        if (autoAbortRef.current) { appendAutoLog('Aborted between batches.'); break; }
+        const batch = targets.slice(i, i + OPTIMIZE_BATCH);
+        const batchNum = Math.floor(i / OPTIMIZE_BATCH) + 1;
+        const totalBatches = Math.ceil(targets.length / OPTIMIZE_BATCH);
+        setAutoPhase(`Optimizing batch ${batchNum}/${totalBatches}`);
+        appendAutoLog(`Optimizing batch ${batchNum}/${totalBatches} (${batch.length} products)…`);
+
+        let incoming: SEOProductSuggestion[] = [];
+        try {
+          const resp = await fetch('/api/shopify/seo-optimize', {
+            method: 'POST', headers: apiHeaders(),
+            body: JSON.stringify({ products: batch }),
+          });
+          if (!resp.ok) {
+            const err = await resp.json().catch(() => ({ error: resp.statusText }));
+            throw new Error(err.error || 'Optimize call failed');
+          }
+          const data = await resp.json();
+          incoming = data.suggestions || [];
+          const batchFailed = batch.length - incoming.length;
+          local.optimized += incoming.length;
+          local.optimizeFailed += batchFailed;
+          setAutoStats(s => ({ ...s, optimized: local.optimized, optimizeFailed: local.optimizeFailed }));
+          setSuggestions(prev => {
+            const map = new Map(prev.map(s => [s.productId, s]));
+            for (const s of incoming) map.set(s.productId, s);
+            return Array.from(map.values());
+          });
+          appendAutoLog(`  → Optimized ${incoming.length}/${batch.length}${batchFailed > 0 ? ` (${batchFailed} failed)` : ''}`);
+        } catch (e: any) {
+          local.optimizeFailed += batch.length;
+          setAutoStats(s => ({ ...s, optimizeFailed: local.optimizeFailed }));
+          appendAutoLog(`  ✗ Batch optimize failed: ${e.message}`);
+          continue; // skip push for this batch
+        }
+
+        // Push each one
+        setAutoPhase(`Pushing batch ${batchNum}/${totalBatches}`);
+        for (const s of incoming) {
+          if (autoAbortRef.current) { appendAutoLog('Aborted during push.'); break; }
+          const payload: Record<string, any> = {};
+          for (const f of s.fields) {
+            if (!f.after.trim()) continue;
+            if (f.after.trim() === f.before.trim()) continue;
+            if (f.field === 'tags') {
+              payload.tags = f.after.split(',').map(t => t.trim()).filter(Boolean);
+            } else {
+              payload[f.field] = f.after;
+            }
+          }
+          if (Object.keys(payload).length === 0) {
+            local.pushSkipped++;
+            setAutoStats(st => ({ ...st, pushSkipped: local.pushSkipped }));
+            appendAutoLog(`  ↷ Skipped "${s.productTitle.substring(0, 50)}" — no meaningful changes`);
+            continue;
+          }
+          const numericId = s.productId.includes('/') ? s.productId.split('/').pop() : s.productId;
+          try {
+            const pushResp = await fetch(`/api/shopify/products/${numericId}`, {
+              method: 'PUT', headers: apiHeaders(), body: JSON.stringify(payload),
+            });
+            if (!pushResp.ok) {
+              const err = await pushResp.json().catch(() => ({ error: pushResp.statusText }));
+              throw new Error(err.error || `HTTP ${pushResp.status}`);
+            }
+            local.pushed++;
+            setAutoStats(st => ({ ...st, pushed: local.pushed }));
+            setPushedIds(prev => new Set([...prev, s.productId]));
+            setProducts(prev => prev.map(p => {
+              if (p.id !== s.productId) return p;
+              return {
+                ...p,
+                title: payload.title ?? p.title,
+                descriptionHtml: payload.descriptionHtml ?? p.descriptionHtml,
+                seo: {
+                  title: payload.seoTitle ?? p.seo.title,
+                  description: payload.seoDescription ?? p.seo.description,
+                },
+                tags: payload.tags ?? p.tags,
+                productType: payload.productType ?? p.productType,
+                vendor: payload.vendor ?? p.vendor,
+              };
+            }));
+            appendAutoLog(`  ✓ Pushed "${s.productTitle.substring(0, 50)}" (${Object.keys(payload).length} field${Object.keys(payload).length !== 1 ? 's' : ''})`);
+          } catch (e: any) {
+            local.pushFailed++;
+            setAutoStats(st => ({ ...st, pushFailed: local.pushFailed }));
+            appendAutoLog(`  ✗ Push failed "${s.productTitle.substring(0, 50)}": ${e.message}`);
+          }
+        }
+      }
+
+      setAutoPhase(autoAbortRef.current ? 'Stopped' : 'Complete');
+      const summary = `Auto run ${autoAbortRef.current ? 'stopped' : 'complete'}: pushed ${local.pushed}, skipped ${local.pushSkipped}, failed ${local.optimizeFailed + local.pushFailed}.`;
+      appendAutoLog(summary);
+      toast(summary, local.pushFailed + local.optimizeFailed === 0 ? 'success' : 'info');
+    } catch (e: any) {
+      appendAutoLog(`✗ Fatal: ${e.message}`);
+      toast('Auto mode error: ' + e.message, 'error');
+      setAutoPhase('Error');
+    } finally {
+      setIsAutoRunning(false);
+    }
+  };
+
   const pendingPushCount = useMemo(
     () => suggestions.filter(s => !pushedIds.has(s.productId)).length,
     [suggestions, pushedIds]
@@ -519,17 +714,60 @@ export default function ShopifySEOTab({ appPassword, isShopifyConnected }: Shopi
           <button
             className="btn-primary"
             onClick={() => handleLoadProducts(null)}
-            disabled={isFetchingProducts || !isShopifyConnected}
+            disabled={isFetchingProducts || !isShopifyConnected || isAutoRunning}
             style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
           >
             <RefreshCw size={16} style={{ animation: isFetchingProducts ? 'spin 1s linear infinite' : 'none' }} />
             {isFetchingProducts ? 'Loading…' : hasFetched ? 'Reload Products' : 'Load Products'}
           </button>
+          {!isAutoRunning ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                Below
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={autoThreshold}
+                  onChange={e => setAutoThreshold(Math.max(1, Math.min(100, Number(e.target.value) || 90)))}
+                  disabled={isOptimizing || isBulkPushing}
+                  style={{ width: '50px', padding: '4px 6px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--glass-bg)', color: 'var(--text-primary)', fontSize: '0.85rem' }}
+                />
+              </label>
+              <button
+                onClick={handleAutoRun}
+                disabled={!isShopifyConnected || isOptimizing || isBulkPushing}
+                title={`Load all products, AI-optimize any scoring below ${autoThreshold}, and push to Shopify automatically`}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '6px',
+                  padding: '8px 14px', borderRadius: '6px',
+                  background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                  border: '1px solid rgba(245,158,11,0.5)',
+                  color: '#fff', fontSize: '0.88rem', fontWeight: 600, cursor: 'pointer',
+                }}
+              >
+                <Zap size={16} /> Auto Mode
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={stopAutoRun}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '6px',
+                padding: '8px 14px', borderRadius: '6px',
+                background: 'rgba(239,68,68,0.15)',
+                border: '1px solid rgba(239,68,68,0.5)',
+                color: '#ef4444', fontSize: '0.88rem', fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              <StopCircle size={16} /> Stop Auto
+            </button>
+          )}
           {hasFetched && (
             <button
               className="btn-primary"
               onClick={handleOptimize}
-              disabled={isOptimizing || isBulkPushing || selectedIds.size === 0}
+              disabled={isOptimizing || isBulkPushing || isAutoRunning || selectedIds.size === 0}
               style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'linear-gradient(135deg, #10b981, #059669)' }}
             >
               <Sparkles size={16} style={{ animation: isOptimizing ? 'spin 1s linear infinite' : 'none' }} />
@@ -553,7 +791,7 @@ export default function ShopifySEOTab({ appPassword, isShopifyConnected }: Shopi
           {hasFetched && pendingPushCount > 0 && (
             <button
               onClick={handleBulkAcceptAndPush}
-              disabled={isBulkPushing || isOptimizing}
+              disabled={isBulkPushing || isOptimizing || isAutoRunning}
               title="Accept every AI-suggested change for all optimized products and push them to Shopify without per-product review"
               style={{
                 display: 'flex', alignItems: 'center', gap: '6px',
@@ -580,6 +818,67 @@ export default function ShopifySEOTab({ appPassword, isShopifyConnected }: Shopi
           )}
         </div>
       </div>
+
+      {/* Auto Mode progress panel */}
+      {(isAutoRunning || autoLog.length > 0) && (
+        <div style={{
+          background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.35)',
+          borderRadius: '8px', padding: '1rem', marginBottom: '1.5rem',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {isAutoRunning ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite', color: '#f59e0b' }} /> : <Check size={16} style={{ color: '#10b981' }} />}
+              <strong style={{ color: '#f59e0b' }}>Auto Mode</strong>
+              <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>{autoPhase || 'Idle'}</span>
+            </div>
+            {!isAutoRunning && (
+              <button
+                onClick={() => { setAutoLog([]); setAutoPhase(''); }}
+                style={{ background: 'transparent', border: '1px solid var(--border-color)', color: 'var(--text-secondary)', borderRadius: '6px', padding: '3px 10px', fontSize: '0.75rem', cursor: 'pointer' }}
+              >
+                Clear log
+              </button>
+            )}
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '8px', marginBottom: '10px' }}>
+            <StatTile label="Loaded" value={autoStats.totalProducts} />
+            <StatTile label={`< ${autoThreshold}`} value={autoStats.needsOptimization} color="#f59e0b" />
+            <StatTile label="Optimized" value={autoStats.optimized} color="#10b981" />
+            <StatTile label="Pushed" value={autoStats.pushed} color="#10b981" />
+            <StatTile label="Skipped" value={autoStats.pushSkipped} color="var(--text-secondary)" />
+            <StatTile label="Failed" value={autoStats.optimizeFailed + autoStats.pushFailed} color={autoStats.optimizeFailed + autoStats.pushFailed > 0 ? '#ef4444' : undefined} />
+          </div>
+
+          {autoStats.needsOptimization > 0 && (
+            <div style={{ height: '4px', background: 'rgba(255,255,255,0.08)', borderRadius: '2px', overflow: 'hidden', marginBottom: '10px' }}>
+              <div style={{
+                width: `${Math.min(100, ((autoStats.pushed + autoStats.pushSkipped + autoStats.pushFailed) / autoStats.needsOptimization) * 100)}%`,
+                height: '100%', background: 'linear-gradient(90deg, #f59e0b, #10b981)',
+                transition: 'width 0.3s ease',
+              }} />
+            </div>
+          )}
+
+          <div
+            ref={autoLogRef}
+            style={{
+              maxHeight: '220px', overflowY: 'auto',
+              background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-color)',
+              borderRadius: '6px', padding: '8px 10px',
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+              fontSize: '0.75rem', lineHeight: 1.5,
+              color: 'var(--text-secondary)',
+            }}
+          >
+            {autoLog.length === 0 ? (
+              <span style={{ opacity: 0.6 }}>Waiting to start…</span>
+            ) : (
+              autoLog.map((line, i) => <div key={i} style={{ whiteSpace: 'pre-wrap' }}>{line}</div>)
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Not connected warning */}
       {!isShopifyConnected && (
