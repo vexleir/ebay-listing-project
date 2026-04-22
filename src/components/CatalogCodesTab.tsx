@@ -13,6 +13,31 @@ interface CatalogCodesTabProps {
 
 const CODE_RE = /^[A-Z]{2}\d{3}$/;
 
+function generateCatalogCode(name: string, existing: CatalogCode[]): string {
+  const cleaned = name
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toUpperCase()
+    .replace(/[^A-Z\s]/g, ' ')
+    .trim();
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  let prefix = '';
+  if (words.length >= 2) prefix = words[0][0] + words[1][0];
+  else if (words.length === 1 && words[0].length >= 2) prefix = words[0].slice(0, 2);
+  else return '';
+
+  const taken = new Set(existing.map(c => c.code));
+  for (let i = 1; i <= 9; i++) {
+    const c = `${prefix}${i}00`;
+    if (!taken.has(c)) return c;
+  }
+  for (let n = 1; n <= 999; n++) {
+    const c = `${prefix}${String(n).padStart(3, '0')}`;
+    if (!taken.has(c)) return c;
+  }
+  return '';
+}
+
 export default function CatalogCodesTab({ appPassword }: CatalogCodesTabProps) {
   const { toast } = useToast();
   const [codes, setCodes] = useState<CatalogCode[]>([]);
@@ -21,6 +46,7 @@ export default function CatalogCodesTab({ appPassword }: CatalogCodesTabProps) {
 
   const [newCode, setNewCode] = useState('');
   const [newName, setNewName] = useState('');
+  const [codeManuallyEdited, setCodeManuallyEdited] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const [editingCode, setEditingCode] = useState<string | null>(null);
@@ -51,6 +77,24 @@ export default function CatalogCodesTab({ appPassword }: CatalogCodesTabProps) {
   const newCodeDuplicate = codes.some(c => c.code === normalizedNewCode);
   const canAdd = newCodeValid && !newCodeDuplicate && newName.trim().length > 0;
 
+  const handleNameChange = (val: string) => {
+    setNewName(val);
+    if (!codeManuallyEdited) {
+      setNewCode(generateCatalogCode(val, codes));
+    }
+  };
+
+  const handleCodeChange = (val: string) => {
+    const v = val.toUpperCase().slice(0, 5);
+    setNewCode(v);
+    setCodeManuallyEdited(v.length > 0);
+  };
+
+  const regenerateCode = () => {
+    setNewCode(generateCatalogCode(newName, codes));
+    setCodeManuallyEdited(false);
+  };
+
   const handleAdd = async () => {
     if (!canAdd) return;
     setSaving(true);
@@ -66,6 +110,7 @@ export default function CatalogCodesTab({ appPassword }: CatalogCodesTabProps) {
       }
       setNewCode('');
       setNewName('');
+      setCodeManuallyEdited(false);
       toast(`Added ${normalizedNewCode}`, 'success');
       await load();
     } catch (e: any) {
@@ -175,35 +220,12 @@ export default function CatalogCodesTab({ appPassword }: CatalogCodesTabProps) {
           Add new catalog code
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-            <label style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Code</label>
-            <input
-              type="text"
-              value={newCode}
-              onChange={e => setNewCode(e.target.value.toUpperCase().slice(0, 5))}
-              onKeyDown={e => { if (e.key === 'Enter') handleAdd(); }}
-              placeholder="DV100"
-              maxLength={5}
-              style={{
-                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                background: 'var(--glass-bg)',
-                border: `1px solid ${newCode && !newCodeValid ? 'rgba(239,68,68,0.4)' : 'var(--border-color)'}`,
-                borderRadius: '6px',
-                padding: '7px 10px',
-                fontSize: '0.88rem',
-                color: 'var(--text-primary)',
-                width: '110px',
-                outline: 'none',
-                textTransform: 'uppercase',
-              }}
-            />
-          </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', flex: 1, minWidth: '240px' }}>
             <label style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Display name</label>
             <input
               type="text"
               value={newName}
-              onChange={e => setNewName(e.target.value)}
+              onChange={e => handleNameChange(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') handleAdd(); }}
               placeholder="Diecast Vehicles"
               style={{
@@ -217,6 +239,55 @@ export default function CatalogCodesTab({ appPassword }: CatalogCodesTabProps) {
                 outline: 'none',
               }}
             />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+            <label style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span>Code</span>
+              {newCode && !codeManuallyEdited && (
+                <span style={{ fontSize: '0.65rem', color: '#a855f7', background: 'rgba(168,85,247,0.12)', padding: '1px 5px', borderRadius: '3px', fontWeight: 600 }}>AUTO</span>
+              )}
+            </label>
+            <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+              <input
+                type="text"
+                value={newCode}
+                onChange={e => handleCodeChange(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleAdd(); }}
+                placeholder="DV100"
+                maxLength={5}
+                style={{
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                  background: 'var(--glass-bg)',
+                  border: `1px solid ${newCode && !newCodeValid ? 'rgba(239,68,68,0.4)' : 'var(--border-color)'}`,
+                  borderRadius: '6px',
+                  padding: '7px 10px',
+                  fontSize: '0.88rem',
+                  color: 'var(--text-primary)',
+                  width: '110px',
+                  outline: 'none',
+                  textTransform: 'uppercase',
+                }}
+              />
+              <button
+                type="button"
+                onClick={regenerateCode}
+                disabled={!newName.trim()}
+                title="Regenerate from name"
+                style={{
+                  padding: '7px 8px',
+                  borderRadius: '6px',
+                  background: 'rgba(168,85,247,0.1)',
+                  border: '1px solid rgba(168,85,247,0.3)',
+                  color: '#a855f7',
+                  cursor: newName.trim() ? 'pointer' : 'not-allowed',
+                  opacity: newName.trim() ? 1 : 0.4,
+                  display: 'flex',
+                  alignItems: 'center',
+                }}
+              >
+                <RefreshCw size={14} />
+              </button>
+            </div>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
             <label style={{ fontSize: '0.72rem', color: 'transparent' }}>.</label>
