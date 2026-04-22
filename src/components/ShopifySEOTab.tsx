@@ -135,7 +135,7 @@ export default function ShopifySEOTab({ appPassword, isShopifyConnected }: Shopi
   const [pushedIds, setPushedIds] = useState<Set<string>>(new Set());
   const [isBulkPushing, setIsBulkPushing] = useState(false);
   const [bulkPushProgress, setBulkPushProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
-  const [hidePerfectScore, setHidePerfectScore] = useState(true);
+  const [hideHighScore, setHideHighScore] = useState(true);
   const [catalogCodes, setCatalogCodes] = useState<Array<{ code: string; name: string }>>([]);
 
   // Auto mode state — loads every product, optimizes any scoring below the threshold, and pushes.
@@ -183,8 +183,8 @@ export default function ShopifySEOTab({ appPassword, isShopifyConnected }: Shopi
 
   const filteredProducts = useMemo(() => {
     let result = products;
-    if (hidePerfectScore) {
-      result = result.filter(p => computeShopifySEOScore(p).total < 100);
+    if (hideHighScore) {
+      result = result.filter(p => computeShopifySEOScore(p).total < 90);
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -196,10 +196,10 @@ export default function ShopifySEOTab({ appPassword, isShopifyConnected }: Shopi
       );
     }
     return result;
-  }, [products, searchQuery, hidePerfectScore]);
+  }, [products, searchQuery, hideHighScore]);
 
-  const perfectScoreCount = useMemo(
-    () => products.filter(p => computeShopifySEOScore(p).total === 100).length,
+  const highScoreCount = useMemo(
+    () => products.filter(p => computeShopifySEOScore(p).total >= 90).length,
     [products]
   );
 
@@ -903,13 +903,13 @@ export default function ShopifySEOTab({ appPassword, isShopifyConnected }: Shopi
               <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
                 {selectedIds.size} of {products.length} selected
               </span>
-              {perfectScoreCount > 0 && (
+              {highScoreCount > 0 && (
                 <button
-                  onClick={() => setHidePerfectScore(h => !h)}
-                  style={{ background: hidePerfectScore ? 'rgba(16,185,129,0.15)' : 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.4)', borderRadius: '6px', padding: '3px 10px', cursor: 'pointer', color: '#10b981', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px' }}
+                  onClick={() => setHideHighScore(h => !h)}
+                  style={{ background: hideHighScore ? 'rgba(16,185,129,0.15)' : 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.4)', borderRadius: '6px', padding: '3px 10px', cursor: 'pointer', color: '#10b981', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px' }}
                 >
-                  {hidePerfectScore ? <Square size={13} /> : <CheckSquare size={13} />}
-                  {perfectScoreCount} perfect 100 — {hidePerfectScore ? 'show' : 'hide'}
+                  {hideHighScore ? <Square size={13} /> : <CheckSquare size={13} />}
+                  {highScoreCount} scoring 90+ — {hideHighScore ? 'show' : 'hide'}
                 </button>
               )}
             </div>
