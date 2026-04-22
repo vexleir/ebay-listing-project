@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, ShoppingBag, Shield, DollarSign, Zap, Download, Sparkles, ChevronLeft, ChevronRight, BookMarked, Layers, Users } from 'lucide-react';
+import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, ShoppingBag, Shield, DollarSign, Zap, Download, Sparkles, ChevronLeft, ChevronRight, BookMarked, Layers, Users, Telescope } from 'lucide-react';
 import './index.css';
 
 import Uploader from './components/Uploader';
@@ -11,6 +11,7 @@ import SoldListings from './components/SoldListings';
 import Analytics from './components/Analytics';
 import SettingsPanel from './components/SettingsPanel';
 import SourcingTool from './components/SourcingTool';
+import SourcingResearch from './components/SourcingResearch';
 import ListingOptimizer from './components/ListingOptimizer';
 import AdminPanel from './components/AdminPanel';
 import EbayImportTab from './components/EbayImportTab';
@@ -59,7 +60,7 @@ function App() {
   });
 
   const [stagedListings, setStagedListings] = useState<StagedListing[]>([]);
-  const [activeTab, setActiveTab] = useState<'new' | 'bulk' | 'staged' | 'listed' | 'sold' | 'analytics' | 'settings' | 'source' | 'optimizer' | 'admin' | 'ebay-import' | 'shopify-seo' | 'catalog-codes' | 'consignment'>('new');
+  const [activeTab, setActiveTab] = useState<'new' | 'bulk' | 'staged' | 'listed' | 'sold' | 'analytics' | 'settings' | 'source' | 'research' | 'optimizer' | 'admin' | 'ebay-import' | 'shopify-seo' | 'catalog-codes' | 'consignment'>('new');
   const [listedProducts, setListedProducts] = useState<StagedListing[]>([]);
   const [consignors, setConsignors] = useState<Consignor[]>([]);
   const [isLoadingListings, setIsLoadingListings] = useState(false);
@@ -595,6 +596,7 @@ function App() {
           <button title="Consignment" style={sidebarBtnStyle('consignment')} onClick={() => setActiveTab('consignment')}><Users size={18} />{sidebarLabel(`Consignment (${[...stagedListings, ...listedProducts].filter(l => l.isConsignment).length})`)}</button>
           <button title="Analytics" style={sidebarBtnStyle('analytics')} onClick={() => setActiveTab('analytics')}><BarChart2 size={18} />{sidebarLabel('Analytics')}</button>
           <button title="Source" style={sidebarBtnStyle('source')} onClick={() => setActiveTab('source')}><ShoppingBag size={18} />{sidebarLabel('Source')}</button>
+          <button title="Sourcing Research" style={sidebarBtnStyle('research')} onClick={() => setActiveTab('research')}><Telescope size={18} />{sidebarLabel('Sourcing Research')}</button>
           <button title="Optimizer" style={sidebarBtnStyle('optimizer')} onClick={() => setActiveTab('optimizer')}><Zap size={18} />{sidebarLabel('Optimizer')}</button>
           {isShopifyConnected && (
             <button title="Shopify SEO" style={sidebarBtnStyle('shopify-seo')} onClick={() => setActiveTab('shopify-seo')}><Sparkles size={18} />{sidebarLabel('Shopify SEO')}</button>
@@ -719,6 +721,14 @@ function App() {
         ) : activeTab === 'source' ? (
           <div className="animate-fade-in">
             <SourcingTool appPassword={appPassword} listed={listedProducts} />
+          </div>
+        ) : activeTab === 'research' ? (
+          <div className="animate-fade-in">
+            <SourcingResearch onBuildListing={(itemName) => {
+              setInstructions(itemName);
+              setGeneratedData(null);
+              setActiveTab('new');
+            }} />
           </div>
         ) : activeTab === 'optimizer' ? (
           <div className="animate-fade-in">
