@@ -1961,11 +1961,16 @@ app.get('/api/ebay/active-listings', async (req, res) => {
         const x = r.exec(block);
         return x ? x[1].trim() : '';
       };
-      // Collect all PictureURL values
+      // Collect all PictureURL values; fall back to GalleryURL when GetSellerList
+      // returns only the gallery thumbnail (common for older/bulk-uploaded items).
       const picRegex = /<PictureURL[^>]*>([\s\S]*?)<\/PictureURL>/g;
       const images = [];
       let pm;
       while ((pm = picRegex.exec(block)) !== null) images.push(pm[1].trim());
+      if (images.length === 0) {
+        const gallery = get('GalleryURL');
+        if (gallery) images.push(gallery);
+      }
 
       items.push({
         ebayItemId: get('ItemID'),
@@ -2051,6 +2056,10 @@ app.post('/api/ebay/refresh-listings', async (req, res) => {
       const images = [];
       let pm;
       while ((pm = picRegex.exec(block)) !== null) images.push(pm[1].trim());
+      if (images.length === 0) {
+        const gallery = get('GalleryURL');
+        if (gallery) images.push(gallery);
+      }
 
       const title = get('Title');
       const rawPrice = get('CurrentPrice') || get('BuyItNowPrice') || '';
@@ -2150,6 +2159,54 @@ app.post('/api/ebay/import-listings', async (req, res) => {
     res.json({ imported, skipped: listings.length - imported, listings: importedListings });
   } catch (e) {
     console.error('[import-listings] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/ebay/refresh-images/:id
+// Pulls the full PictureDetails for a single listing via GetItem (more reliable
+// than GetSellerList) and writes the image URLs back to the DB.
+app.post('/api/ebay/refresh-images/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const db = await getDb();
+    const listing = await db.collection('listings').findOne({ companyId: req.companyId, id });
+    if (!listing) return res.status(404).json({ error: 'Listing not found' });
+    if (!listing.ebayDraftId) return res.status(400).json({ error: 'Listing has no eBay item ID' });
+
+    const token = await getValidAccessToken(req.companyId);
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <ItemID>${listing.ebayDraftId}</ItemID>
+  <DetailLevel>ReturnAll</DetailLevel>
+  <IncludeItemSpecifics>false</IncludeItemSpecifics>
+</GetItemRequest>`;
+    const resp = await axios.post('https://api.ebay.com/ws/api.dll', xml, {
+      headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1331', 'X-EBAY-API-CALL-NAME': 'GetItem', 'X-EBAY-API-SITEID': '0', 'X-EBAY-API-IAF-TOKEN': token, 'Content-Type': 'text/xml' }
+    });
+    const body = resp.data;
+
+    const picRegex = /<PictureURL[^>]*>([\s\S]*?)<\/PictureURL>/g;
+    const images = [];
+    let pm;
+    while ((pm = picRegex.exec(body)) !== null) images.push(pm[1].trim());
+    if (images.length === 0) {
+      const galleryMatch = /<GalleryURL[^>]*>([\s\S]*?)<\/GalleryURL>/.exec(body);
+      if (galleryMatch) images.push(galleryMatch[1].trim());
+    }
+
+    if (images.length === 0) {
+      return res.status(404).json({ error: 'No images returned by eBay for this item' });
+    }
+
+    const now = Date.now();
+    await db.collection('listings').updateOne(
+      { companyId: req.companyId, id },
+      { $set: { images, updatedAt: now } }
+    );
+    res.json({ images, updatedAt: now });
+  } catch (e) {
+    console.error('[refresh-images] error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });

@@ -163,6 +163,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [stats, setStats] = useState<Record<string, { watchCount: string; hitCount: string; quantitySold: string } | null>>({});
   const [loadingStatsId, setLoadingStatsId] = useState<string | null>(null);
+  const [refreshingImagesId, setRefreshingImagesId] = useState<string | null>(null);
   const [shopifyPushingId, setShopifyPushingId] = useState<string | null>(null);
   const [shopifyDelistingId, setShopifyDelistingId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -207,6 +208,25 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
     } finally {
       setEnding(false);
       setEndConfirmId(null);
+    }
+  };
+
+  const handleRefetchImages = async (listing: StagedListing) => {
+    if (!listing.ebayDraftId) return;
+    setRefreshingImagesId(listing.id);
+    try {
+      const resp = await fetch(`/api/ebay/refresh-images/${listing.id}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${pw}` },
+      });
+      const data = await resp.json();
+      if (!resp.ok || data.error) throw new Error(data.error || 'Refresh failed');
+      onUpdateListing?.({ ...listing, images: data.images, updatedAt: data.updatedAt });
+      toast(`Refreshed ${data.images.length} image${data.images.length === 1 ? '' : 's'} from eBay.`, 'success');
+    } catch (e: any) {
+      toast('Image refresh failed: ' + e.message, 'error');
+    } finally {
+      setRefreshingImagesId(null);
     }
   };
 
@@ -499,7 +519,21 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
             <ImageSearchButton src={listing.images[0]} />
           </div>
         ) : (
-          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>No images</div>
+          <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px', color: 'var(--text-secondary)' }}>
+            <span>No images</span>
+            {listing.ebayDraftId && isEbayConnected && (
+              <button
+                className="btn-secondary"
+                disabled={refreshingImagesId === listing.id}
+                onClick={() => handleRefetchImages(listing)}
+                style={{ fontSize: '0.75rem', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                title="Fetch image URLs from eBay for this item"
+              >
+                <RefreshCw size={12} style={{ animation: refreshingImagesId === listing.id ? 'spin 1s linear infinite' : 'none' }} />
+                {refreshingImagesId === listing.id ? 'Fetching…' : 'Fetch from eBay'}
+              </button>
+            )}
+          </div>
         )}
       </div>
       <div style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', flex: 1 }}>
