@@ -1068,27 +1068,32 @@ app.post('/api/shopify/seo-optimize', async (req, res) => {
 
     const collectionsForAi = await catalog.getCollectionsForAI(req.companyId);
 
-    const { GoogleGenerativeAI } = require('@google/generative-ai');
-    const genAI = new GoogleGenerativeAI(apiKey);
+    const { GoogleGenAI } = await import('@google/genai');
+    const ai = new GoogleGenAI({ apiKey });
 
-    // Pick best available model (flash-first)
-    let modelName = 'gemini-1.5-flash';
+    // Pick best available model — prefer flash, then newer versions
+    let modelName = 'gemini-2.5-flash';
     try {
       const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
       if (resp.ok) {
         const data = await resp.json();
+        const versionScore = (name) => {
+          if (name.includes('2.5')) return 0;
+          if (name.includes('2.0')) return 1;
+          if (name.includes('1.5')) return 2;
+          return 3;
+        };
         const models = (data.models || [])
           .filter(m => m.supportedGenerationMethods?.includes('generateContent') && m.name?.includes('gemini'))
           .map(m => m.name.replace('models/', ''));
         models.sort((a, b) => {
-          if (a.includes('flash') && !b.includes('flash')) return -1;
-          if (!a.includes('flash') && b.includes('flash')) return 1;
-          return 0;
+          const aFlash = a.includes('flash'), bFlash = b.includes('flash');
+          if (aFlash !== bFlash) return aFlash ? -1 : 1;
+          return versionScore(a) - versionScore(b);
         });
         if (models.length > 0) modelName = models[0];
       }
     } catch (e) { /* fall through */ }
-    const model = genAI.getGenerativeModel({ model: modelName });
 
     const mimeFromUrl = (url) => {
       const u = (url || '').toLowerCase().split('?')[0];
@@ -1109,12 +1114,16 @@ app.post('/api/shopify/seo-optimize', async (req, res) => {
     };
 
     const callGemini = async (parts) => {
-      const result = await model.generateContent(parts);
-      let text = result.response.text().replace(/```json/g, '').replace(/```/g, '').trim();
+      const result = await ai.models.generateContent({
+        model: modelName,
+        contents: parts,
+        config: { thinkingConfig: { thinkingBudget: 0 } },
+      });
+      let text = (result.text || '').replace(/```json/g, '').replace(/```/g, '').trim();
       const jsonStart = text.indexOf('{');
       const jsonEnd = text.lastIndexOf('}');
       if (jsonStart !== -1 && jsonEnd !== -1) text = text.substring(jsonStart, jsonEnd + 1);
-      return { parsed: JSON.parse(text), usage: result.response.usageMetadata };
+      return { parsed: JSON.parse(text), usage: result.usageMetadata };
     };
 
     const suggestions = [];

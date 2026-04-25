@@ -1,6 +1,18 @@
 const axios = require('axios');
 const { getValidAccessToken } = require('./ebayAuth');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+
+// @google/genai is ESM-only; load it lazily so this CJS module can require it.
+let _GoogleGenAI = null;
+async function loadGenAI() {
+  if (!_GoogleGenAI) {
+    const mod = await import('@google/genai');
+    _GoogleGenAI = mod.GoogleGenAI;
+  }
+  return _GoogleGenAI;
+}
+
+// Disable Gemini 2.5 "thinking" — we just need structured listing output.
+const GENERATION_CONFIG = { thinkingConfig: { thinkingBudget: 0 } };
 
 // ─── XML Helpers ──────────────────────────────────────────────────────────────
 
@@ -236,29 +248,34 @@ const DEFAULT_COLLECTIONS_FOR_AI = 'OT999:Other, TY100:Toys, TY200:Vintage Toys,
 
 async function aiOptimizeListing(listingData, apiKey, collectionsForAi) {
   const COLLECTIONS_FOR_AI = collectionsForAi || DEFAULT_COLLECTIONS_FOR_AI;
-  const genAI = new GoogleGenerativeAI(apiKey);
+  const GoogleGenAI = await loadGenAI();
+  const ai = new GoogleGenAI({ apiKey });
 
-  // Pick best available model
-  let modelName = 'gemini-1.5-flash';
+  // Pick best available model — prefer flash, then newer versions
+  let modelName = 'gemini-2.5-flash';
   try {
     const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
     if (resp.ok) {
       const data = await resp.json();
+      const versionScore = (name) => {
+        if (name.includes('2.5')) return 0;
+        if (name.includes('2.0')) return 1;
+        if (name.includes('1.5')) return 2;
+        return 3;
+      };
       const models = data.models
         .filter(m => m.supportedGenerationMethods?.includes('generateContent') && m.name?.includes('gemini'))
         .map(m => m.name.replace('models/', ''));
       models.sort((a, b) => {
-        if (a.includes('flash') && !b.includes('flash')) return -1;
-        if (!a.includes('flash') && b.includes('flash')) return 1;
-        return 0;
+        const aFlash = a.includes('flash'), bFlash = b.includes('flash');
+        if (aFlash !== bFlash) return aFlash ? -1 : 1;
+        return versionScore(a) - versionScore(b);
       });
       if (models.length > 0) modelName = models[0];
     }
   } catch (e) {
     // fall through to default
   }
-
-  const model = genAI.getGenerativeModel({ model: modelName });
 
   const { title, description, itemSpecifics, price, categoryName, conditionName, categorySpecifics } = listingData;
 
@@ -307,9 +324,13 @@ Respond ONLY with a valid JSON object (no markdown wrappers):
 
 For "suggestedCollectionCodes", choose 1-4 codes from this list that best categorize the item: ${COLLECTIONS_FOR_AI}`;
 
-  const result = await model.generateContent([prompt]);
-  const usage = result.response.usageMetadata;
-  let text = result.response.text().replace(/```json/g, '').replace(/```/g, '').trim();
+  const result = await ai.models.generateContent({
+    model: modelName,
+    contents: prompt,
+    config: GENERATION_CONFIG,
+  });
+  const usage = result.usageMetadata;
+  let text = (result.text || '').replace(/```json/g, '').replace(/```/g, '').trim();
 
   // Handle JSON embedded in extra text
   const jsonStart = text.indexOf('{');

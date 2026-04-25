@@ -1,14 +1,30 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+// @google/genai is ESM-only; load it lazily so this CJS module can require it.
+let _GoogleGenAI = null;
+async function loadGenAI() {
+  if (!_GoogleGenAI) {
+    const mod = await import('@google/genai');
+    _GoogleGenAI = mod.GoogleGenAI;
+  }
+  return _GoogleGenAI;
+}
+
+// Disable Gemini 2.5 "thinking" — we just need structured listing output.
+const GENERATION_CONFIG = { thinkingConfig: { thinkingBudget: 0 } };
 
 const DEFAULT_COLLECTIONS_FOR_AI = 'OT999:Other, TY100:Toys, TY200:Vintage Toys, TY300:Retro Toys, TY400:Modern Toys, TY500:Collectible Toys, TC100:Trading Cards, TC200:TCG Non-Sports, PK200:Pokémon Cards, YG200:Yu-Gi-Oh Cards, MT200:Magic The Gathering, OP200:One Piece Cards, DB200:Dragon Ball Cards, DG200:Digimon Cards, SC100:Sports Cards, BB200:Baseball Cards, BK200:Basketball Cards, FB200:Football Cards, HK200:Hockey Cards, SC300:Soccer Cards, BX100:Sealed Products, BX200:Booster Boxes/Packs, SL100:Slabbed/Graded Items, FX100:Funko Pops, AC100:Action Figures, ST100:Statues & Figures, PL100:Plush, BD100:Board Games, VG100:Video Games, VG200:Retro Video Games, VG300:Modern Video Games, VC100:Video Game Consoles, CM100:Comics, BK100:Books, GN100:Graphic Novels, MG100:Magazines, AN100:Anime Merchandise, MN100:Manga, MV100:Movies DVD/Blu-ray, MS100:Music Physical Media, RC100:Vinyl Records, CS100:Cassettes, EL100:Electronics, CL100:Clothing, HT100:Hats, SH100:Shoes, JW100:Jewelry, WD100:Watches, HG100:Home Goods, DC100:Home Decor, AR100:Art, PT100:Posters & Prints, SG100:Signed/Autographed, PR100:Promotional Items, EV100:Event Exclusives, LM100:Limited Editions, CH100:Chase/Variant Items, RC200:Rare Items, UL100:High-End/Premium, BU100:Bundles/Lots, CL200:Clearance, NW100:New Arrivals, FT100:Featured Items, TR100:Trending Items, DS100:Discounted Items, VI100:Vintage Items, RT100:Retro Items';
 
 async function generateListing(imageParts, instructions, apiKey, collectionsForAi) {
   const COLLECTIONS_FOR_AI = collectionsForAi || DEFAULT_COLLECTIONS_FOR_AI;
-  const genAI = new GoogleGenerativeAI(apiKey);
+  const GoogleGenAI = await loadGenAI();
+  const ai = new GoogleGenAI({ apiKey });
 
   const runWithModel = async (modelName) => {
-    const model = genAI.getGenerativeModel({ model: modelName });
-    
+    const generate = (contents) => ai.models.generateContent({
+      model: modelName,
+      contents,
+      config: GENERATION_CONFIG,
+    });
+
     // 1. Analyze product and get base title & details
     const analysisPrompt = `
       You are an expert eBay seller and SEO master. Please analyze these images of a product.
@@ -30,11 +46,10 @@ async function generateListing(imageParts, instructions, apiKey, collectionsForA
     let totalPromptTokens = 0;
     let totalCompletionTokens = 0;
 
-    let result = await model.generateContent([analysisPrompt, ...imageParts]);
-    const usage1 = result.response.usageMetadata;
+    let result = await generate([analysisPrompt, ...imageParts]);
+    const usage1 = result.usageMetadata;
     if (usage1) { totalPromptTokens += usage1.promptTokenCount || 0; totalCompletionTokens += usage1.candidatesTokenCount || 0; }
-    let text = result.response.text();
-    text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+    let text = (result.text || '').replace(/```json/g, '').replace(/```/g, '').trim();
 
     let analysis;
     try {
@@ -56,10 +71,10 @@ async function generateListing(imageParts, instructions, apiKey, collectionsForA
         Based on the product: "${analysis.identifiedProductDetails}", see if you can add 1 or 2 more relevant SEO keywords to make the title closer to 80 characters without exceeding 80 characters.
         Return ONLY the new title as plain text, nothing else. If you can't add any good keywords, just return the exact same title.
       `;
-      const enrichResult = await model.generateContent([enrichPrompt]);
-      const usage2 = enrichResult.response.usageMetadata;
+      const enrichResult = await generate(enrichPrompt);
+      const usage2 = enrichResult.usageMetadata;
       if (usage2) { totalPromptTokens += usage2.promptTokenCount || 0; totalCompletionTokens += usage2.candidatesTokenCount || 0; }
-      const newTitle = enrichResult.response.text().trim().replace(/^["']|["']$/g, '');
+      const newTitle = (enrichResult.text || '').trim().replace(/^["']|["']$/g, '');
       if (newTitle.length <= 80 && newTitle.length > title.length) {
         title = newTitle;
       }
@@ -92,11 +107,11 @@ async function generateListing(imageParts, instructions, apiKey, collectionsForA
       Respond ONLY with the raw JSON object matching the keys: condition, description, itemSpecifics, category, priceRecommendation, priceJustification, shippingEstimate, tags, seoKeywords, collectionCodes. Do not include markdown code block wrappers.
     `;
 
-    const finalResult = await model.generateContent([descConditionPrompt, ...imageParts]);
-    const usage3 = finalResult.response.usageMetadata;
+    const finalResult = await generate([descConditionPrompt, ...imageParts]);
+    const usage3 = finalResult.usageMetadata;
     if (usage3) { totalPromptTokens += usage3.promptTokenCount || 0; totalCompletionTokens += usage3.candidatesTokenCount || 0; }
-    let finalText = finalResult.response.text();
-    finalText = finalText.replace(/```json/g, '').replace(/```html/g, '').replace(/```/g, '').trim();
+    let finalText = (finalResult.text || '')
+      .replace(/```json/g, '').replace(/```html/g, '').replace(/```/g, '').trim();
     
     let parsedFinal;
     try {
@@ -146,20 +161,26 @@ async function generateListing(imageParts, instructions, apiKey, collectionsForA
     console.warn("Could not fetch model list directly:", e);
   }
 
-  let modelsToTry = availableModels.length > 0 
-    ? availableModels 
-    : ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-1.0-pro-vision-latest', 'gemini-pro-vision'];
+  let modelsToTry = availableModels.length > 0
+    ? availableModels
+    : ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'];
 
   if (availableModels.length > 0) {
+    // Prefer flash variants and newer versions (2.5 → 2.0 → 1.5)
+    const versionScore = (name) => {
+      if (name.includes('2.5')) return 0;
+      if (name.includes('2.0')) return 1;
+      if (name.includes('1.5')) return 2;
+      return 3;
+    };
     modelsToTry.sort((a, b) => {
-      if (a.includes('flash') && !b.includes('flash')) return -1;
-      if (!a.includes('flash') && b.includes('flash')) return 1;
-      return 0;
+      const aFlash = a.includes('flash'), bFlash = b.includes('flash');
+      if (aFlash !== bFlash) return aFlash ? -1 : 1;
+      return versionScore(a) - versionScore(b);
     });
   }
 
   let lastError = null;
-  const failedModels = [];
 
   for (const modelName of modelsToTry) {
     try {
@@ -168,7 +189,6 @@ async function generateListing(imageParts, instructions, apiKey, collectionsForA
     } catch (error) {
       console.warn(`Model ${modelName} failed:`, error.message);
       lastError = error;
-      failedModels.push(`${modelName}: ${error.message}`);
       // Fail immediately for auth errors — cycling through models won't help
       if (error.message.includes('API_KEY_INVALID') ||
           error.message.includes('API key not found') ||
@@ -176,19 +196,14 @@ async function generateListing(imageParts, instructions, apiKey, collectionsForA
           error.message.includes('Please pass a valid API key')) {
         throw new Error(`Invalid Gemini API key. Please check the GEMINI_API_KEY environment variable on Render.com.`);
       }
-      // Fall through to the next model for any non-auth error.
-      // Includes 404/not-found and SDK-internal errors (e.g. parse bugs on
-      // newer model response shapes) — those tend to be model-specific, so a
-      // different model often succeeds on the same input.
+      // Only continue to next model for 404/model-not-found errors
+      if (!error.message.includes('404 ') && !error.message.includes('not found')) {
+        throw new Error(`Error with ${modelName}: ${error.message}`);
+      }
     }
   }
 
-  console.warn(`All Gemini models failed. Attempts:\n${failedModels.join('\n')}`);
-  throw new Error(
-    lastError
-      ? `All Gemini models failed. Last error from ${modelsToTry[modelsToTry.length - 1]}: ${lastError.message}`
-      : "Failed to communicate with AI."
-  );
+  throw new Error(lastError ? lastError.message : "Failed to communicate with AI.");
 }
 
 async function generateListingFromUrls(imageUrls, instructions, apiKey, collectionsForAi) {
