@@ -1025,15 +1025,6 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
                       📝 {listing.sellerNotes}
                     </p>
                   )}
-                  {listing.tags && listing.tags.length > 0 && (
-                    <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
-                      {listing.tags.map(tag => (
-                        <button key={tag} onClick={() => setActiveTag(activeTag === tag ? null : tag)} style={{ fontSize: '0.72rem', padding: '1px 7px', borderRadius: '4px', border: '1px solid', cursor: 'pointer', background: activeTag === tag ? 'rgba(99,102,241,0.25)' : 'rgba(99,102,241,0.1)', borderColor: 'rgba(99,102,241,0.35)', color: '#a5b4fc' }}>
-                          {tag}
-                        </button>
-                      ))}
-                    </div>
-                  )}
                   <div style={{ marginTop: 'auto', display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', alignItems: 'center', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)', flexWrap: 'wrap' }}>
                     <span style={{ marginRight: 'auto' }} />
                     <ActionButtons listing={listing} />
