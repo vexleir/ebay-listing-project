@@ -285,7 +285,6 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [pushingId, setPushingId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
-  const [activeTag, setActiveTag] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<SortOption>('date-desc');
   const [pushModal, setPushModal] = useState<PushModal | null>(null);
@@ -321,7 +320,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
 
   const visibleListings = (() => {
     const q = search.toLowerCase();
-    let result = activeTag ? listings.filter(l => l.tags?.includes(activeTag)) : listings;
+    let result = listings;
     if (q) result = result.filter(l => l.title.toLowerCase().includes(q) || (l.sku || '').toLowerCase().includes(q) || (l.category || '').toLowerCase().includes(q));
     return result.slice().sort((a, b) => {
       if (sortBy === 'date-asc') return a.createdAt - b.createdAt;
@@ -481,7 +480,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
     });
   };
 
-  useEffect(() => { setCurrentPage(1); }, [search, activeTag, sortBy]);
+  useEffect(() => { setCurrentPage(1); }, [search, sortBy]);
   const totalPages = perPage === 0 ? 1 : Math.ceil(visibleListings.length / perPage);
   const paginatedListings = perPage === 0 ? visibleListings : visibleListings.slice((currentPage - 1) * perPage, currentPage * perPage);
 
@@ -665,7 +664,6 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
   };
 
   const imageEditListing = imageEditId ? listings.find(l => l.id === imageEditId) : null;
-  const allTags = Array.from(new Set(listings.flatMap(l => l.tags || [])));
 
   return (
     <div>
@@ -909,24 +907,10 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
         </div>
       </div>
 
-      {/* Tag filter bar */}
-      {allTags.length > 0 && (
-        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '1rem', alignItems: 'center' }}>
-          <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', opacity: 0.7 }}>Filter:</span>
-          {allTags.map(tag => (
-            <button key={tag} onClick={() => setActiveTag(activeTag === tag ? null : tag)}
-              style={{ fontSize: '0.78rem', padding: '3px 10px', borderRadius: '4px', border: '1px solid', cursor: 'pointer', background: activeTag === tag ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.05)', borderColor: activeTag === tag ? 'var(--accent-color)' : 'var(--border-color)', color: activeTag === tag ? '#a5b4fc' : 'var(--text-secondary)', transition: 'all 0.15s' }}>
-              {tag}
-            </button>
-          ))}
-          {activeTag && <button onClick={() => setActiveTag(null)} style={{ fontSize: '0.78rem', padding: '3px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer' }}>Clear</button>}
-        </div>
-      )}
-
       {/* Toolbar */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', gap: '0.75rem', flexWrap: 'wrap' }}>
         <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-          {visibleListings.length}{(activeTag || search) ? ` of ${listings.length}` : ''} listing{visibleListings.length !== 1 ? 's' : ''}
+          {visibleListings.length}{search ? ` of ${listings.length}` : ''} listing{visibleListings.length !== 1 ? 's' : ''}
           {search && <span style={{ opacity: 0.6 }}> matching "{search}"</span>}
         </span>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
