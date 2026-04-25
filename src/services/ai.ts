@@ -1,6 +1,6 @@
-import type { Part } from '@google/generative-ai';
+type ImagePart = { inlineData: { data: string; mimeType: string } };
 
-export async function fileToGenerativePart(file: File): Promise<Part> {
+export async function fileToGenerativePart(file: File): Promise<ImagePart> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => {
