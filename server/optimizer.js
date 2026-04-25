@@ -285,7 +285,7 @@ OPTIMIZATION RULES:
 - Title must use all 80 characters if possible, NEVER exceed 80
 - Front-load most important keywords (brand, model, key feature first)
 - Remove filler/spam words: "look", "l@@k", "wow", "nice", "great", "check", "hot", "fast ship", "free ship", "must see", "see pics"
-- Description: keep the core content but enhance formatting, add call to action, make scannable with HTML
+- Description: keep the core content but enhance formatting, add call to action, make scannable with HTML. The CTA must be styled text only (bold/colored emphasized line) — NEVER a button, pill, or clickable-looking element. eBay strips links and interactive elements, so do not use `<a>` or `<button>` tags or button-style CSS (solid-filled rounded boxes, padded "click here" blocks, etc.).
 - Item specifics: include ALL required fields, fill in as many recommended fields as possible using context from the listing
 - Price suggestion: based on the listing condition and category, suggest a competitive price
 
