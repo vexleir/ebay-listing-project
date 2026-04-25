@@ -1649,8 +1649,8 @@ app.post('/api/generate', async (req, res) => {
     }
     res.json(result);
   } catch (error) {
-    console.error('AI Generation Error:', error.message);
-    res.status(500).json({ error: error.message || 'Failed to generate AI listing' });
+    console.error('AI Generation Error:', error);
+    res.status(500).json({ error: (error && error.message) || 'Failed to generate AI listing' });
   }
 });
 

@@ -19,11 +19,21 @@ async function generateListing(imageParts, instructions, apiKey, collectionsForA
   const ai = new GoogleGenAI({ apiKey });
 
   const runWithModel = async (modelName) => {
-    const generate = (contents) => ai.models.generateContent({
-      model: modelName,
-      contents,
-      config: GENERATION_CONFIG,
-    });
+    const generate = async (label, contents) => {
+      try {
+        return await ai.models.generateContent({
+          model: modelName,
+          contents,
+          config: GENERATION_CONFIG,
+        });
+      } catch (e) {
+        console.error(`[generateListing/${label}] failure on model ${modelName}:`, e);
+        const wrapped = new Error(`[${label}] ${(e && e.message) || String(e)}`);
+        wrapped.cause = e;
+        wrapped.stack = `${wrapped.message}\nCaused by: ${e && e.stack ? e.stack : ''}`;
+        throw wrapped;
+      }
+    };
 
     // 1. Analyze product and get base title & details
     const analysisPrompt = `
@@ -46,7 +56,7 @@ async function generateListing(imageParts, instructions, apiKey, collectionsForA
     let totalPromptTokens = 0;
     let totalCompletionTokens = 0;
 
-    let result = await generate([analysisPrompt, ...imageParts]);
+    let result = await generate('analysis', [analysisPrompt, ...imageParts]);
     const usage1 = result.usageMetadata;
     if (usage1) { totalPromptTokens += usage1.promptTokenCount || 0; totalCompletionTokens += usage1.candidatesTokenCount || 0; }
     let text = (result.text || '').replace(/```json/g, '').replace(/```/g, '').trim();
@@ -71,7 +81,7 @@ async function generateListing(imageParts, instructions, apiKey, collectionsForA
         Based on the product: "${analysis.identifiedProductDetails}", see if you can add 1 or 2 more relevant SEO keywords to make the title closer to 80 characters without exceeding 80 characters.
         Return ONLY the new title as plain text, nothing else. If you can't add any good keywords, just return the exact same title.
       `;
-      const enrichResult = await generate(enrichPrompt);
+      const enrichResult = await generate('enrich', enrichPrompt);
       const usage2 = enrichResult.usageMetadata;
       if (usage2) { totalPromptTokens += usage2.promptTokenCount || 0; totalCompletionTokens += usage2.candidatesTokenCount || 0; }
       const newTitle = (enrichResult.text || '').trim().replace(/^["']|["']$/g, '');
@@ -107,7 +117,7 @@ async function generateListing(imageParts, instructions, apiKey, collectionsForA
       Respond ONLY with the raw JSON object matching the keys: condition, description, itemSpecifics, category, priceRecommendation, priceJustification, shippingEstimate, tags, seoKeywords, collectionCodes. Do not include markdown code block wrappers.
     `;
 
-    const finalResult = await generate([descConditionPrompt, ...imageParts]);
+    const finalResult = await generate('final', [descConditionPrompt, ...imageParts]);
     const usage3 = finalResult.usageMetadata;
     if (usage3) { totalPromptTokens += usage3.promptTokenCount || 0; totalCompletionTokens += usage3.candidatesTokenCount || 0; }
     let finalText = (finalResult.text || '')
@@ -187,18 +197,24 @@ async function generateListing(imageParts, instructions, apiKey, collectionsForA
       console.log(`Trying model: ${modelName}`);
       return await runWithModel(modelName);
     } catch (error) {
-      console.warn(`Model ${modelName} failed:`, error.message);
+      // Log the full error with stack so Render logs show the real call site,
+      // not just "a is not defined" detached from its origin.
+      console.error(`Model ${modelName} failed:`, error);
       lastError = error;
+      const msg = (error && error.message) || String(error);
       // Fail immediately for auth errors — cycling through models won't help
-      if (error.message.includes('API_KEY_INVALID') ||
-          error.message.includes('API key not found') ||
-          error.message.includes('API Key not found') ||
-          error.message.includes('Please pass a valid API key')) {
+      if (msg.includes('API_KEY_INVALID') ||
+          msg.includes('API key not found') ||
+          msg.includes('API Key not found') ||
+          msg.includes('Please pass a valid API key')) {
         throw new Error(`Invalid Gemini API key. Please check the GEMINI_API_KEY environment variable on Render.com.`);
       }
       // Only continue to next model for 404/model-not-found errors
-      if (!error.message.includes('404 ') && !error.message.includes('not found')) {
-        throw new Error(`Error with ${modelName}: ${error.message}`);
+      if (!msg.includes('404 ') && !msg.includes('not found')) {
+        const wrapped = new Error(`Error with ${modelName}: ${msg}`);
+        wrapped.cause = error;
+        wrapped.stack = `${wrapped.message}\nCaused by: ${error && error.stack ? error.stack : msg}`;
+        throw wrapped;
       }
     }
   }
