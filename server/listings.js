@@ -112,10 +112,71 @@ async function deleteConsignor(companyId, id) {
   await db.collection('consignors').deleteOne({ companyId, id });
 }
 
+// ─── Containers (inventory) ─────────────────────────────────────────────────
+
+async function getContainers(companyId) {
+  const db = await getDb();
+  return db.collection('containers').find({ companyId }).sort({ name: 1 }).toArray();
+}
+
+async function getContainerById(companyId, id) {
+  const db = await getDb();
+  return db.collection('containers').findOne({ companyId, id });
+}
+
+async function createContainer(companyId, container) {
+  const db = await getDb();
+  const { _id, ...doc } = container;
+  doc.companyId = companyId;
+  await db.collection('containers').insertOne(doc);
+}
+
+async function updateContainer(companyId, id, updates) {
+  const db = await getDb();
+  const { _id, ...safeUpdates } = updates;
+  await db.collection('containers').updateOne({ companyId, id }, { $set: safeUpdates });
+}
+
+async function deleteContainer(companyId, id) {
+  const db = await getDb();
+  await db.collection('containers').deleteOne({ companyId, id });
+  // Cascade-unlink: clear containerId from any listings that pointed at it
+  await db.collection('listings').updateMany(
+    { companyId, containerId: id },
+    { $unset: { containerId: '' } }
+  );
+}
+
+async function getListingsInContainer(companyId, containerId) {
+  const db = await getDb();
+  return db.collection('listings').find(
+    { companyId, containerId },
+    { projection: { _id: 0, id: 1, title: 1, sku: 1, priceRecommendation: 1, images: 1, status: 1, ebayDraftId: 1, shopifyProductId: 1, containerId: 1 } }
+  ).sort({ title: 1 }).toArray();
+}
+
+async function addLooseItem(companyId, containerId, item) {
+  const db = await getDb();
+  await db.collection('containers').updateOne(
+    { companyId, id: containerId },
+    { $push: { looseItems: item } }
+  );
+}
+
+async function removeLooseItem(companyId, containerId, itemId) {
+  const db = await getDb();
+  await db.collection('containers').updateOne(
+    { companyId, id: containerId },
+    { $pull: { looseItems: { id: itemId } } }
+  );
+}
+
 module.exports = {
   getListings, createListing, updateListing, deleteListing,
   getAllListingsMeta, getActiveListings,
   getSettings, saveSettings,
   incrementTokenUsage, getTokenUsage,
   getConsignors, createConsignor, updateConsignor, deleteConsignor,
+  getContainers, getContainerById, createContainer, updateContainer, deleteContainer,
+  getListingsInContainer, addLooseItem, removeLooseItem,
 };

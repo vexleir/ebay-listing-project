@@ -36,6 +36,29 @@ export interface StagedListing {
   consignmentFeePct?: number; // Our commission % (0-100); consignor gets the remainder
   consignorPaidAt?: number;
   consignorPayoutAmount?: string; // Dollar amount paid out to consignor (computed at mark-paid time)
+  // Inventory
+  containerId?: string;
+}
+
+export type ContainerType = 'bin' | 'box' | 'shelf' | 'drawer' | 'tote' | 'pallet' | 'other';
+
+export interface ContainerLooseItem {
+  id: string;
+  label: string;
+  notes?: string;
+  createdAt: number;
+}
+
+export interface Container {
+  id: string;
+  name: string;
+  type: ContainerType;
+  location?: string;
+  notes?: string;
+  looseItems?: ContainerLooseItem[];
+  archived?: boolean;
+  createdAt: number;
+  updatedAt?: number;
 }
 
 export interface Consignor {

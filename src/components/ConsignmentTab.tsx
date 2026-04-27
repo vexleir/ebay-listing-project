@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Users, UserPlus, Edit2, Trash2, Check, X, DollarSign, Calendar, ExternalLink, Package, ClipboardList, Undo2, Plus } from 'lucide-react';
-import type { StagedListing, Consignor } from '../types';
+import type { StagedListing, Consignor, Container } from '../types';
 import { calculateNetProfit } from '../utils/fees';
 import { useToast } from '../context/ToastContext';
 import ResultsEditor from './ResultsEditor';
@@ -19,6 +19,7 @@ interface ConsignmentTabProps {
   onMarkPaid: (id: string, payoutAmount: string) => Promise<void>;
   onUnmarkPaid: (id: string) => Promise<void>;
   appPassword: string;
+  containers?: Container[];
 }
 
 type SubTab = 'items' | 'consignors';
@@ -60,6 +61,7 @@ export default function ConsignmentTab(props: ConsignmentTabProps) {
     onUpdateStagedListing, onAssignConsignment, onMarkPaid, onUnmarkPaid,
     onMarkSold,
     appPassword,
+    containers = [],
   } = props;
 
   const { toast } = useToast();
@@ -110,10 +112,12 @@ export default function ConsignmentTab(props: ConsignmentTabProps) {
             sku: l.sku, sellerNotes: l.sellerNotes, costBasis: l.costBasis,
             shippingLabelCost: l.shippingLabelCost, tags: l.tags,
             collectionCodes: l.collectionCodes, quantity: l.quantity,
+            containerId: l.containerId,
           }}
           images={[]}
           existingImageUrls={l.images || []}
           appPassword={appPassword}
+          containers={containers}
           onStage={(updatedData) => {
             onUpdateStagedListing({ ...l, ...updatedData, updatedAt: Date.now() });
             setEditingId(null);

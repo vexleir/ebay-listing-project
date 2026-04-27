@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Trash2, Edit2, Copy, Check, Calendar, LayoutGrid, List, Wand2, TrendingUp, X, RefreshCw, ImagePlus, GripVertical, UploadCloud, Search, ChevronDown, ShieldCheck, ShieldAlert, ShieldX, Share2, AlertTriangle, CheckCircle2 } from 'lucide-react';
-import type { StagedListing, EbayPolicy } from '../types';
+import { Trash2, Edit2, Copy, Check, Calendar, LayoutGrid, List, Wand2, TrendingUp, X, RefreshCw, ImagePlus, GripVertical, UploadCloud, Search, ChevronDown, ShieldCheck, ShieldAlert, ShieldX, Share2, AlertTriangle, CheckCircle2, Package } from 'lucide-react';
+import type { StagedListing, EbayPolicy, Container } from '../types';
 import ResultsEditor from './ResultsEditor';
 import ImageSearchButton from './ImageSearchButton';
 import Lightbox from './Lightbox';
@@ -17,6 +17,8 @@ interface StagedListingsProps {
   onMoveToListed: (listing: StagedListing, draftId: string) => void;
   isEbayConnected?: boolean;
   appPassword?: string;
+  containers?: Container[];
+  onOpenContainer?: (id: string) => void;
 }
 
 type ViewMode = 'grid' | 'list';
@@ -279,7 +281,7 @@ interface PushModal {
   loading: boolean;
 }
 
-export default function StagedListingsView({ listings, onUpdate, onDelete, onBulkDelete, onMoveToListed, isEbayConnected, appPassword = '' }: StagedListingsProps) {
+export default function StagedListingsView({ listings, onUpdate, onDelete, onBulkDelete, onMoveToListed, isEbayConnected, appPassword = '', containers = [], onOpenContainer }: StagedListingsProps) {
   const { toast } = useToast();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -318,10 +320,22 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
   const [imageEditId, setImageEditId] = useState<string | null>(null);
   const [crossPostListing, setCrossPostListing] = useState<StagedListing | null>(null);
 
+  const containerNameById = (() => {
+    const m = new Map<string, string>();
+    for (const c of containers) m.set(c.id, c.name);
+    return m;
+  })();
+
   const visibleListings = (() => {
     const q = search.toLowerCase();
     let result = listings;
-    if (q) result = result.filter(l => l.title.toLowerCase().includes(q) || (l.sku || '').toLowerCase().includes(q) || (l.category || '').toLowerCase().includes(q));
+    if (q) result = result.filter(l => {
+      if (l.title.toLowerCase().includes(q)) return true;
+      if ((l.sku || '').toLowerCase().includes(q)) return true;
+      if ((l.category || '').toLowerCase().includes(q)) return true;
+      const cName = l.containerId ? containerNameById.get(l.containerId) : '';
+      return !!(cName && cName.toLowerCase().includes(q));
+    });
     return result.slice().sort((a, b) => {
       if (sortBy === 'date-asc') return a.createdAt - b.createdAt;
       if (sortBy === 'date-desc') return b.createdAt - a.createdAt;
@@ -547,10 +561,11 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
     return (
       <div style={{ maxWidth: '800px', margin: '0 auto', height: '80vh' }}>
         <ResultsEditor
-          data={{ title: l.title, description: l.description, condition: l.condition, category: l.category, priceRecommendation: l.priceRecommendation, shippingEstimate: l.shippingEstimate, itemSpecifics: l.itemSpecifics, sku: l.sku, sellerNotes: l.sellerNotes, costBasis: l.costBasis, shippingLabelCost: l.shippingLabelCost, tags: l.tags, collectionCodes: l.collectionCodes, quantity: l.quantity }}
+          data={{ title: l.title, description: l.description, condition: l.condition, category: l.category, priceRecommendation: l.priceRecommendation, shippingEstimate: l.shippingEstimate, itemSpecifics: l.itemSpecifics, sku: l.sku, sellerNotes: l.sellerNotes, costBasis: l.costBasis, shippingLabelCost: l.shippingLabelCost, tags: l.tags, collectionCodes: l.collectionCodes, quantity: l.quantity, containerId: l.containerId }}
           images={[]}
           existingImageUrls={l.images || []}
           appPassword={appPassword}
+          containers={containers}
           onStage={(updatedData) => { onUpdate({ ...l, ...updatedData, updatedAt: Date.now() }); setEditingId(null); toast('Listing saved.', 'success'); }}
           onCancel={() => setEditingId(null)}
         />
@@ -1003,6 +1018,15 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
                     <span style={{ fontSize: '0.8rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px' }}>${listing.priceRecommendation}</span>
                     <span style={{ fontSize: '0.8rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px' }}>{listing.category}</span>
                     {listing.sku && <span style={{ fontSize: '0.8rem', background: 'rgba(99,102,241,0.25)', padding: '2px 8px', borderRadius: '4px', color: '#a5b4fc' }}>SKU: {listing.sku}</span>}
+                    {listing.containerId && containerNameById.get(listing.containerId) && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onOpenContainer?.(listing.containerId!); }}
+                        title="Open in Inventory"
+                        style={{ fontSize: '0.8rem', background: 'rgba(34,197,94,0.18)', padding: '2px 8px', borderRadius: '4px', color: '#86efac', border: '1px solid rgba(34,197,94,0.35)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                      >
+                        <Package size={11} /> {containerNameById.get(listing.containerId)}
+                      </button>
+                    )}
                   </div>
                   {listing.sellerNotes && (
                     <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', padding: '6px 8px', marginBottom: '0.5rem', fontStyle: 'italic' }}>
@@ -1056,6 +1080,15 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
                   <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
                     <span style={{ fontSize: '0.78rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px', whiteSpace: 'nowrap' }}>${listing.priceRecommendation}</span>
                     {listing.sku && <span style={{ fontSize: '0.78rem', background: 'rgba(99,102,241,0.25)', padding: '2px 8px', borderRadius: '4px', color: '#a5b4fc', whiteSpace: 'nowrap' }}>{listing.sku}</span>}
+                    {listing.containerId && containerNameById.get(listing.containerId) && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onOpenContainer?.(listing.containerId!); }}
+                        title="Open in Inventory"
+                        style={{ fontSize: '0.78rem', background: 'rgba(34,197,94,0.18)', padding: '2px 8px', borderRadius: '4px', color: '#86efac', border: '1px solid rgba(34,197,94,0.35)', cursor: 'pointer', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                      >
+                        <Package size={11} /> {containerNameById.get(listing.containerId)}
+                      </button>
+                    )}
                   </div>
 
                   <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', flexShrink: 0, minWidth: '80px', textAlign: 'right' }}>

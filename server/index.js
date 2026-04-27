@@ -6,7 +6,7 @@ const path = require('path');
 const { generateListing, generateListingFromUrls } = require('./ai');
 const { getAuthUrl, exchangeCodeForToken, getValidAccessToken, hasValidSession, getTokenExpiry } = require('./ebayAuth');
 const shopifyAuth = require('./shopifyAuth');
-const { getListings, createListing, updateListing, deleteListing, getAllListingsMeta, getActiveListings, getSettings, saveSettings, incrementTokenUsage, getTokenUsage, getConsignors, createConsignor, updateConsignor, deleteConsignor } = require('./listings');
+const { getListings, createListing, updateListing, deleteListing, getAllListingsMeta, getActiveListings, getSettings, saveSettings, incrementTokenUsage, getTokenUsage, getConsignors, createConsignor, updateConsignor, deleteConsignor, getContainers, getContainerById, createContainer, updateContainer, deleteContainer, getListingsInContainer, addLooseItem, removeLooseItem } = require('./listings');
 const { fetchListingForOptimizer, fetchSoldComps, aiOptimizeListing } = require('./optimizer');
 const catalog = require('./collections');
 const { uploadImage } = require('./cloudinary');
@@ -1584,6 +1584,94 @@ app.put('/api/consignors/:id', async (req, res) => {
 app.delete('/api/consignors/:id', async (req, res) => {
   try {
     await deleteConsignor(req.companyId, req.params.id);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Inventory containers ────────────────────────────────────────────────────
+
+const VALID_CONTAINER_TYPES = new Set(['bin', 'box', 'shelf', 'drawer', 'tote', 'pallet', 'other']);
+
+app.get('/api/containers', async (req, res) => {
+  try {
+    const containers = await getContainers(req.companyId);
+    res.json(containers);
+  } catch (e) {
+    console.error('[containers] GET error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/containers/:id', async (req, res) => {
+  try {
+    const container = await getContainerById(req.companyId, req.params.id);
+    if (!container) return res.status(404).json({ error: 'Container not found' });
+    const listings = await getListingsInContainer(req.companyId, req.params.id);
+    res.json({ container, listings });
+  } catch (e) {
+    console.error('[containers] GET-by-id error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/containers', async (req, res) => {
+  try {
+    const container = req.body.container;
+    if (!container?.id || !container?.name || !container?.type) {
+      return res.status(400).json({ error: 'id, name, and type required' });
+    }
+    if (!VALID_CONTAINER_TYPES.has(container.type)) {
+      return res.status(400).json({ error: `type must be one of ${Array.from(VALID_CONTAINER_TYPES).join(', ')}` });
+    }
+    await createContainer(req.companyId, container);
+    res.json({ success: true });
+  } catch (e) {
+    console.error('[containers] POST error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.put('/api/containers/:id', async (req, res) => {
+  try {
+    const updates = req.body.updates || {};
+    if (updates.type !== undefined && !VALID_CONTAINER_TYPES.has(updates.type)) {
+      return res.status(400).json({ error: `type must be one of ${Array.from(VALID_CONTAINER_TYPES).join(', ')}` });
+    }
+    await updateContainer(req.companyId, req.params.id, updates);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/containers/:id', async (req, res) => {
+  try {
+    await deleteContainer(req.companyId, req.params.id);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/containers/:id/loose-items', async (req, res) => {
+  try {
+    const { label, notes } = req.body || {};
+    if (!label || typeof label !== 'string') {
+      return res.status(400).json({ error: 'label required' });
+    }
+    const item = { id: crypto.randomUUID(), label, notes: notes || '', createdAt: Date.now() };
+    await addLooseItem(req.companyId, req.params.id, item);
+    res.json({ success: true, item });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/containers/:id/loose-items/:itemId', async (req, res) => {
+  try {
+    await removeLooseItem(req.companyId, req.params.id, req.params.itemId);
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });

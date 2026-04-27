@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, ShoppingBag, Shield, DollarSign, Zap, Download, Sparkles, ChevronLeft, ChevronRight, BookMarked, Layers, Users, Telescope } from 'lucide-react';
+import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, ShoppingBag, Shield, DollarSign, Zap, Download, Sparkles, ChevronLeft, ChevronRight, BookMarked, Layers, Users, Telescope, Package } from 'lucide-react';
 import './index.css';
 
 import Uploader from './components/Uploader';
@@ -18,9 +18,10 @@ import EbayImportTab from './components/EbayImportTab';
 import ShopifySEOTab from './components/ShopifySEOTab';
 import CatalogCodesTab from './components/CatalogCodesTab';
 import ConsignmentTab from './components/ConsignmentTab';
+import InventoryTab from './components/InventoryTab';
 import LoginScreen from './components/LoginScreen';
 import { generateListing } from './services/ai';
-import type { StagedListing, Consignor } from './types';
+import type { StagedListing, Consignor, Container, ContainerLooseItem } from './types';
 import { useToast } from './context/ToastContext';
 import './App.css';
 
@@ -60,9 +61,11 @@ function App() {
   });
 
   const [stagedListings, setStagedListings] = useState<StagedListing[]>([]);
-  const [activeTab, setActiveTab] = useState<'new' | 'bulk' | 'staged' | 'listed' | 'sold' | 'analytics' | 'settings' | 'source' | 'research' | 'optimizer' | 'admin' | 'ebay-import' | 'shopify-seo' | 'catalog-codes' | 'consignment'>('new');
+  const [activeTab, setActiveTab] = useState<'new' | 'bulk' | 'staged' | 'listed' | 'sold' | 'analytics' | 'settings' | 'source' | 'research' | 'optimizer' | 'admin' | 'ebay-import' | 'shopify-seo' | 'catalog-codes' | 'consignment' | 'inventory'>('new');
   const [listedProducts, setListedProducts] = useState<StagedListing[]>([]);
   const [consignors, setConsignors] = useState<Consignor[]>([]);
+  const [containers, setContainers] = useState<Container[]>([]);
+  const [openContainerId, setOpenContainerId] = useState<string | null>(null);
   const [isLoadingListings, setIsLoadingListings] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => localStorage.getItem('sidebar_collapsed') === '1');
 
@@ -227,14 +230,16 @@ function App() {
   const loadListings = async (token: string) => {
     setIsLoadingListings(true);
     try {
-      const [staged, listed, cons] = await Promise.all([
+      const [staged, listed, cons, conts] = await Promise.all([
         fetch('/api/listings?status=staged', { headers: bearerHeaders(token) }).then(r => r.json()),
         fetch('/api/listings?status=listed', { headers: bearerHeaders(token) }).then(r => r.json()),
         fetch('/api/consignors', { headers: bearerHeaders(token) }).then(r => r.json()),
+        fetch('/api/containers', { headers: bearerHeaders(token) }).then(r => r.json()),
       ]);
       setStagedListings(Array.isArray(staged) ? mergeImages(staged) : []);
       setListedProducts(Array.isArray(listed) ? mergeImages(listed) : []);
       setConsignors(Array.isArray(cons) ? cons : []);
+      setContainers(Array.isArray(conts) ? conts : []);
     } catch (e) {
       console.error('Failed to load listings:', e);
     } finally {
@@ -259,6 +264,66 @@ function App() {
   const handleDeleteConsignor = async (id: string) => {
     setConsignors(prev => prev.filter(c => c.id !== id));
     await fetch(`/api/consignors/${id}`, { method: 'DELETE', headers: bearerHeaders(appPassword) });
+  };
+
+  // ─── Inventory containers ────────────────────────────────────────────────
+
+  const handleCreateContainer = async (input: Omit<Container, 'id' | 'createdAt'>): Promise<Container> => {
+    const id = crypto.randomUUID();
+    const now = Date.now();
+    const newContainer: Container = { ...input, id, createdAt: now };
+    setContainers(prev => [...prev, newContainer].sort((a, b) => a.name.localeCompare(b.name)));
+    await fetch('/api/containers', { method: 'POST', headers: apiHeaders(appPassword), body: JSON.stringify({ container: newContainer }) });
+    return newContainer;
+  };
+
+  const handleUpdateContainer = async (id: string, updates: Partial<Container>) => {
+    const withTimestamp = { ...updates, updatedAt: Date.now() };
+    setContainers(prev => prev.map(c => c.id === id ? { ...c, ...withTimestamp } as Container : c).sort((a, b) => a.name.localeCompare(b.name)));
+    await fetch(`/api/containers/${id}`, { method: 'PUT', headers: apiHeaders(appPassword), body: JSON.stringify({ updates: withTimestamp }) });
+  };
+
+  const handleDeleteContainer = async (id: string) => {
+    setContainers(prev => prev.filter(c => c.id !== id));
+    // Cascade-unlink locally so badges disappear immediately
+    setStagedListings(prev => prev.map(l => l.containerId === id ? { ...l, containerId: undefined } : l));
+    setListedProducts(prev => prev.map(l => l.containerId === id ? { ...l, containerId: undefined } : l));
+    await fetch(`/api/containers/${id}`, { method: 'DELETE', headers: bearerHeaders(appPassword) });
+  };
+
+  const handleAssignListingToContainer = async (listingId: string, containerId: string | null) => {
+    const updates = { containerId: containerId || undefined, updatedAt: Date.now() };
+    setStagedListings(prev => prev.map(l => l.id === listingId ? { ...l, ...updates } : l));
+    setListedProducts(prev => prev.map(l => l.id === listingId ? { ...l, ...updates } : l));
+    // Backend stores undefined as missing field; we send explicit null intent via updates.containerId
+    const body = JSON.stringify({ updates: { containerId: containerId, updatedAt: updates.updatedAt } });
+    await fetch(`/api/listings/${listingId}`, { method: 'PUT', headers: apiHeaders(appPassword), body });
+  };
+
+  const handleAddLooseItem = async (containerId: string, label: string, notes?: string): Promise<ContainerLooseItem | null> => {
+    const resp = await fetch(`/api/containers/${containerId}/loose-items`, {
+      method: 'POST', headers: apiHeaders(appPassword), body: JSON.stringify({ label, notes }),
+    });
+    if (!resp.ok) return null;
+    const { item } = await resp.json();
+    setContainers(prev => prev.map(c => c.id === containerId
+      ? { ...c, looseItems: [...(c.looseItems || []), item] }
+      : c
+    ));
+    return item;
+  };
+
+  const handleRemoveLooseItem = async (containerId: string, itemId: string) => {
+    setContainers(prev => prev.map(c => c.id === containerId
+      ? { ...c, looseItems: (c.looseItems || []).filter(i => i.id !== itemId) }
+      : c
+    ));
+    await fetch(`/api/containers/${containerId}/loose-items/${itemId}`, { method: 'DELETE', headers: bearerHeaders(appPassword) });
+  };
+
+  const openContainerInTab = (id: string) => {
+    setOpenContainerId(id);
+    setActiveTab('inventory');
   };
 
   const stageListingCore = async (listing: Omit<StagedListing, 'id' | 'createdAt'>) => {
@@ -594,6 +659,7 @@ function App() {
           <button title="eBay Import" style={{ ...sidebarBtnStyle('ebay-import'), borderStyle: activeTab === 'ebay-import' ? 'solid' : 'dashed', opacity: activeTab === 'ebay-import' ? 1 : 0.75 }} onClick={() => setActiveTab('ebay-import')}><Download size={18} />{sidebarLabel('eBay Import')}</button>
           <button title="Sold" style={sidebarBtnStyle('sold')} onClick={() => setActiveTab('sold')}><DollarSign size={18} />{sidebarLabel(`Sold (${listedProducts.filter(l => !!l.soldAt && !l.isConsignment).length})`)}</button>
           <button title="Consignment" style={sidebarBtnStyle('consignment')} onClick={() => setActiveTab('consignment')}><Users size={18} />{sidebarLabel(`Consignment (${[...stagedListings, ...listedProducts].filter(l => l.isConsignment).length})`)}</button>
+          <button title="Inventory" style={sidebarBtnStyle('inventory')} onClick={() => { setOpenContainerId(null); setActiveTab('inventory'); }}><Package size={18} />{sidebarLabel(`Inventory (${containers.length})`)}</button>
           <button title="Analytics" style={sidebarBtnStyle('analytics')} onClick={() => setActiveTab('analytics')}><BarChart2 size={18} />{sidebarLabel('Analytics')}</button>
           <button title="Source" style={sidebarBtnStyle('source')} onClick={() => setActiveTab('source')}><ShoppingBag size={18} />{sidebarLabel('Source')}</button>
           <button title="Sourcing Research" style={sidebarBtnStyle('research')} onClick={() => setActiveTab('research')}><Telescope size={18} />{sidebarLabel('Sourcing Research')}</button>
@@ -676,7 +742,7 @@ function App() {
             </div>
             {generatedData && (
               <div className="animate-fade-in">
-                <ResultsEditor data={generatedData} images={images} onStage={handleStageListing} onCancel={() => setGeneratedData(null)} appPassword={appPassword} />
+                <ResultsEditor data={generatedData} images={images} onStage={handleStageListing} onCancel={() => setGeneratedData(null)} appPassword={appPassword} containers={containers} />
               </div>
             )}
           </div>
@@ -686,11 +752,11 @@ function App() {
           </div>
         ) : activeTab === 'staged' ? (
           <div className="animate-fade-in">
-            <StagedListings listings={stagedListings.filter(l => !l.isConsignment)} onUpdate={handleUpdateStagedListing} onDelete={handleDeleteStagedListing} onBulkDelete={handleBulkDelete} onMoveToListed={handleMoveToListed} isEbayConnected={isEbayConnected} appPassword={appPassword} />
+            <StagedListings listings={stagedListings.filter(l => !l.isConsignment)} onUpdate={handleUpdateStagedListing} onDelete={handleDeleteStagedListing} onBulkDelete={handleBulkDelete} onMoveToListed={handleMoveToListed} isEbayConnected={isEbayConnected} appPassword={appPassword} containers={containers} onOpenContainer={openContainerInTab} />
           </div>
         ) : activeTab === 'listed' ? (
           <div className="animate-fade-in">
-            <ListedProducts listings={listedProducts.filter(l => !l.isConsignment)} onDelete={handleDeleteListedListing} onArchive={handleArchiveListedListing} onSyncSold={handleSyncSold} onRelist={handleRelistListing} onMoveToStaged={handleMoveToStaged} onMarkSold={handleMarkSold} onUpdateListing={handleUpdateListing} isEbayConnected={isEbayConnected} isShopifyConnected={isShopifyConnected} appPassword={appPassword} />
+            <ListedProducts listings={listedProducts.filter(l => !l.isConsignment)} onDelete={handleDeleteListedListing} onArchive={handleArchiveListedListing} onSyncSold={handleSyncSold} onRelist={handleRelistListing} onMoveToStaged={handleMoveToStaged} onMarkSold={handleMarkSold} onUpdateListing={handleUpdateListing} isEbayConnected={isEbayConnected} isShopifyConnected={isShopifyConnected} appPassword={appPassword} containers={containers} onOpenContainer={openContainerInTab} />
           </div>
         ) : activeTab === 'sold' ? (
           <div className="animate-fade-in">
@@ -711,6 +777,22 @@ function App() {
               onAssignConsignment={handleAssignConsignment}
               onMarkPaid={handleMarkConsignorPaid}
               onUnmarkPaid={handleUnmarkConsignorPaid}
+              appPassword={appPassword}
+              containers={containers}
+            />
+          </div>
+        ) : activeTab === 'inventory' ? (
+          <div className="animate-fade-in">
+            <InventoryTab
+              containers={containers}
+              selectedContainerId={openContainerId}
+              setSelectedContainerId={setOpenContainerId}
+              onCreateContainer={handleCreateContainer}
+              onUpdateContainer={handleUpdateContainer}
+              onDeleteContainer={handleDeleteContainer}
+              onAssignListingToContainer={handleAssignListingToContainer}
+              onAddLooseItem={handleAddLooseItem}
+              onRemoveLooseItem={handleRemoveLooseItem}
               appPassword={appPassword}
             />
           </div>

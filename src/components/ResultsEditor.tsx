@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { Save, X, Eye, Code, Type, LayoutTemplate, Tag, Wand2, GripVertical } from 'lucide-react';
-import type { StagedListing } from '../types';
+import { Save, X, Eye, Code, Type, LayoutTemplate, Tag, Wand2, GripVertical, Package } from 'lucide-react';
+import type { StagedListing, Container } from '../types';
 import { useToast } from '../context/ToastContext';
 import { calculateNetProfit } from '../utils/fees';
 import CollectionSelector from './CollectionSelector';
@@ -12,15 +12,17 @@ interface ResultsEditorProps {
     priceRecommendation: string; priceJustification?: string; shippingEstimate: string;
     sku?: string; sellerNotes?: string; costBasis?: string; tags?: string[]; shippingLabelCost?: string;
     collectionCodes?: string[]; quantity?: number;
+    containerId?: string;
   };
   images: File[];
   existingImageUrls?: string[];
   onStage: (listing: Omit<StagedListing, 'id' | 'createdAt'>) => void;
   onCancel: () => void;
   appPassword?: string;
+  containers?: Container[];
 }
 
-export default function ResultsEditor({ data, images, existingImageUrls, onStage, onCancel, appPassword = '' }: ResultsEditorProps) {
+export default function ResultsEditor({ data, images, existingImageUrls, onStage, onCancel, appPassword = '', containers = [] }: ResultsEditorProps) {
   const { toast } = useToast();
   const [title, setTitle] = useState(data.title);
   const [description, setDescription] = useState(data.description);
@@ -38,6 +40,7 @@ export default function ResultsEditor({ data, images, existingImageUrls, onStage
   const [tags, setTags] = useState<string[]>(data.tags || []);
   const [tagInput, setTagInput] = useState('');
   const [collectionCodes, setCollectionCodes] = useState<string[]>(data.collectionCodes || []);
+  const [containerId, setContainerId] = useState<string>(data.containerId || '');
   const [previewMode, setPreviewMode] = useState<boolean>(true);
 
   // Category suggestions
@@ -229,6 +232,28 @@ export default function ResultsEditor({ data, images, existingImageUrls, onStage
             </label>
             <input type="text" className="input-base" value={shippingLabelCost} onChange={e => setShippingLabelCost(e.target.value)} placeholder="e.g. 5.50" />
           </div>
+          <div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '8px', color: 'var(--text-secondary)' }}>
+              <Package size={13} /> Container <span style={{ fontSize: '0.75rem', opacity: 0.6, marginLeft: '4px' }}>(physical location)</span>
+            </label>
+            <select
+              className="input-base"
+              value={containerId}
+              onChange={e => setContainerId(e.target.value)}
+            >
+              <option value="">— Unassigned —</option>
+              {containers.map(c => (
+                <option key={c.id} value={c.id}>
+                  {c.name}{c.location ? ` · ${c.location}` : ''}
+                </option>
+              ))}
+            </select>
+            {containers.length === 0 && (
+              <p style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: '4px', fontStyle: 'italic' }}>
+                Create containers in the Inventory tab.
+              </p>
+            )}
+          </div>
         </div>
 
         {/* Live net profit preview */}
@@ -361,7 +386,7 @@ export default function ResultsEditor({ data, images, existingImageUrls, onStage
         <button className="btn-primary" style={{ flex: 2 }} disabled={title.length > 80}
           onClick={() => {
             const qtyNum = Math.max(1, parseInt(quantity, 10) || 1);
-            onStage({ title, condition, description, category, priceRecommendation, priceJustification, shippingEstimate, itemSpecifics, images: allImages, sku, sellerNotes, costBasis, shippingLabelCost, tags, collectionCodes, quantity: qtyNum });
+            onStage({ title, condition, description, category, priceRecommendation, priceJustification, shippingEstimate, itemSpecifics, images: allImages, sku, sellerNotes, costBasis, shippingLabelCost, tags, collectionCodes, quantity: qtyNum, containerId: containerId || undefined });
           }}>
           <Save size={18} /> Save & Stage Listing
         </button>

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Save, Send, Plus, Trash2 } from 'lucide-react';
-import type { StagedListing } from '../types';
+import { X, Save, Send, Plus, Trash2, Package } from 'lucide-react';
+import type { StagedListing, Container } from '../types';
 import { useToast } from '../context/ToastContext';
 import CollectionSelector from './CollectionSelector';
 
@@ -10,6 +10,7 @@ interface EditListingModalProps {
   appPassword: string;
   onClose: () => void;
   onSaved: (updated: StagedListing) => void;
+  containers?: Container[];
 }
 
 const CONDITIONS = [
@@ -41,7 +42,7 @@ function conditionTextToId(text: string): string {
   return '3000';
 }
 
-export default function EditListingModal({ listing, appPassword, onClose, onSaved }: EditListingModalProps) {
+export default function EditListingModal({ listing, appPassword, onClose, onSaved, containers = [] }: EditListingModalProps) {
   const { toast } = useToast();
   const [title, setTitle] = useState(listing.title || '');
   const [price, setPrice] = useState(listing.priceRecommendation || '');
@@ -54,6 +55,7 @@ export default function EditListingModal({ listing, appPassword, onClose, onSave
     Object.entries(listing.itemSpecifics || {}).map(([name, value]) => ({ name, value }))
   );
   const [collectionCodes, setCollectionCodes] = useState<string[]>(listing.collectionCodes || []);
+  const [containerId, setContainerId] = useState<string>(listing.containerId || '');
   const [saving, setSaving] = useState(false);
   const [pushing, setPushing] = useState(false);
 
@@ -71,6 +73,7 @@ export default function EditListingModal({ listing, appPassword, onClose, onSave
       specifics.filter(s => s.name.trim() && s.value.trim()).map(s => [s.name.trim(), s.value.trim()])
     ),
     collectionCodes,
+    containerId: containerId || undefined,
     updatedAt: Date.now(),
   });
 
@@ -214,6 +217,19 @@ export default function EditListingModal({ listing, appPassword, onClose, onSave
           <div>
             <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>Seller Notes (internal)</label>
             <input className="input-base" value={sellerNotes} onChange={e => setSellerNotes(e.target.value)} />
+          </div>
+          <div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>
+              <Package size={13} /> Container <span style={{ fontSize: '0.75rem', opacity: 0.6, fontWeight: 400 }}>(physical location)</span>
+            </label>
+            <select className="input-base" value={containerId} onChange={e => setContainerId(e.target.value)}>
+              <option value="">— Unassigned —</option>
+              {containers.map(c => (
+                <option key={c.id} value={c.id}>
+                  {c.name}{c.location ? ` · ${c.location}` : ''}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
