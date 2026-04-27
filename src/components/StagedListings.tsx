@@ -279,6 +279,9 @@ interface PushModal {
   categoryId: string;
   fulfillmentPolicies: EbayPolicy[];
   loading: boolean;
+  acceptOffers: boolean;
+  autoAcceptPrice: string;
+  minOfferPrice: string;
 }
 
 export default function StagedListingsView({ listings, onUpdate, onDelete, onBulkDelete, onMoveToListed, isEbayConnected, appPassword = '', containers = [], onOpenContainer }: StagedListingsProps) {
@@ -374,7 +377,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
     // Default schedule: 21 days from now (eBay's max), formatted for datetime-local input
     const defaultSchedule = new Date(Date.now() + 21 * 24 * 60 * 60 * 1000);
     const defaultScheduleStr = toArizonaLocalISO(defaultSchedule);
-    setPushModal({ listing, conditionId: desiredConditionId, validConditions: [], scheduleDate: defaultScheduleStr, fulfillmentPolicyId: '', categoryId: '', fulfillmentPolicies: [], loading: true });
+    setPushModal({ listing, conditionId: desiredConditionId, validConditions: [], scheduleDate: defaultScheduleStr, fulfillmentPolicyId: '', categoryId: '', fulfillmentPolicies: [], loading: true, acceptOffers: true, autoAcceptPrice: '', minOfferPrice: '' });
     try {
       const [settingsResp, policiesResp, categoryResp] = await Promise.all([
         fetch('/api/settings', { headers: { 'Authorization': `Bearer ${pw}` } }).then(r => r.json()).catch(() => ({})),
@@ -410,7 +413,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
 
   const confirmPushToEbay = async () => {
     if (!pushModal) return;
-    const { listing, conditionId, fulfillmentPolicyId, categoryId, scheduleDate } = pushModal;
+    const { listing, conditionId, fulfillmentPolicyId, categoryId, scheduleDate, acceptOffers, autoAcceptPrice, minOfferPrice } = pushModal;
     const pw = appPassword || localStorage.getItem('app_password') || '';
     setPushingId(listing.id);
     setPushModal(null);
@@ -423,7 +426,14 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pw}` },
         // Append Arizona offset (-07:00) so the server parses the local time correctly
-        body: JSON.stringify({ listing: { ...listing, itemSpecifics: mergedSpecifics, collectionCodes: pushCollectionCodes }, overrideConditionId: conditionId, overrideFulfillmentPolicyId: fulfillmentPolicyId || undefined, overrideCategoryId: categoryId || undefined, scheduleDate: scheduleDate ? new Date(scheduleDate + ':00-07:00').toISOString() : undefined })
+        body: JSON.stringify({
+          listing: { ...listing, itemSpecifics: mergedSpecifics, collectionCodes: pushCollectionCodes },
+          overrideConditionId: conditionId,
+          overrideFulfillmentPolicyId: fulfillmentPolicyId || undefined,
+          overrideCategoryId: categoryId || undefined,
+          scheduleDate: scheduleDate ? new Date(scheduleDate + ':00-07:00').toISOString() : undefined,
+          bestOffer: { enabled: acceptOffers, autoAcceptPrice: autoAcceptPrice || undefined, minOfferPrice: minOfferPrice || undefined },
+        })
       });
       const data = await resp.json();
       if (!resp.ok || data.error) throw new Error(data.error ?? 'Push failed');
@@ -465,7 +475,7 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
         const resp = await fetch('/api/ebay/draft', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pw}` },
-          body: JSON.stringify({ listing, overrideConditionId: autoConditionId(listing.condition), scheduleDate: scheduleIso })
+          body: JSON.stringify({ listing, overrideConditionId: autoConditionId(listing.condition), scheduleDate: scheduleIso, bestOffer: { enabled: true } })
         });
         if (!resp.ok) throw new Error(await resp.text());
         const data = await resp.json();
@@ -787,6 +797,55 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
                     </>
                   ) : (
                     <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>Listing will go live immediately when pushed</p>
+                  )}
+                </div>
+                {/* Best Offer */}
+                <div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>
+                    <input
+                      type="checkbox"
+                      checked={pushModal.acceptOffers}
+                      onChange={e => setPushModal(prev => prev ? { ...prev, acceptOffers: e.target.checked } : null)}
+                      style={{ accentColor: 'var(--accent-color)', width: '14px', height: '14px' }}
+                    />
+                    Accept Best Offers
+                  </label>
+                  {pushModal.acceptOffers && (
+                    <>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>Auto-accept at ($)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            inputMode="decimal"
+                            className="input-base"
+                            value={pushModal.autoAcceptPrice}
+                            onChange={e => setPushModal(prev => prev ? { ...prev, autoAcceptPrice: e.target.value } : null)}
+                            placeholder="(off)"
+                            style={{ fontSize: '0.85rem', padding: '6px 10px' }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>Auto-decline below ($)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            inputMode="decimal"
+                            className="input-base"
+                            value={pushModal.minOfferPrice}
+                            onChange={e => setPushModal(prev => prev ? { ...prev, minOfferPrice: e.target.value } : null)}
+                            placeholder="(off)"
+                            style={{ fontSize: '0.85rem', padding: '6px 10px' }}
+                          />
+                        </div>
+                      </div>
+                      <p style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', margin: '4px 0 0 0' }}>
+                        Leave blank to review every offer manually. eBay only auto-accepts/declines when a value is set.
+                      </p>
+                    </>
                   )}
                 </div>
                 {/* Item Specifics quick-fix */}

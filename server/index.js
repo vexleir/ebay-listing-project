@@ -2323,7 +2323,7 @@ function getConditionId(conditionStr) {
 }
 
 app.post('/api/ebay/draft', async (req, res) => {
-  const { listing, overrideCategoryId, overrideConditionId, overrideFulfillmentPolicyId, scheduleDate } = req.body;
+  const { listing, overrideCategoryId, overrideConditionId, overrideFulfillmentPolicyId, scheduleDate, bestOffer } = req.body;
   const userSettings = await getSettings(req.companyId).catch(() => ({}));
   const config = {
     fulfillmentPolicy: overrideFulfillmentPolicyId || userSettings.defaultFulfillmentPolicyId || process.env.EBAY_FULFILLMENT_POLICY_ID,
@@ -2439,6 +2439,26 @@ app.post('/api/ebay/draft', async (req, res) => {
     const descFooter = userSettings.descriptionFooter || '';
     const wrappedDescription = descHeader + listing.description + descFooter;
 
+    // Best Offer — opt-in via bestOffer.enabled. Auto-accept and minimum prices are
+    // only sent when the user filled them in; otherwise eBay leaves those thresholds unset.
+    let bestOfferDetailsXml = '';
+    let listingDetailsXml = '';
+    if (bestOffer && bestOffer.enabled) {
+      bestOfferDetailsXml = '<BestOfferDetails><BestOfferEnabled>true</BestOfferEnabled></BestOfferDetails>';
+      const sanitizeMoney = (v) => {
+        if (v == null || v === '') return null;
+        const num = parseFloat(String(v).replace(/[^0-9.]/g, ''));
+        if (!isFinite(num) || num <= 0) return null;
+        return num.toFixed(2);
+      };
+      const auto = sanitizeMoney(bestOffer.autoAcceptPrice);
+      const min = sanitizeMoney(bestOffer.minOfferPrice);
+      const parts = [];
+      if (auto) parts.push(`<BestOfferAutoAcceptPrice currencyID="USD">${auto}</BestOfferAutoAcceptPrice>`);
+      if (min) parts.push(`<MinimumBestOfferPrice currencyID="USD">${min}</MinimumBestOfferPrice>`);
+      if (parts.length > 0) listingDetailsXml = `<ListingDetails>${parts.join('')}</ListingDetails>`;
+    }
+
     const addItemXml = `<?xml version="1.0" encoding="utf-8"?>
 <AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <ErrorLanguage>en_US</ErrorLanguage>
@@ -2458,6 +2478,8 @@ app.post('/api/ebay/draft', async (req, res) => {
     <ListingType>FixedPriceItem</ListingType>
     ${pictureDetailsXml}
     ${itemSpecificsXml}
+    ${bestOfferDetailsXml}
+    ${listingDetailsXml}
     <PostalCode>${config.sellerZip}</PostalCode>
     <Location><![CDATA[${config.sellerLocation}]]></Location>
     <SellerProfiles>
