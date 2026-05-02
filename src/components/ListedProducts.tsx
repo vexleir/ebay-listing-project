@@ -26,7 +26,7 @@ interface ListedProductsProps {
   onOpenContainer?: (id: string) => void;
 }
 
-type SortOption = 'date-desc' | 'date-asc' | 'title-asc' | 'title-desc' | 'price-asc' | 'price-desc';
+type SortOption = 'date-desc' | 'date-asc' | 'title-asc' | 'title-desc' | 'price-asc' | 'price-desc' | 'health-asc' | 'health-desc';
 type ViewMode = 'grid' | 'list';
 type StatusFilter = 'all' | 'active' | 'ended';
 type MarketplaceFilter = 'all' | 'ebay-only' | 'shopify' | 'both';
@@ -161,6 +161,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
   const [sort, setSort] = useState<SortOption>('date-desc');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [marketplaceFilter, setMarketplaceFilter] = useState<MarketplaceFilter>('all');
+  const [maxHealth, setMaxHealth] = useState<number>(100);
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [editListing, setEditListing] = useState<StagedListing | null>(null);
   const [markSoldModal, setMarkSoldModal] = useState<{ listing: StagedListing; price: string; date: string } | null>(null);
@@ -346,6 +347,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
       return true;
     })
     .filter(l => !activeTag || l.tags?.includes(activeTag))
+    .filter(l => maxHealth >= 100 || computeHealthScore(l).score <= maxHealth)
     .filter(l => {
       const q = search.toLowerCase();
       if (!q) return true;
@@ -357,18 +359,20 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
     })
     .sort((a, b) => {
       switch (sort) {
-        case 'date-asc':   return a.createdAt - b.createdAt;
-        case 'date-desc':  return b.createdAt - a.createdAt;
-        case 'title-asc':  return a.title.localeCompare(b.title);
-        case 'title-desc': return b.title.localeCompare(a.title);
-        case 'price-asc':  return parsePrice(a.priceRecommendation) - parsePrice(b.priceRecommendation);
-        case 'price-desc': return parsePrice(b.priceRecommendation) - parsePrice(a.priceRecommendation);
+        case 'date-asc':    return a.createdAt - b.createdAt;
+        case 'date-desc':   return b.createdAt - a.createdAt;
+        case 'title-asc':   return a.title.localeCompare(b.title);
+        case 'title-desc':  return b.title.localeCompare(a.title);
+        case 'price-asc':   return parsePrice(a.priceRecommendation) - parsePrice(b.priceRecommendation);
+        case 'price-desc':  return parsePrice(b.priceRecommendation) - parsePrice(a.priceRecommendation);
+        case 'health-asc':  return computeHealthScore(a).score - computeHealthScore(b).score;
+        case 'health-desc': return computeHealthScore(b).score - computeHealthScore(a).score;
         default: return 0;
       }
     });
 
   // Reset to page 1 when filters/search change
-  useEffect(() => { setCurrentPage(1); }, [search, statusFilter, marketplaceFilter, activeTag, sort]);
+  useEffect(() => { setCurrentPage(1); }, [search, statusFilter, marketplaceFilter, activeTag, sort, maxHealth]);
 
 
   const totalPages = perPage === 0 ? 1 : Math.ceil(filteredListings.length / perPage);
@@ -1146,8 +1150,32 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
             <option value="title-desc">Title: Z → A</option>
             <option value="price-desc">Price: High → Low</option>
             <option value="price-asc">Price: Low → High</option>
+            <option value="health-asc">Health: Low → High</option>
+            <option value="health-desc">Health: High → Low</option>
           </select>
           <ChevronDown size={14} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-secondary)' }} />
+        </div>
+        <div title="Show only listings whose health score is at or below this value (100 = show all)"
+          style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 10px', height: '38px', border: '1px solid var(--border-color)', borderRadius: '8px', background: 'var(--glass-bg)' }}>
+          <ShieldAlert size={14} style={{ color: maxHealth >= 100 ? 'var(--text-secondary)' : '#f59e0b' }} />
+          <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Health ≤</span>
+          <input
+            type="number"
+            min={0}
+            max={100}
+            value={maxHealth}
+            onChange={e => {
+              const v = parseInt(e.target.value, 10);
+              if (Number.isNaN(v)) setMaxHealth(100);
+              else setMaxHealth(Math.max(0, Math.min(100, v)));
+            }}
+            style={{ width: '52px', background: 'transparent', border: 'none', outline: 'none', color: 'var(--text-primary)', fontSize: '0.85rem', textAlign: 'right' }}
+          />
+          {maxHealth < 100 && (
+            <button onClick={() => setMaxHealth(100)} title="Reset" style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 0 }}>
+              <X size={13} />
+            </button>
+          )}
         </div>
         {onSyncSold && (
           <button className="btn-icon" title={isEbayConnected ? 'Sync sold items from eBay' : 'Connect to eBay to sync sold items'} style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '9px 12px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', color: isEbayConnected ? 'var(--success)' : 'var(--text-secondary)', opacity: isEbayConnected ? 1 : 0.5 }}
