@@ -42,6 +42,52 @@ app.use(express.static(path.join(__dirname, 'public')));
 const PORT = process.env.PORT || 3001;
 const EBAY_API_BASE = 'https://api.ebay.com';
 
+// eBay aspects that must be sent via dedicated XML elements, not ItemSpecifics
+const RESERVED_SPECIFICS = new Set([
+  'condition', 'conditionid', 'condition id', 'price', 'start price',
+  'buy it now price', 'currency', 'listing type', 'listing duration',
+]);
+
+// eBay caps individual ItemSpecifics values at 65 chars. Long aspects like
+// "Compatible Model" are typically multi-value lists — split them into
+// multiple <Value> elements within a single <NameValueList> instead of
+// truncating mid-list.
+function buildItemSpecificsXml(itemSpecifics) {
+  if (!itemSpecifics) return '';
+  const entries = Array.isArray(itemSpecifics)
+    ? itemSpecifics.map(s => [s && s.name, s && s.value])
+    : Object.entries(itemSpecifics);
+  const filtered = entries.filter(([name, val]) =>
+    name && val != null && val !== '' &&
+    !RESERVED_SPECIFICS.has(String(name).toLowerCase().trim()));
+  if (filtered.length === 0) return '';
+
+  const splitValues = (raw) => {
+    const s = String(raw).trim();
+    if (!s) return [];
+    if (s.length <= 65) return [s];
+    // Try semicolon then comma separators; only accept the split if every
+    // piece individually fits within eBay's 65-char limit.
+    for (const sep of [/\s*;\s*/, /\s*,\s*/]) {
+      const parts = s.split(sep).map(p => p.trim()).filter(Boolean);
+      if (parts.length > 1 && parts.every(p => p.length <= 65)) return parts;
+    }
+    return [s.substring(0, 65)];
+  };
+
+  const blocks = filtered.map(([name, val]) => {
+    const safeName = String(name).substring(0, 65);
+    // eBay caps the number of values per aspect — 30 is a safe ceiling.
+    const values = splitValues(val).slice(0, 30);
+    if (values.length === 0) return '';
+    const valueXml = values.map(v => `<Value><![CDATA[${v}]]></Value>`).join('');
+    return `<NameValueList><Name><![CDATA[${safeName}]]></Name>${valueXml}</NameValueList>`;
+  }).filter(Boolean);
+
+  if (blocks.length === 0) return '';
+  return '<ItemSpecifics>\n' + blocks.join('\n') + '\n</ItemSpecifics>';
+}
+
 // ─── Public routes (no auth required) ────────────────────────────────────────
 
 // POST /api/auth/login
@@ -312,9 +358,7 @@ app.post('/api/ebay/revise', async (req, res) => {
     const condXml       = conditionId  ? `<ConditionID>${conditionId}</ConditionID>` : '';
     const qtyNum        = quantity != null ? Math.max(1, parseInt(quantity, 10) || 1) : null;
     const qtyXml        = qtyNum != null ? `<Quantity>${qtyNum}</Quantity>` : '';
-    const specificsXml  = Array.isArray(itemSpecifics) && itemSpecifics.length
-      ? '<ItemSpecifics>' + itemSpecifics.map(s => `<NameValueList><Name><![CDATA[${s.name}]]></Name><Value><![CDATA[${s.value}]]></Value></NameValueList>`).join('') + '</ItemSpecifics>'
-      : '';
+    const specificsXml  = buildItemSpecificsXml(itemSpecifics);
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <Item>
@@ -2415,25 +2459,7 @@ app.post('/api/ebay/draft', async (req, res) => {
     if (uploadedPictureUrls.length > 0) {
       pictureDetailsXml = '<PictureDetails>\n' + uploadedPictureUrls.map(url => `<PictureURL>${url}</PictureURL>`).join('\n') + '\n</PictureDetails>';
     }
-    // Fields eBay handles via dedicated XML elements — sending them in ItemSpecifics
-    // causes "Dropped condition" warnings that can block the push with other required-field errors.
-    const RESERVED_SPECIFICS = new Set([
-      'condition', 'conditionid', 'condition id', 'price', 'start price',
-      'buy it now price', 'currency', 'listing type', 'listing duration',
-    ]);
-    let itemSpecificsXml = '';
-    if (listing.itemSpecifics && Object.keys(listing.itemSpecifics).length > 0) {
-      const filteredEntries = Object.entries(listing.itemSpecifics)
-        .filter(([name, val]) => name && val && !RESERVED_SPECIFICS.has(name.toLowerCase().trim()));
-      if (filteredEntries.length > 0) {
-        // eBay enforces a 65-character limit on both aspect names and values
-        itemSpecificsXml = '<ItemSpecifics>\n' + filteredEntries.map(([name, val]) => {
-          const safeName = String(name).substring(0, 65);
-          const safeVal = String(val).substring(0, 65);
-          return `<NameValueList><Name><![CDATA[${safeName}]]></Name><Value><![CDATA[${safeVal}]]></Value></NameValueList>`;
-        }).join('\n') + '\n</ItemSpecifics>';
-      }
-    }
+    const itemSpecificsXml = buildItemSpecificsXml(listing.itemSpecifics);
 
     const descHeader = userSettings.descriptionHeader || '';
     const descFooter = userSettings.descriptionFooter || '';
