@@ -360,7 +360,14 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
         });
         const reviseData = await reviseResp.json();
         if (!reviseResp.ok || reviseData.error) throw new Error('eBay revise failed: ' + reviseData.error);
-        if (reviseData.warning) console.warn('[revise]', reviseData.warning);
+        if (reviseData.warning) {
+          toast(`Listing optimized and pushed to eBay. Note: ${reviseData.warning}`, 'info');
+          setOptimizeListing(null);
+          setOptimizeResult(null);
+          setOptimizeInstructions('');
+          setOptimizeSaving(false);
+          return;
+        }
       }
 
       toast(`Listing optimized${pushEbay ? ' and pushed to eBay' : ''}!`, 'success');
