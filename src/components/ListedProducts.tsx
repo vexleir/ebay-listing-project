@@ -158,6 +158,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
   const [sort, setSort] = useState<SortOption>('date-desc');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [maxHealth, setMaxHealth] = useState<number>(100);
+  const [maxHealthInput, setMaxHealthInput] = useState<string>('100');
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [editListing, setEditListing] = useState<StagedListing | null>(null);
   const [markSoldModal, setMarkSoldModal] = useState<{ listing: StagedListing; price: string; date: string } | null>(null);
@@ -879,18 +880,33 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
           <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Health ≤</span>
           <input
             type="number"
+            inputMode="numeric"
             min={0}
             max={100}
-            value={maxHealth}
+            value={maxHealthInput}
             onChange={e => {
-              const v = parseInt(e.target.value, 10);
-              if (Number.isNaN(v)) setMaxHealth(100);
-              else setMaxHealth(Math.max(0, Math.min(100, v)));
+              const raw = e.target.value;
+              setMaxHealthInput(raw);
+              if (raw === '') return;
+              const v = parseInt(raw, 10);
+              if (!Number.isNaN(v)) setMaxHealth(Math.max(0, Math.min(100, v)));
             }}
+            onBlur={() => {
+              const v = parseInt(maxHealthInput, 10);
+              if (Number.isNaN(v)) {
+                setMaxHealth(100);
+                setMaxHealthInput('100');
+              } else {
+                const clamped = Math.max(0, Math.min(100, v));
+                setMaxHealth(clamped);
+                setMaxHealthInput(String(clamped));
+              }
+            }}
+            onFocus={e => e.target.select()}
             style={{ width: '52px', background: 'transparent', border: 'none', outline: 'none', color: 'var(--text-primary)', fontSize: '0.85rem', textAlign: 'right' }}
           />
           {maxHealth < 100 && (
-            <button onClick={() => setMaxHealth(100)} title="Reset" style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 0 }}>
+            <button onClick={() => { setMaxHealth(100); setMaxHealthInput('100'); }} title="Reset" style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 0 }}>
               <X size={13} />
             </button>
           )}
