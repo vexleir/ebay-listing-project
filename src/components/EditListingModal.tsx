@@ -53,7 +53,7 @@ export default function EditListingModal({ listing, appPassword, onClose, onSave
   const [specifics, setSpecifics] = useState<{ name: string; value: string }[]>(
     Object.entries(listing.itemSpecifics || {}).map(([name, value]) => ({ name, value }))
   );
-  const [collectionCodes, setCollectionCodes] = useState<string[]>(listing.collectionCodes || []);
+  const [collectionCodes] = useState<string[]>(listing.collectionCodes || []);
   const [containerId, setContainerId] = useState<string>(listing.containerId || '');
   const [saving, setSaving] = useState(false);
   const [pushing, setPushing] = useState(false);

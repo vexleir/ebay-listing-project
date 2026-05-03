@@ -38,7 +38,7 @@ export default function ResultsEditor({ data, images, existingImageUrls, onStage
   const [shippingLabelCost, setShippingLabelCost] = useState(data.shippingLabelCost || '');
   const [tags, setTags] = useState<string[]>(data.tags || []);
   const [tagInput, setTagInput] = useState('');
-  const [collectionCodes, setCollectionCodes] = useState<string[]>(data.collectionCodes || []);
+  const [collectionCodes] = useState<string[]>(data.collectionCodes || []);
   const [containerId, setContainerId] = useState<string>(data.containerId || '');
   const [previewMode, setPreviewMode] = useState<boolean>(true);
 
