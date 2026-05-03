@@ -325,6 +325,7 @@ export default function ListingOptimizer({ appPassword }: Props) {
   const [editTitle, setEditTitle] = useState('');
   const [editPrice, setEditPrice] = useState('');
   const [editDescription, setEditDescription] = useState('');
+  const [descView, setDescView] = useState<'html' | 'preview'>('html');
   const [editSpecifics, setEditSpecifics] = useState<SpecificRow[]>([]);
 
   // AI accept state (null = pending, true = accepted, false = rejected)
@@ -944,20 +945,44 @@ export default function ListingOptimizer({ appPassword }: Props) {
 
               {/* Description */}
               <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
-                  Description (HTML)
-                  <span style={{ marginLeft: '8px', fontWeight: 400, fontSize: '0.75rem' }}>
-                    {editDescription.replace(/<[^>]+>/g, '').length} plain chars
-                  </span>
-                </label>
-                <textarea
-                  className="input-base"
-                  value={editDescription}
-                  onChange={e => setEditDescription(e.target.value)}
-                  disabled={!listing.isOwner}
-                  rows={8}
-                  style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: '0.8rem' }}
-                />
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px', gap: '8px', flexWrap: 'wrap' }}>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                    Description {descView === 'html' ? '(HTML)' : '(Preview)'}
+                    <span style={{ marginLeft: '8px', fontWeight: 400, fontSize: '0.75rem' }}>
+                      {editDescription.replace(/<[^>]+>/g, '').length} plain chars
+                    </span>
+                  </label>
+                  <div role="tablist" style={{ display: 'inline-flex', border: '1px solid var(--border-color)', borderRadius: '6px', overflow: 'hidden' }}>
+                    <button
+                      role="tab"
+                      aria-selected={descView === 'html'}
+                      onClick={() => setDescView('html')}
+                      style={{ padding: '4px 10px', fontSize: '0.75rem', background: descView === 'html' ? 'var(--glass-bg)' : 'transparent', color: descView === 'html' ? 'var(--text-primary)' : 'var(--text-secondary)', border: 'none', cursor: 'pointer' }}
+                    >HTML</button>
+                    <button
+                      role="tab"
+                      aria-selected={descView === 'preview'}
+                      onClick={() => setDescView('preview')}
+                      style={{ padding: '4px 10px', fontSize: '0.75rem', background: descView === 'preview' ? 'var(--glass-bg)' : 'transparent', color: descView === 'preview' ? 'var(--text-primary)' : 'var(--text-secondary)', border: 'none', cursor: 'pointer', borderLeft: '1px solid var(--border-color)' }}
+                    >Preview</button>
+                  </div>
+                </div>
+                {descView === 'html' ? (
+                  <textarea
+                    className="input-base"
+                    value={editDescription}
+                    onChange={e => setEditDescription(e.target.value)}
+                    disabled={!listing.isOwner}
+                    rows={8}
+                    style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: '0.8rem' }}
+                  />
+                ) : (
+                  <div
+                    className="input-base"
+                    style={{ minHeight: '200px', maxHeight: '480px', overflowY: 'auto', padding: '12px 14px', fontSize: '0.9rem', lineHeight: 1.5, background: 'var(--glass-bg)' }}
+                    dangerouslySetInnerHTML={{ __html: editDescription || '<em style="color: var(--text-secondary)">No description</em>' }}
+                  />
+                )}
                 {aiSuggestions && (
                   <AiSuggestionBox
                     label="Description"
