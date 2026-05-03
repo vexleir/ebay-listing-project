@@ -179,6 +179,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
   const [ending, setEnding] = useState(false);
   // AI optimize modal
   const [optimizeListing, setOptimizeListing] = useState<StagedListing | null>(null);
+  const [optimizeDescView, setOptimizeDescView] = useState<'html' | 'preview'>('html');
   const [optimizeInstructions, setOptimizeInstructions] = useState('');
   const [optimizing, setOptimizing] = useState(false);
   const [optimizeResult, setOptimizeResult] = useState<any>(null);
@@ -498,7 +499,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
               <DollarSign size={17} /> Sold
             </button>
           )}
-          <button className="btn-icon" title="AI Optimize listing" onClick={() => { setOptimizeListing(listing); setOptimizeResult(null); setOptimizeInstructions(''); setOptimizeCollectionCodes(listing.collectionCodes || []); }}
+          <button className="btn-icon" title="AI Optimize listing" onClick={() => { setOptimizeListing(listing); setOptimizeResult(null); setOptimizeInstructions(''); setOptimizeCollectionCodes(listing.collectionCodes || []); setOptimizeDescView('html'); }}
             style={{ color: '#a78bfa' }}>
             <Wand2 size={18} />
           </button>
@@ -579,7 +580,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
             <DollarSign size={17} />
           </button>
         )}
-        <button className="btn-icon" title="AI Optimize listing" onClick={() => { setOptimizeListing(listing); setOptimizeResult(null); setOptimizeInstructions(''); setOptimizeCollectionCodes(listing.collectionCodes || []); }}
+        <button className="btn-icon" title="AI Optimize listing" onClick={() => { setOptimizeListing(listing); setOptimizeResult(null); setOptimizeInstructions(''); setOptimizeCollectionCodes(listing.collectionCodes || []); setOptimizeDescView('html'); }}
           style={{ color: '#a78bfa' }}>
           <Wand2 size={17} />
         </button>
@@ -752,8 +753,34 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
 
                 {/* Description */}
                 <div style={{ marginBottom: '0.75rem' }}>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '3px' }}>Description</label>
-                  <textarea className="input-base" rows={5} value={optimizeResult.description || ''} onChange={e => setOptimizeResult((r: any) => ({ ...r, description: e.target.value }))} style={{ width: '100%', resize: 'vertical' }} />
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '3px', gap: '8px' }}>
+                    <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                      Description {optimizeDescView === 'html' ? '(HTML)' : '(Preview)'}
+                    </label>
+                    <div role="tablist" style={{ display: 'inline-flex', border: '1px solid var(--border-color)', borderRadius: '6px', overflow: 'hidden' }}>
+                      <button
+                        role="tab"
+                        aria-selected={optimizeDescView === 'html'}
+                        onClick={() => setOptimizeDescView('html')}
+                        style={{ padding: '3px 10px', fontSize: '0.72rem', background: optimizeDescView === 'html' ? 'var(--glass-bg)' : 'transparent', color: optimizeDescView === 'html' ? 'var(--text-primary)' : 'var(--text-secondary)', border: 'none', cursor: 'pointer' }}
+                      >HTML</button>
+                      <button
+                        role="tab"
+                        aria-selected={optimizeDescView === 'preview'}
+                        onClick={() => setOptimizeDescView('preview')}
+                        style={{ padding: '3px 10px', fontSize: '0.72rem', background: optimizeDescView === 'preview' ? 'var(--glass-bg)' : 'transparent', color: optimizeDescView === 'preview' ? 'var(--text-primary)' : 'var(--text-secondary)', border: 'none', cursor: 'pointer', borderLeft: '1px solid var(--border-color)' }}
+                      >Preview</button>
+                    </div>
+                  </div>
+                  {optimizeDescView === 'html' ? (
+                    <textarea className="input-base" rows={5} value={optimizeResult.description || ''} onChange={e => setOptimizeResult((r: any) => ({ ...r, description: e.target.value }))} style={{ width: '100%', resize: 'vertical' }} />
+                  ) : (
+                    <div
+                      className="input-base"
+                      style={{ minHeight: '140px', maxHeight: '420px', overflowY: 'auto', padding: '10px 12px', fontSize: '0.88rem', lineHeight: 1.5, background: 'var(--glass-bg)', width: '100%' }}
+                      dangerouslySetInnerHTML={{ __html: optimizeResult.description || '<em style="color: var(--text-secondary)">No description</em>' }}
+                    />
+                  )}
                 </div>
 
                 {/* Item specifics preview */}
