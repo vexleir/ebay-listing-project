@@ -6,7 +6,6 @@ import {
   ArrowRight, Loader, Tag, Image, FileText, DollarSign, Truck, Star,
 } from 'lucide-react';
 import { computeOptimizerScore, type ListingScore, type CategorySpecific } from '../utils/listingScore';
-import CollectionSelector from './CollectionSelector';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1019,9 +1018,6 @@ export default function ListingOptimizer({ appPassword }: Props) {
                   />
                 )}
               </div>
-
-              {/* Collections */}
-              <CollectionSelector selected={collectionCodes} onChange={setCollectionCodes} />
 
               {/* Error */}
               {error && (

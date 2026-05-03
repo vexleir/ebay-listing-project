@@ -110,9 +110,9 @@ async function generateListing(imageParts, instructions, apiKey, collectionsForA
       5. "priceRecommendation": A single recommended sell price as a plain decimal number string only (e.g. "49.99"). No currency symbols, no ranges, no text — just the number.
       6. "priceJustification": A brief explanation of why that price was chosen (comparable sold listings, condition, rarity, etc.). This is for the seller's reference only.
       7. "shippingEstimate": A detailed shipping estimate including estimated weight, dimensions, recommended service, packaging, and cost.
-      8. "tags": An array of 6-10 concise, lowercase product tags for Shopify/Google Shopping (e.g. ["vintage", "action-figure", "1990s", "anime", "collectible"]). These will be used as Shopify product tags and for SEO/campaign targeting.
-      9. "seoKeywords": A comma-separated string of 5-8 high-value Google Shopping SEO keywords relevant to the product (e.g. "vintage dragonball z figure, collectible anime toy, 90s action figure"). These will populate the Shopify SEO Keywords metafield.
-      10. "collectionCodes": An array of 1-4 codes (strings) from the list below that best categorize this item for Shopify collection sorting. Choose the most specific applicable codes. Available codes: ${COLLECTIONS_FOR_AI}
+      8. "tags": An array of 6-10 concise, lowercase product tags relevant to this item (e.g. ["vintage", "action-figure", "1990s", "anime", "collectible"]). Used for SEO and category targeting.
+      9. "seoKeywords": A comma-separated string of 5-8 high-value SEO keywords relevant to the product (e.g. "vintage dragonball z figure, collectible anime toy, 90s action figure").
+      10. "collectionCodes": An array of 1-4 codes (strings) from the list below that best categorize this item. Choose the most specific applicable codes. Available codes: ${COLLECTIONS_FOR_AI}
 
       Respond ONLY with the raw JSON object matching the keys: condition, description, itemSpecifics, category, priceRecommendation, priceJustification, shippingEstimate, tags, seoKeywords, collectionCodes. Do not include markdown code block wrappers.
     `;

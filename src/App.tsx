@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, ShoppingBag, Shield, DollarSign, Zap, Download, Sparkles, ChevronLeft, ChevronRight, BookMarked, Layers, Users, Telescope, Package } from 'lucide-react';
+import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, ShoppingBag, Shield, DollarSign, Zap, Download, ChevronLeft, ChevronRight, BookMarked, Layers, Users, Telescope, Package } from 'lucide-react';
 import './index.css';
 
 import Uploader from './components/Uploader';
@@ -15,7 +15,6 @@ import SourcingResearch from './components/SourcingResearch';
 import ListingOptimizer from './components/ListingOptimizer';
 import AdminPanel from './components/AdminPanel';
 import EbayImportTab from './components/EbayImportTab';
-import ShopifySEOTab from './components/ShopifySEOTab';
 import CatalogCodesTab from './components/CatalogCodesTab';
 import ConsignmentTab from './components/ConsignmentTab';
 import InventoryTab from './components/InventoryTab';
@@ -41,7 +40,6 @@ function App() {
 
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isEbayConnected, setIsEbayConnected] = useState(false);
-  const [isShopifyConnected, setIsShopifyConnected] = useState(false);
   // appPassword holds the JWT token; prop name kept for backward compat across all child components
   const [appPassword, setAppPassword] = useState(localStorage.getItem('app_token') || '');
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
@@ -61,7 +59,7 @@ function App() {
   });
 
   const [stagedListings, setStagedListings] = useState<StagedListing[]>([]);
-  const [activeTab, setActiveTab] = useState<'new' | 'bulk' | 'staged' | 'listed' | 'sold' | 'analytics' | 'settings' | 'source' | 'research' | 'optimizer' | 'admin' | 'ebay-import' | 'shopify-seo' | 'catalog-codes' | 'consignment' | 'inventory'>('new');
+  const [activeTab, setActiveTab] = useState<'new' | 'bulk' | 'staged' | 'listed' | 'sold' | 'analytics' | 'settings' | 'source' | 'research' | 'optimizer' | 'admin' | 'ebay-import' | 'catalog-codes' | 'consignment' | 'inventory'>('new');
   const [listedProducts, setListedProducts] = useState<StagedListing[]>([]);
   const [consignors, setConsignors] = useState<Consignor[]>([]);
   const [containers, setContainers] = useState<Container[]>([]);
@@ -106,10 +104,6 @@ function App() {
               }
             })
             .catch(() => {});
-          fetch('/api/shopify/auth-status', { headers: bearerHeaders(appPassword) })
-            .then(r => r.json())
-            .then(d => setIsShopifyConnected(d.connected))
-            .catch(() => {});
         })
         .catch(() => {
           localStorage.removeItem('app_token');
@@ -138,10 +132,6 @@ function App() {
             .catch(() => {});
         }
       })
-      .catch(() => {});
-    fetch('/api/shopify/auth-status', { headers: bearerHeaders(token) })
-      .then(r => r.json())
-      .then(d => setIsShopifyConnected(d.connected))
       .catch(() => {});
   };
 
@@ -434,11 +424,7 @@ function App() {
       const updated = listedProducts.filter(l => soldItems.some(s => s.itemId === l.ebayDraftId && !l.soldAt));
       await Promise.all(updated.map(async l => {
         const match = soldItems.find(s => s.itemId === l.ebayDraftId)!;
-        await fetch(`/api/listings/${l.id}`, { method: 'PUT', headers: apiHeaders(appPassword), body: JSON.stringify({ updates: { archived: true, soldAt: Date.now(), soldPrice: match.soldPrice, soldPlatform: 'ebay', updatedAt: Date.now() } }) });
-        // Auto-delist from Shopify if cross-listed
-        if (l.shopifyProductId && l.shopifyStatus === 'listed') {
-          fetch(`/api/shopify/delist/${l.id}`, { method: 'POST', headers: bearerHeaders(appPassword) }).catch(() => {});
-        }
+        await fetch(`/api/listings/${l.id}`, { method: 'PUT', headers: apiHeaders(appPassword), body: JSON.stringify({ updates: { archived: true, soldAt: Date.now(), soldPrice: match.soldPrice, updatedAt: Date.now() } }) });
       }));
       if (count > 0) toast(`${count} listing${count > 1 ? 's' : ''} marked as sold!`, 'success');
       else if (!silent) toast('All listings already up to date.', 'info');
@@ -466,7 +452,6 @@ function App() {
       archived: false,
       soldAt: undefined,
       soldPrice: undefined,
-      soldPlatform: undefined,
       updatedAt: now,
     };
     setListedProducts(prev => prev.filter(l => l.id !== listing.id));
@@ -664,9 +649,6 @@ function App() {
           <button title="Source" style={sidebarBtnStyle('source')} onClick={() => setActiveTab('source')}><ShoppingBag size={18} />{sidebarLabel('Source')}</button>
           <button title="Sourcing Research" style={sidebarBtnStyle('research')} onClick={() => setActiveTab('research')}><Telescope size={18} />{sidebarLabel('Sourcing Research')}</button>
           <button title="Optimizer" style={sidebarBtnStyle('optimizer')} onClick={() => setActiveTab('optimizer')}><Zap size={18} />{sidebarLabel('Optimizer')}</button>
-          {isShopifyConnected && (
-            <button title="Shopify SEO" style={sidebarBtnStyle('shopify-seo')} onClick={() => setActiveTab('shopify-seo')}><Sparkles size={18} />{sidebarLabel('Shopify SEO')}</button>
-          )}
           <button title="Catalog Codes" style={sidebarBtnStyle('catalog-codes')} onClick={() => setActiveTab('catalog-codes')}><BookMarked size={18} />{sidebarLabel('Catalog Codes')}</button>
           {currentUser?.role === 'superadmin' && (
             <button title="Admin" style={sidebarBtnStyle('admin')} onClick={() => setActiveTab('admin')}><Shield size={18} />{sidebarLabel('Admin')}</button>
@@ -756,7 +738,7 @@ function App() {
           </div>
         ) : activeTab === 'listed' ? (
           <div className="animate-fade-in">
-            <ListedProducts listings={listedProducts.filter(l => !l.isConsignment)} onDelete={handleDeleteListedListing} onArchive={handleArchiveListedListing} onSyncSold={handleSyncSold} onRelist={handleRelistListing} onMoveToStaged={handleMoveToStaged} onMarkSold={handleMarkSold} onUpdateListing={handleUpdateListing} isEbayConnected={isEbayConnected} isShopifyConnected={isShopifyConnected} appPassword={appPassword} containers={containers} onOpenContainer={openContainerInTab} />
+            <ListedProducts listings={listedProducts.filter(l => !l.isConsignment)} onDelete={handleDeleteListedListing} onArchive={handleArchiveListedListing} onSyncSold={handleSyncSold} onRelist={handleRelistListing} onMoveToStaged={handleMoveToStaged} onMarkSold={handleMarkSold} onUpdateListing={handleUpdateListing} isEbayConnected={isEbayConnected} appPassword={appPassword} containers={containers} onOpenContainer={openContainerInTab} />
           </div>
         ) : activeTab === 'sold' ? (
           <div className="animate-fade-in">
@@ -825,10 +807,6 @@ function App() {
               existingEbayIds={new Set(listedProducts.map(l => l.ebayDraftId).filter((id): id is string => !!id))}
             />
           </div>
-        ) : activeTab === 'shopify-seo' ? (
-          <div className="animate-fade-in">
-            <ShopifySEOTab appPassword={appPassword} isShopifyConnected={isShopifyConnected} />
-          </div>
         ) : activeTab === 'catalog-codes' ? (
           <div className="animate-fade-in">
             <CatalogCodesTab appPassword={appPassword} />
@@ -839,7 +817,7 @@ function App() {
           </div>
         ) : (
           <div className="animate-fade-in">
-            <SettingsPanel appPassword={appPassword} isEbayConnected={isEbayConnected} isShopifyConnected={isShopifyConnected} onShopifyConnectionChange={setIsShopifyConnected} staged={stagedListings} listed={listedProducts} />
+            <SettingsPanel appPassword={appPassword} isEbayConnected={isEbayConnected} staged={stagedListings} listed={listedProducts} />
           </div>
         )}
       </main>

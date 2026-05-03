@@ -192,7 +192,7 @@ export default function CatalogCodesTab({ appPassword }: CatalogCodesTabProps) {
             Catalog Codes
           </h2>
           <p style={{ margin: '0.25rem 0 0', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-            Manage the catalog codes used by the AI to categorize listings for Shopify collections.
+            Manage the catalog codes used by the AI to categorize listings.
             Format: two uppercase letters + three digits (e.g. <code style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>DV100</code>).
           </p>
         </div>

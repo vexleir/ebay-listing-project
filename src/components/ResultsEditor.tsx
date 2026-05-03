@@ -3,7 +3,6 @@ import { Save, X, Eye, Code, Type, LayoutTemplate, Tag, Wand2, GripVertical, Pac
 import type { StagedListing, Container } from '../types';
 import { useToast } from '../context/ToastContext';
 import { calculateNetProfit } from '../utils/fees';
-import CollectionSelector from './CollectionSelector';
 
 interface ResultsEditorProps {
   data: {
@@ -313,8 +312,6 @@ export default function ResultsEditor({ data, images, existingImageUrls, onStage
             />
           </div>
         </div>
-
-        <CollectionSelector selected={collectionCodes} onChange={setCollectionCodes} />
 
         {/* Condition */}
         <div>

@@ -1,7 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npx vite *)"
+      "Bash(npx vite *)",
+      "Bash(git mv *)",
+      "Bash(awk 'NR < 354 || NR > 1351' server/index.js)",
+      "Bash(mv server/index.js.tmp server/index.js)",
+      "Bash(awk 'NR < 243 || NR > 372' src/components/SettingsPanel.tsx)",
+      "Bash(mv src/components/SettingsPanel.tsx.tmp src/components/SettingsPanel.tsx)",
+      "Bash(node -c server/listings.js)"
     ]
   }
 }

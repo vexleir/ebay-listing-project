@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom';
 import { X, Save, Send, Plus, Trash2, Package } from 'lucide-react';
 import type { StagedListing, Container } from '../types';
 import { useToast } from '../context/ToastContext';
-import CollectionSelector from './CollectionSelector';
 
 interface EditListingModalProps {
   listing: StagedListing;
@@ -201,8 +200,6 @@ export default function EditListingModal({ listing, appPassword, onClose, onSave
               ))}
             </div>
           </div>
-
-          <CollectionSelector selected={collectionCodes} onChange={setCollectionCodes} />
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
             <div>

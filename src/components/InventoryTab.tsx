@@ -17,7 +17,7 @@ const TYPE_ICON: Record<ContainerType, typeof Package> = {
 
 interface ContainerDetailResponse {
   container: Container;
-  listings: Array<Pick<StagedListing, 'id' | 'title' | 'sku' | 'priceRecommendation' | 'images' | 'status' | 'ebayDraftId' | 'shopifyProductId' | 'containerId'>>;
+  listings: Array<Pick<StagedListing, 'id' | 'title' | 'sku' | 'priceRecommendation' | 'images' | 'status' | 'ebayDraftId' | 'containerId'>>;
 }
 
 interface InventoryTabProps {

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { ExternalLink, Calendar, CheckCircle, Trash2, Archive, ArchiveRestore, Search, ChevronDown, LayoutGrid, List, Download, RefreshCw, Eye, RotateCcw, CircleSlash, Share2, DollarSign, Pencil, ShoppingBag, Check, X, Wand2, ShieldCheck, ShieldAlert, ShieldX, Undo2, Package } from 'lucide-react';
+import { ExternalLink, Calendar, CheckCircle, Trash2, Archive, ArchiveRestore, Search, ChevronDown, LayoutGrid, List, Download, RefreshCw, Eye, RotateCcw, CircleSlash, Share2, DollarSign, Pencil, Check, X, Wand2, ShieldCheck, ShieldAlert, ShieldX, Undo2, Package } from 'lucide-react';
 import type { StagedListing, Container } from '../types';
 import ImageSearchButton from './ImageSearchButton';
 import Lightbox from './Lightbox';
@@ -8,7 +8,6 @@ import { useToast } from '../context/ToastContext';
 import { calculateNetProfit } from '../utils/fees';
 import CrossPostModal from './CrossPostModal';
 import EditListingModal from './EditListingModal';
-import CollectionSelector from './CollectionSelector';
 
 interface ListedProductsProps {
   listings: StagedListing[];
@@ -20,7 +19,6 @@ interface ListedProductsProps {
   onMarkSold?: (id: string, soldPrice: string, soldAt: number) => void;
   onUpdateListing?: (updated: StagedListing) => void;
   isEbayConnected?: boolean;
-  isShopifyConnected?: boolean;
   appPassword?: string;
   containers?: Container[];
   onOpenContainer?: (id: string) => void;
@@ -29,7 +27,6 @@ interface ListedProductsProps {
 type SortOption = 'date-desc' | 'date-asc' | 'title-asc' | 'title-desc' | 'price-asc' | 'price-desc' | 'health-asc' | 'health-desc';
 type ViewMode = 'grid' | 'list';
 type StatusFilter = 'all' | 'active' | 'ended';
-type MarketplaceFilter = 'all' | 'ebay-only' | 'shopify' | 'both';
 
 function parsePrice(val: string): number {
   const m = val.replace(/[^0-9.]/g, '');
@@ -150,7 +147,7 @@ function HealthBadge({ listing }: { listing: StagedListing }) {
   );
 }
 
-export default function ListedProductsView({ listings, onDelete, onArchive, onSyncSold, onRelist, onMoveToStaged, onMarkSold, onUpdateListing, isEbayConnected, isShopifyConnected, appPassword = '', containers = [], onOpenContainer }: ListedProductsProps) {
+export default function ListedProductsView({ listings, onDelete, onArchive, onSyncSold, onRelist, onMoveToStaged, onMarkSold, onUpdateListing, isEbayConnected, appPassword = '', containers = [], onOpenContainer }: ListedProductsProps) {
   const containerNameById = (() => {
     const m = new Map<string, string>();
     for (const c of containers) m.set(c.id, c.name);
@@ -160,7 +157,6 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortOption>('date-desc');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [marketplaceFilter, setMarketplaceFilter] = useState<MarketplaceFilter>('all');
   const [maxHealth, setMaxHealth] = useState<number>(100);
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [editListing, setEditListing] = useState<StagedListing | null>(null);
@@ -172,10 +168,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
   const [stats, setStats] = useState<Record<string, { watchCount: string; hitCount: string; quantitySold: string } | null>>({});
   const [loadingStatsId, setLoadingStatsId] = useState<string | null>(null);
   const [refreshingImagesId, setRefreshingImagesId] = useState<string | null>(null);
-  const [shopifyPushingId, setShopifyPushingId] = useState<string | null>(null);
-  const [shopifyDelistingId, setShopifyDelistingId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [bulkShopifyPushingIds, setBulkShopifyPushingIds] = useState<Set<string>>(new Set());
   const [perPage, setPerPage] = useState<number>(20);
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -190,12 +183,6 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
   const [optimizeResult, setOptimizeResult] = useState<any>(null);
   const [optimizeSaving, setOptimizeSaving] = useState(false);
   const [optimizeCollectionCodes, setOptimizeCollectionCodes] = useState<string[]>([]);
-  // Shopify push options modal
-  const [pushOptionsListing, setPushOptionsListing] = useState<StagedListing | null>(null);
-  const [pushOptionsCollectionCodes, setPushOptionsCollectionCodes] = useState<string[]>([]);
-  const [pushOptionsTags, setPushOptionsTags] = useState<string[]>([]);
-  const [pushOptionsSeoKeywords, setPushOptionsSeoKeywords] = useState('');
-  const [pushOptionsPushing, setPushOptionsPushing] = useState(false);
 
   const pw = appPassword || localStorage.getItem('app_password') || '';
 
@@ -253,76 +240,6 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
     }
   };
 
-  const openShopifyPushModal = (listing: StagedListing) => {
-    setPushOptionsListing(listing);
-    setPushOptionsCollectionCodes(listing.collectionCodes || []);
-    setPushOptionsTags(listing.tags || []);
-    setPushOptionsSeoKeywords(listing.seoKeywords || (listing.tags || []).join(', '));
-  };
-
-  const handleShopifyPushConfirm = async () => {
-    if (!pushOptionsListing) return;
-    const enriched: StagedListing = {
-      ...pushOptionsListing,
-      collectionCodes: pushOptionsCollectionCodes,
-      tags: pushOptionsTags,
-      seoKeywords: pushOptionsSeoKeywords,
-    };
-    setPushOptionsPushing(true);
-    setShopifyPushingId(pushOptionsListing.id);
-    try {
-      const resp = await fetch('/api/shopify/push', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pw}` },
-        body: JSON.stringify({ listing: enriched }),
-      });
-      const data = await resp.json();
-      if (!resp.ok || data.error) throw new Error(data.error || 'Shopify push failed');
-      onUpdateListing?.({ ...enriched, shopifyProductId: data.shopifyProductId, shopifyStatus: 'listed', shopifyListedAt: Date.now() });
-
-      // Report what happened with metafields / collections
-      const mfSet = data.metafieldsSet || [];
-      const mfErrors = data.metafieldErrors || [];
-      const colWarnings = data.collectionWarnings || [];
-      if (mfErrors.length > 0 || colWarnings.length > 0) {
-        const problems = [...mfErrors, ...colWarnings].join(' | ');
-        toast(`Listed on Shopify — but some fields failed: ${problems}`, 'error');
-      } else if (mfSet.length > 0) {
-        toast(`Listed on Shopify! Metafields set: ${mfSet.join(', ')}`, 'success');
-      } else {
-        toast('Listed on Shopify!', 'success');
-      }
-      setPushOptionsListing(null);
-    } catch (e: any) {
-      toast('Shopify push failed: ' + e.message, 'error');
-    } finally {
-      setPushOptionsPushing(false);
-      setShopifyPushingId(null);
-    }
-  };
-
-  const handleShopifyPush = (listing: StagedListing) => openShopifyPushModal(listing);
-
-  const handleShopifyDelist = async (listing: StagedListing) => {
-    setShopifyDelistingId(listing.id);
-    try {
-      const resp = await fetch(`/api/shopify/delist/${listing.id}`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${pw}` },
-      });
-      const data = await resp.json();
-      if (!resp.ok || data.error) throw new Error(data.error || 'Delist failed');
-      if (onUpdateListing) {
-        onUpdateListing({ ...listing, shopifyStatus: 'unlisted' });
-      }
-      toast('Removed from Shopify store.', 'success');
-    } catch (e: any) {
-      toast('Shopify delist failed: ' + e.message, 'error');
-    } finally {
-      setShopifyDelistingId(null);
-    }
-  };
-
   // Sold items have their own tab — exclude them here
   const nonSold = listings.filter(l => !l.soldAt);
   const allTags = Array.from(new Set(nonSold.flatMap(l => l.tags || [])));
@@ -337,13 +254,6 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
     .filter(l => {
       if (statusFilter === 'active') return !l.archived;
       if (statusFilter === 'ended')  return l.archived;
-      return true;
-    })
-    .filter(l => {
-      const onShopify = !!(l.shopifyProductId && l.shopifyStatus === 'listed');
-      if (marketplaceFilter === 'shopify')   return onShopify;
-      if (marketplaceFilter === 'ebay-only') return !onShopify;
-      if (marketplaceFilter === 'both')      return !!(l.ebayDraftId) && onShopify;
       return true;
     })
     .filter(l => !activeTag || l.tags?.includes(activeTag))
@@ -372,7 +282,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
     });
 
   // Reset to page 1 when filters/search change
-  useEffect(() => { setCurrentPage(1); }, [search, statusFilter, marketplaceFilter, activeTag, sort, maxHealth]);
+  useEffect(() => { setCurrentPage(1); }, [search, statusFilter, activeTag, sort, maxHealth]);
 
 
   const totalPages = perPage === 0 ? 1 : Math.ceil(filteredListings.length / perPage);
@@ -381,25 +291,6 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const selectAllFiltered = () => setSelectedIds(new Set(filteredListings.map(l => l.id)));
   const clearSelection = () => setSelectedIds(new Set());
-
-  const handleBulkShopifyPush = async () => {
-    const toPush = filteredListings.filter(l => selectedIds.has(l.id) && !(l.shopifyProductId && l.shopifyStatus === 'listed'));
-    if (toPush.length === 0) { toast('All selected items are already on Shopify.', 'info'); return; }
-    setBulkShopifyPushingIds(new Set(toPush.map(l => l.id)));
-    let success = 0; let fail = 0;
-    for (const listing of toPush) {
-      try {
-        const resp = await fetch('/api/shopify/push', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pw}` }, body: JSON.stringify({ listing }) });
-        const data = await resp.json();
-        if (!resp.ok || data.error) throw new Error(data.error);
-        onUpdateListing?.({ ...listing, shopifyProductId: data.shopifyProductId, shopifyStatus: 'listed', shopifyListedAt: Date.now() });
-        success++;
-      } catch { fail++; }
-    }
-    setBulkShopifyPushingIds(new Set());
-    clearSelection();
-    toast(`Shopify push: ${success} listed${fail > 0 ? `, ${fail} failed` : ''}.`, success > 0 ? 'success' : 'error');
-  };
 
   const handleBulkArchive = () => {
     Array.from(selectedIds).forEach(id => onArchive(id));
@@ -432,7 +323,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
     }
   };
 
-  const handleSaveOptimized = async (pushEbay: boolean, pushShopify: boolean) => {
+  const handleSaveOptimized = async (pushEbay: boolean) => {
     if (!optimizeListing || !optimizeResult) return;
     setOptimizeSaving(true);
     const updated: StagedListing = {
@@ -472,19 +363,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
         if (reviseData.warning) console.warn('[revise]', reviseData.warning);
       }
 
-      // Push to Shopify
-      if (pushShopify && optimizeListing.shopifyProductId) {
-        const shopifyResp = await fetch(`/api/shopify/update/${optimizeListing.id}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pw}` },
-          body: JSON.stringify(updated),
-        });
-        const shopifyData = await shopifyResp.json();
-        if (!shopifyResp.ok || shopifyData.error) throw new Error('Shopify update failed: ' + shopifyData.error);
-      }
-
-      const where = [pushEbay && 'eBay', pushShopify && 'Shopify'].filter(Boolean).join(' & ');
-      toast(`Listing optimized${where ? ` and pushed to ${where}` : ''}!`, 'success');
+      toast(`Listing optimized${pushEbay ? ' and pushed to eBay' : ''}!`, 'success');
       setOptimizeListing(null);
       setOptimizeResult(null);
       setOptimizeInstructions('');
@@ -573,11 +452,6 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
               <Package size={11} /> {containerNameById.get(listing.containerId)}
             </button>
           )}
-          {listing.shopifyProductId && listing.shopifyStatus === 'listed' && (
-            <span style={{ fontSize: '0.78rem', background: 'rgba(150,191,72,0.2)', color: '#96bf48', border: '1px solid rgba(150,191,72,0.35)', padding: '2px 8px', borderRadius: '4px', fontWeight: 600 }}>
-              Shopify ✓
-            </span>
-          )}
         </div>
         {listing.sellerNotes && <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', padding: '6px 8px', marginBottom: '0.75rem', fontStyle: 'italic' }}>📝 {listing.sellerNotes}</p>}
         {stats[listing.id] && (
@@ -630,21 +504,6 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
             <button className="btn-icon" title="Fetch view/watcher stats from eBay" onClick={() => fetchStats(listing)} disabled={loadingStatsId === listing.id} style={{ color: stats[listing.id] ? 'var(--accent-color)' : undefined }}>
               {loadingStatsId === listing.id ? <span style={{ fontSize: '10px' }}>...</span> : <Eye size={18} />}
             </button>
-          )}
-          {isShopifyConnected && !isArchived && (
-            listing.shopifyProductId && listing.shopifyStatus === 'listed' ? (
-              <button className="btn-icon" title="Remove from Shopify" onClick={() => handleShopifyDelist(listing)}
-                disabled={shopifyDelistingId === listing.id}
-                style={{ color: '#96bf48', fontSize: '0.7rem', gap: '3px' }}>
-                {shopifyDelistingId === listing.id ? <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <ShoppingBag size={16} />}
-              </button>
-            ) : (
-              <button className="btn-icon" title="Push to Shopify" onClick={() => handleShopifyPush(listing)}
-                disabled={shopifyPushingId === listing.id}
-                style={{ color: 'var(--text-secondary)', fontSize: '0.7rem', gap: '3px' }}>
-                {shopifyPushingId === listing.id ? <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <ShoppingBag size={16} />}
-              </button>
-            )
           )}
           <button className="btn-icon" title="Cross-post to other platforms" onClick={() => setCrossPostListing(listing)}>
             <Share2 size={18} />
@@ -723,19 +582,6 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
           <button className="btn-icon" title="Fetch view/watcher stats" onClick={() => fetchStats(listing)} disabled={loadingStatsId === listing.id} style={{ color: stats[listing.id] ? 'var(--accent-color)' : undefined }}>
             {loadingStatsId === listing.id ? <span style={{ fontSize: '10px' }}>...</span> : <Eye size={18} />}
           </button>
-        )}
-        {isShopifyConnected && !isArchived && (
-          listing.shopifyProductId && listing.shopifyStatus === 'listed' ? (
-            <button className="btn-icon" title="Remove from Shopify" onClick={() => handleShopifyDelist(listing)}
-              disabled={shopifyDelistingId === listing.id} style={{ color: '#96bf48' }}>
-              {shopifyDelistingId === listing.id ? <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <ShoppingBag size={16} />}
-            </button>
-          ) : (
-            <button className="btn-icon" title="Push to Shopify" onClick={() => handleShopifyPush(listing)}
-              disabled={shopifyPushingId === listing.id}>
-              {shopifyPushingId === listing.id ? <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <ShoppingBag size={16} />}
-            </button>
-          )
         )}
         <button className="btn-icon" title="Cross-post to other platforms" onClick={() => setCrossPostListing(listing)}>
           <Share2 size={18} />
@@ -835,69 +681,6 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
         </div>, document.body
       )}
 
-      {/* Shopify push options modal */}
-      {pushOptionsListing && createPortal(
-        <div onClick={() => setPushOptionsListing(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
-          <div className="glass-panel" onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '560px', padding: '2rem', maxHeight: '90vh', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '1.25rem' }}>
-              <ShoppingBag size={18} style={{ color: '#96bf48' }} />
-              <h3 style={{ margin: 0, flex: 1 }}>Push to Shopify</h3>
-              <button onClick={() => setPushOptionsListing(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px' }}><X size={18} /></button>
-            </div>
-
-            {/* Listing preview */}
-            <div style={{ display: 'flex', gap: '12px', marginBottom: '1.25rem', padding: '10px 12px', background: 'rgba(255,255,255,0.04)', borderRadius: '8px' }}>
-              {pushOptionsListing.images?.[0] && <img src={pushOptionsListing.images[0]} alt="" style={{ width: '52px', height: '52px', objectFit: 'cover', borderRadius: '6px', flexShrink: 0 }} />}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ margin: '0 0 2px 0', fontWeight: 500, fontSize: '0.88rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pushOptionsListing.title}</p>
-                <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>${pushOptionsListing.priceRecommendation}</span>
-              </div>
-            </div>
-
-            {/* Collections */}
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>
-                Collections
-                {pushOptionsCollectionCodes.length > 0 && (
-                  <span style={{ fontSize: '0.75rem', fontWeight: 400, color: '#96bf48', marginLeft: '6px' }}>
-                    ({pushOptionsCollectionCodes.length} selected)
-                  </span>
-                )}
-              </label>
-              <CollectionSelector selected={pushOptionsCollectionCodes} onChange={setPushOptionsCollectionCodes} />
-            </div>
-
-            {/* Tags */}
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>Tags <span style={{ fontWeight: 400, opacity: 0.6 }}>(comma-separated)</span></label>
-              <input className="input-base" style={{ width: '100%' }}
-                value={pushOptionsTags.join(', ')}
-                onChange={e => setPushOptionsTags(e.target.value.split(',').map(t => t.trim()).filter(Boolean))}
-                placeholder="vintage, collectible, anime…" />
-            </div>
-
-            {/* SEO Keywords */}
-            <div style={{ marginBottom: '1.5rem' }}>
-              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>
-                SEO Keywords <span style={{ fontWeight: 400, opacity: 0.6 }}>(Google Shopping metafield)</span>
-              </label>
-              <input className="input-base" style={{ width: '100%' }}
-                value={pushOptionsSeoKeywords}
-                onChange={e => setPushOptionsSeoKeywords(e.target.value)}
-                placeholder="vintage figure, collectible toy, 90s anime…" />
-            </div>
-
-            <div style={{ display: 'flex', gap: '0.75rem' }}>
-              <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setPushOptionsListing(null)}>Cancel</button>
-              <button className="btn-primary" style={{ flex: 2, background: 'linear-gradient(135deg,#96bf48,#5e8e3e)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
-                disabled={pushOptionsPushing} onClick={handleShopifyPushConfirm}>
-                {pushOptionsPushing ? <><RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} /> Pushing…</> : <><ShoppingBag size={14} /> Push to Shopify</>}
-              </button>
-            </div>
-          </div>
-        </div>, document.body
-      )}
-
       {/* AI Optimize modal */}
       {optimizeListing && createPortal(
         <div onClick={() => setOptimizeListing(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', overflowY: 'auto' }}>
@@ -917,22 +700,8 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
                   <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>${optimizeListing.priceRecommendation}</span>
                   <HealthBadge listing={optimizeListing} />
                   {optimizeListing.ebayDraftId && <span style={{ fontSize: '0.75rem', background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', padding: '1px 7px', borderRadius: '4px' }}>eBay listed</span>}
-                  {optimizeListing.shopifyProductId && optimizeListing.shopifyStatus === 'listed' && <span style={{ fontSize: '0.75rem', background: 'rgba(150,191,72,0.2)', color: '#96bf48', padding: '1px 7px', borderRadius: '4px' }}>Shopify listed</span>}
                 </div>
               </div>
-            </div>
-
-            {/* Collection picker */}
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>
-                Collections
-                {optimizeCollectionCodes.length > 0 && (
-                  <span style={{ fontSize: '0.75rem', fontWeight: 400, color: 'var(--text-secondary)', marginLeft: '6px' }}>
-                    ({optimizeCollectionCodes.length} selected)
-                  </span>
-                )}
-              </label>
-              <CollectionSelector selected={optimizeCollectionCodes} onChange={setOptimizeCollectionCodes} />
             </div>
 
             {/* Instructions */}
@@ -994,7 +763,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
                 {/* Tags */}
                 <div style={{ marginBottom: '0.75rem' }}>
                   <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '3px' }}>
-                    Shopify/eBay Tags <span style={{ opacity: 0.6 }}>(comma-separated)</span>
+                    Tags <span style={{ opacity: 0.6 }}>(comma-separated)</span>
                   </label>
                   <input className="input-base"
                     value={Array.isArray(optimizeResult.tags) ? optimizeResult.tags.join(', ') : (optimizeResult.tags || '')}
@@ -1005,7 +774,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
                 {/* SEO Keywords */}
                 <div style={{ marginBottom: '1rem' }}>
                   <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '3px' }}>
-                    SEO Keywords <span style={{ opacity: 0.6 }}>(Shopify metafield · Google Shopping)</span>
+                    SEO Keywords <span style={{ opacity: 0.6 }}>(comma-separated)</span>
                   </label>
                   <input className="input-base"
                     value={optimizeResult.seoKeywords || ''}
@@ -1013,42 +782,14 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
                     style={{ width: '100%' }} placeholder="vintage figure, collectible anime toy, 90s action figure…" />
                 </div>
 
-                {/* Google metafields preview */}
-                <div style={{ marginBottom: '1rem', padding: '10px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
-                  <p style={{ margin: '0 0 6px 0', fontSize: '0.78rem', color: 'var(--text-secondary)', fontWeight: 500 }}>Google Shopping Metafields (auto-derived)</p>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                    {[
-                      { label: 'google.condition', value: (() => { const s = (optimizeResult.condition || '').toLowerCase(); return s.includes('new') && !s.includes('like') ? 'new' : s.includes('refurb') ? 'refurbished' : 'used'; })() },
-                      { label: 'google.mpn', value: optimizeResult.itemSpecifics?.MPN || optimizeResult.itemSpecifics?.['Model Number'] || '—' },
-                      { label: 'google.age_group', value: optimizeResult.itemSpecifics?.['Age Group'] || optimizeResult.itemSpecifics?.['Target Audience'] || '—' },
-                      { label: 'google.gender', value: optimizeResult.itemSpecifics?.Gender || '—' },
-                    ].map(({ label, value }) => (
-                      <span key={label} style={{ fontSize: '0.72rem', background: 'rgba(245,158,11,0.1)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.2)', padding: '2px 8px', borderRadius: '4px' }}>
-                        {label}: <strong>{value}</strong>
-                      </span>
-                    ))}
-                  </div>
-                  <p style={{ margin: '6px 0 0 0', fontSize: '0.7rem', color: 'var(--text-secondary)', opacity: 0.6 }}>These are set automatically on Shopify when you push. Edit item specifics above to change them.</p>
-                </div>
-
                 {/* Action buttons */}
                 <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                  <button className="btn-secondary" style={{ flex: 1 }} disabled={optimizeSaving} onClick={() => handleSaveOptimized(false, false)}>
+                  <button className="btn-secondary" style={{ flex: 1 }} disabled={optimizeSaving} onClick={() => handleSaveOptimized(false)}>
                     {optimizeSaving ? 'Saving…' : 'Save Only'}
                   </button>
                   {optimizeListing.ebayDraftId && (
-                    <button className="btn-primary" style={{ flex: 1, background: 'rgba(99,102,241,0.25)', borderColor: 'rgba(99,102,241,0.5)' }} disabled={optimizeSaving} onClick={() => handleSaveOptimized(true, false)}>
+                    <button className="btn-primary" style={{ flex: 1, background: 'rgba(99,102,241,0.25)', borderColor: 'rgba(99,102,241,0.5)' }} disabled={optimizeSaving} onClick={() => handleSaveOptimized(true)}>
                       {optimizeSaving ? 'Saving…' : 'Save + Revise eBay'}
-                    </button>
-                  )}
-                  {optimizeListing.shopifyProductId && optimizeListing.shopifyStatus === 'listed' && (
-                    <button className="btn-primary" style={{ flex: 1, background: 'rgba(150,191,72,0.2)', borderColor: 'rgba(150,191,72,0.4)', color: '#96bf48' }} disabled={optimizeSaving} onClick={() => handleSaveOptimized(false, true)}>
-                      {optimizeSaving ? 'Saving…' : 'Save + Update Shopify'}
-                    </button>
-                  )}
-                  {optimizeListing.ebayDraftId && optimizeListing.shopifyProductId && optimizeListing.shopifyStatus === 'listed' && (
-                    <button className="btn-primary" style={{ flex: 1 }} disabled={optimizeSaving} onClick={() => handleSaveOptimized(true, true)}>
-                      {optimizeSaving ? 'Saving…' : 'Save + Push Both'}
                     </button>
                   )}
                 </div>
@@ -1076,29 +817,6 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
         })}
       </div>
 
-      {/* Marketplace filter pills */}
-      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '1rem', alignItems: 'center' }}>
-        <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', opacity: 0.7 }}>Platform:</span>
-        {([
-          { key: 'all',       label: 'All platforms' },
-          { key: 'ebay-only', label: 'eBay only',       color: '#6366f1' },
-          { key: 'shopify',   label: 'On Shopify',      color: '#96bf48' },
-          { key: 'both',      label: 'Both platforms',  color: '#f59e0b' },
-        ] as { key: MarketplaceFilter; label: string; color?: string }[]).map(({ key, label, color }) => {
-          const isActive = marketplaceFilter === key;
-          return (
-            <button key={key} onClick={() => setMarketplaceFilter(key)}
-              style={{ fontSize: '0.8rem', padding: '3px 11px', borderRadius: '20px', border: '1px solid', cursor: 'pointer',
-                background: isActive ? `rgba(${color ? color : '99,102,241'},0.15)` : 'rgba(255,255,255,0.04)',
-                borderColor: isActive ? (color || 'var(--accent-color)') : 'var(--border-color)',
-                color: isActive ? (color || 'var(--accent)') : 'var(--text-secondary)',
-                fontWeight: isActive ? 600 : 400, transition: 'all 0.15s' }}>
-              {label}
-            </button>
-          );
-        })}
-      </div>
-
       {/* Tag filter bar */}
       {allTags.length > 0 && (
         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '1rem', alignItems: 'center' }}>
@@ -1117,13 +835,6 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
       {selectedIds.size > 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem', padding: '0.6rem 1rem', background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: '8px', flexWrap: 'wrap' }}>
           <span style={{ fontSize: '0.85rem', color: '#a5b4fc', fontWeight: 500 }}>{selectedIds.size} selected</span>
-          {isShopifyConnected && (
-            <button className="btn-primary" onClick={handleBulkShopifyPush} disabled={bulkShopifyPushingIds.size > 0}
-              style={{ fontSize: '0.8rem', padding: '4px 12px', background: 'linear-gradient(135deg, #96bf48, #5e8e3e)', display: 'flex', alignItems: 'center', gap: '5px' }}>
-              {bulkShopifyPushingIds.size > 0 ? <RefreshCw size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <ShoppingBag size={13} />}
-              {bulkShopifyPushingIds.size > 0 ? `Pushing ${bulkShopifyPushingIds.size}…` : `Push to Shopify`}
-            </button>
-          )}
           <button onClick={handleBulkArchive} style={{ fontSize: '0.8rem', padding: '4px 12px', background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border-color)', color: 'var(--text-secondary)', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
             <Archive size={13} /> Archive
           </button>

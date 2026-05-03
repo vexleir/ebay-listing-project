@@ -7,7 +7,6 @@ import ImageSearchButton from './ImageSearchButton';
 import Lightbox from './Lightbox';
 import { useToast } from '../context/ToastContext';
 import CrossPostModal from './CrossPostModal';
-import CollectionSelector from './CollectionSelector';
 
 interface StagedListingsProps {
   listings: StagedListing[];
@@ -888,17 +887,6 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
                       <button className="btn-icon" style={{ color: '#ef4444', padding: '4px 8px' }} onClick={() => setPushExtraSpecifics(prev => prev.filter((_, idx) => idx !== i))}>✕</button>
                     </div>
                   ))}
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>
-                    Collections
-                    {pushCollectionCodes.length > 0 && (
-                      <span style={{ fontSize: '0.75rem', fontWeight: 400, color: 'var(--text-secondary)', marginLeft: '6px' }}>
-                        ({pushCollectionCodes.length} selected)
-                      </span>
-                    )}
-                  </label>
-                  <CollectionSelector selected={pushCollectionCodes} onChange={setPushCollectionCodes} />
                 </div>
                 <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '0.5rem' }}>
                   <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setPushModal(null)}>Cancel</button>

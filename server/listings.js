@@ -151,7 +151,7 @@ async function getListingsInContainer(companyId, containerId) {
   const db = await getDb();
   return db.collection('listings').find(
     { companyId, containerId },
-    { projection: { _id: 0, id: 1, title: 1, sku: 1, priceRecommendation: 1, images: 1, status: 1, ebayDraftId: 1, shopifyProductId: 1, containerId: 1 } }
+    { projection: { _id: 0, id: 1, title: 1, sku: 1, priceRecommendation: 1, images: 1, status: 1, ebayDraftId: 1, containerId: 1 } }
   ).sort({ title: 1 }).toArray();
 }
 
