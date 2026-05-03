@@ -486,6 +486,36 @@ function App() {
     toast(`"${listing.title.substring(0, 35)}..." re-staged for relisting.`, 'success');
   };
 
+  // Delist + relist on eBay in one shot. Ends the current eBay item and
+  // immediately pushes a fresh one with the same (or updated) data — no
+  // scheduling. Stays on the Listings tab; updates the row's eBay ID in place.
+  const handleDelistAndRelist = async (listing: StagedListing): Promise<{ newDraftId: string } | null> => {
+    if (!listing.ebayDraftId) {
+      toast('Listing has no eBay item ID to delist.', 'error');
+      return null;
+    }
+    const resp = await fetch('/api/ebay/relist', {
+      method: 'POST',
+      headers: apiHeaders(appPassword),
+      body: JSON.stringify({
+        oldItemId: listing.ebayDraftId,
+        listingId: listing.id,
+        listing,
+        overrideConditionId: undefined,
+      }),
+    });
+    const data = await resp.json();
+    if (!resp.ok || data.error) {
+      toast('Delist & relist failed: ' + (data.error || resp.statusText), 'error');
+      return null;
+    }
+    const newDraftId: string = data.draftId;
+    const now = Date.now();
+    setListedProducts(prev => prev.map(l => l.id === listing.id ? { ...l, ebayDraftId: newDraftId, updatedAt: now } : l));
+    toast(`"${listing.title.substring(0, 35)}..." delisted and relisted on eBay.`, 'success');
+    return { newDraftId };
+  };
+
   const handleArchiveListedListing = async (id: string) => {
     const listing = listedProducts.find(l => l.id === id);
     if (!listing) return;
@@ -738,7 +768,7 @@ function App() {
           </div>
         ) : activeTab === 'listed' ? (
           <div className="animate-fade-in">
-            <ListedProducts listings={listedProducts.filter(l => !l.isConsignment)} onDelete={handleDeleteListedListing} onArchive={handleArchiveListedListing} onSyncSold={handleSyncSold} onRelist={handleRelistListing} onMoveToStaged={handleMoveToStaged} onMarkSold={handleMarkSold} onUpdateListing={handleUpdateListing} isEbayConnected={isEbayConnected} appPassword={appPassword} containers={containers} onOpenContainer={openContainerInTab} />
+            <ListedProducts listings={listedProducts.filter(l => !l.isConsignment)} onDelete={handleDeleteListedListing} onArchive={handleArchiveListedListing} onSyncSold={handleSyncSold} onRelist={handleRelistListing} onDelistRelist={handleDelistAndRelist} onMoveToStaged={handleMoveToStaged} onMarkSold={handleMarkSold} onUpdateListing={handleUpdateListing} isEbayConnected={isEbayConnected} appPassword={appPassword} containers={containers} onOpenContainer={openContainerInTab} />
           </div>
         ) : activeTab === 'sold' ? (
           <div className="animate-fade-in">

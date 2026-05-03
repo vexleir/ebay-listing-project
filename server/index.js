@@ -1257,9 +1257,12 @@ function getConditionId(conditionStr) {
   return '3000';
 }
 
-app.post('/api/ebay/draft', async (req, res) => {
-  const { listing, overrideCategoryId, overrideConditionId, overrideFulfillmentPolicyId, scheduleDate, bestOffer } = req.body;
-  const userSettings = await getSettings(req.companyId).catch(() => ({}));
+// Shared helper used by /api/ebay/draft and /api/ebay/relist. Uploads images,
+// builds the AddFixedPriceItem XML, posts it, retries once on a condition
+// mismatch, and returns { draftId, conditionFallback, warnings }. Throws an
+// Error with .status and (optionally) .warnings on failure.
+async function pushListingToEbay({ listing, overrideCategoryId, overrideConditionId, overrideFulfillmentPolicyId, scheduleDate, bestOffer, companyId }) {
+  const userSettings = await getSettings(companyId).catch(() => ({}));
   const config = {
     fulfillmentPolicy: overrideFulfillmentPolicyId || userSettings.defaultFulfillmentPolicyId || process.env.EBAY_FULFILLMENT_POLICY_ID,
     paymentPolicy: userSettings.defaultPaymentPolicyId || process.env.EBAY_PAYMENT_POLICY_ID,
@@ -1268,19 +1271,19 @@ app.post('/api/ebay/draft', async (req, res) => {
     sellerZip: userSettings.sellerZip || process.env.SELLER_ZIP || '10001',
     sellerLocation: userSettings.sellerLocation || process.env.SELLER_LOCATION || 'United States',
   };
-  // Pre-flight: verify required policy IDs are set before uploading images
   const missingPolicies = [];
   if (!config.fulfillmentPolicy) missingPolicies.push('Shipping/Fulfillment Policy');
   if (!config.returnPolicy) missingPolicies.push('Return Policy');
   if (!config.paymentPolicy) missingPolicies.push('Payment Policy');
   if (missingPolicies.length > 0) {
-    return res.status(400).json({ error: `eBay listing requires the following policies to be configured in Settings: ${missingPolicies.join(', ')}. Go to Settings → eBay Policies to select your saved eBay business policies.` });
+    const err = new Error(`eBay listing requires the following policies to be configured in Settings: ${missingPolicies.join(', ')}. Go to Settings → eBay Policies to select your saved eBay business policies.`);
+    err.status = 400;
+    throw err;
   }
 
-  try {
-    const token = await getValidAccessToken(req.companyId);
-    console.log(`--- Initiating XML Trading API push for: ${listing.title} ---`);
-    const TRADING_URL = 'https://api.ebay.com/ws/api.dll';
+  const token = await getValidAccessToken(companyId);
+  console.log(`--- Initiating XML Trading API push for: ${listing.title} ---`);
+  const TRADING_URL = 'https://api.ebay.com/ws/api.dll';
 
     const uploadedPictureUrls = [];
     if (listing.images && listing.images.length > 0) {
@@ -1319,13 +1322,17 @@ app.post('/api/ebay/draft', async (req, res) => {
           uploadedPictureUrls.push(match[1]);
         } else {
           const errMsg = picRes.data.match(/<LongMessage>(.*?)<\/LongMessage>/);
-          return res.status(400).json({ error: 'eBay EPS Image Upload Failed: ' + (errMsg ? errMsg[1] : 'Unknown error') });
+          const e = new Error('eBay EPS Image Upload Failed: ' + (errMsg ? errMsg[1] : 'Unknown error'));
+          e.status = 400;
+          throw e;
         }
       }
     }
 
     if (listing.images && listing.images.length > 0 && uploadedPictureUrls.length === 0) {
-      return res.status(400).json({ error: 'All image uploads to eBay failed.' });
+      const e = new Error('All image uploads to eBay failed.');
+      e.status = 400;
+      throw e;
     }
 
     const rawPrice = (listing.priceRecommendation || '').replace(/[^0-9.]/g, '');
@@ -1440,34 +1447,107 @@ app.post('/api/ebay/draft', async (req, res) => {
         if (!retryRes.data.includes('<Ack>Failure</Ack>') && !retryRes.data.includes('<Ack>Error</Ack>')) {
           const retryItemId = retryRes.data.match(/<ItemID>(.*?)<\/ItemID>/)?.[1] || 'Unknown ID';
           console.log(`[draft] Retry succeeded with condition 3000. Item ID: ${retryItemId}`);
-          return res.json({ success: true, draftId: retryItemId, conditionFallback: true });
+          return { draftId: retryItemId, conditionFallback: true, warnings };
         }
         const { errors: retryErrors, warnings: retryWarnings } = parseEbayErrors(retryRes.data);
-        return res.status(400).json({ error: 'eBay API Error: ' + retryErrors.join(' | '), warnings: retryWarnings });
+        const e = new Error('eBay API Error: ' + retryErrors.join(' | '));
+        e.status = 400;
+        e.warnings = retryWarnings;
+        throw e;
       }
 
       const errorMsg = trueErrors.length > 0 ? trueErrors.join(' | ') : 'Unknown Trading API Error';
       console.error('[draft] eBay errors:', errorMsg);
-      return res.status(400).json({ error: 'eBay API Error: ' + errorMsg, warnings });
+      const e = new Error('eBay API Error: ' + errorMsg);
+      e.status = 400;
+      e.warnings = warnings;
+      throw e;
     }
     const itemIdMatch = addRes.data.match(/<ItemID>(.*?)<\/ItemID>/);
     const draftId = itemIdMatch ? itemIdMatch[1] : 'Unknown ID';
-    console.log(`Successfully pushed to eBay! Scheduled Item ID: ${draftId}`);
+    console.log(`Successfully pushed to eBay! Item ID: ${draftId}`);
 
-    res.json({ success: true, draftId });
+    return { draftId, conditionFallback: false, warnings: [] };
+}
+
+// Translate any error from pushListingToEbay into an HTTP response on `res`.
+function sendEbayPushError(res, error) {
+  let msg = error.message;
+  if (error?.response?.data) {
+    const d = error.response.data;
+    if (typeof d === 'string') {
+      const m = d.match(/<LongMessage>(.*?)<\/LongMessage>/);
+      msg = m ? m[1] : d.substring(0, 400);
+    } else if (typeof d === 'object') {
+      msg = JSON.stringify(d).substring(0, 400);
+    }
+  }
+  console.error('Node Error:', msg);
+  const status = error.status || 500;
+  const payload = { error: status === 500 ? `Push failed: ${msg}` : msg };
+  if (error.warnings) payload.warnings = error.warnings;
+  res.status(status).json(payload);
+}
+
+app.post('/api/ebay/draft', async (req, res) => {
+  try {
+    const result = await pushListingToEbay({ ...req.body, companyId: req.companyId });
+    res.json({ success: true, ...result });
   } catch (error) {
-    let msg = error.message;
-    if (error?.response?.data) {
-      const d = error.response.data;
-      if (typeof d === 'string') {
-        const m = d.match(/<LongMessage>(.*?)<\/LongMessage>/);
-        msg = m ? m[1] : d.substring(0, 400);
-      } else if (typeof d === 'object') {
-        msg = JSON.stringify(d).substring(0, 400);
+    sendEbayPushError(res, error);
+  }
+});
+
+// Delist + relist: ends the current eBay listing and immediately pushes a fresh
+// one (no scheduleDate). Used by the Optimize modal's "Delist & Relist" action
+// and by the per-listing "Delist & Relist" button on the Listings tab.
+app.post('/api/ebay/relist', async (req, res) => {
+  const { oldItemId, listingId, listing } = req.body;
+  if (!oldItemId) return res.status(400).json({ error: 'oldItemId required' });
+  if (!listing) return res.status(400).json({ error: 'listing required' });
+  try {
+    const token = await getValidAccessToken(req.companyId);
+    // Step 1 — end the current listing
+    const endXml = `<?xml version="1.0" encoding="utf-8"?>
+<EndFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <ItemID>${oldItemId}</ItemID>
+  <EndingReason>NotAvailable</EndingReason>
+</EndFixedPriceItemRequest>`;
+    const endRes = await axios.post('https://api.ebay.com/ws/api.dll', endXml, {
+      headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1331', 'X-EBAY-API-CALL-NAME': 'EndFixedPriceItem', 'X-EBAY-API-SITEID': '0', 'X-EBAY-API-IAF-TOKEN': token, 'Content-Type': 'text/xml' }
+    });
+    // Treat "already ended" / "not active" as non-fatal so partial relists can recover.
+    if (endRes.data.includes('<Ack>Failure</Ack>')) {
+      const longMsg = endRes.data.match(/<LongMessage>(.*?)<\/LongMessage>/)?.[1] || '';
+      const recoverable = /already ended|not active|cannot be ended/i.test(longMsg);
+      if (!recoverable) {
+        return res.status(400).json({ error: 'End listing failed: ' + (longMsg || 'Unknown error') });
+      }
+      console.warn(`[relist] EndFixedPriceItem returned recoverable failure (${oldItemId}): ${longMsg}`);
+    }
+
+    // Step 2 — push a fresh listing immediately (no scheduleDate)
+    const result = await pushListingToEbay({
+      listing,
+      overrideCategoryId: req.body.overrideCategoryId,
+      overrideConditionId: req.body.overrideConditionId,
+      overrideFulfillmentPolicyId: req.body.overrideFulfillmentPolicyId,
+      bestOffer: req.body.bestOffer,
+      companyId: req.companyId,
+    });
+
+    // Step 3 — sync the local DB record with the new eBay item ID
+    if (listingId) {
+      try {
+        await updateListing(req.companyId, listingId, { ebayDraftId: result.draftId, updatedAt: Date.now() });
+      } catch (e) {
+        console.warn(`[relist] failed to update listing ${listingId} with new draftId ${result.draftId}: ${e.message}`);
       }
     }
-    console.error('Node Error:', msg);
-    res.status(500).json({ error: `Push failed: ${msg}` });
+
+    res.json({ success: true, ...result, oldItemId });
+  } catch (error) {
+    sendEbayPushError(res, error);
   }
 });
 

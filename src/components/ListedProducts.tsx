@@ -15,6 +15,7 @@ interface ListedProductsProps {
   onArchive: (id: string) => void;
   onSyncSold?: () => void;
   onRelist?: (listing: StagedListing) => void;
+  onDelistRelist?: (listing: StagedListing) => Promise<{ newDraftId: string } | null>;
   onMoveToStaged?: (listing: StagedListing) => void;
   onMarkSold?: (id: string, soldPrice: string, soldAt: number) => void;
   onUpdateListing?: (updated: StagedListing) => void;
@@ -147,7 +148,7 @@ function HealthBadge({ listing }: { listing: StagedListing }) {
   );
 }
 
-export default function ListedProductsView({ listings, onDelete, onArchive, onSyncSold, onRelist, onMoveToStaged, onMarkSold, onUpdateListing, isEbayConnected, appPassword = '', containers = [], onOpenContainer }: ListedProductsProps) {
+export default function ListedProductsView({ listings, onDelete, onArchive, onSyncSold, onRelist, onDelistRelist, onMoveToStaged, onMarkSold, onUpdateListing, isEbayConnected, appPassword = '', containers = [], onOpenContainer }: ListedProductsProps) {
   const containerNameById = (() => {
     const m = new Map<string, string>();
     for (const c of containers) m.set(c.id, c.name);
@@ -177,6 +178,9 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
   // End listing confirm
   const [endConfirmId, setEndConfirmId] = useState<string | null>(null);
   const [ending, setEnding] = useState(false);
+  // Delist + relist (live, immediate)
+  const [delistRelistConfirmId, setDelistRelistConfirmId] = useState<string | null>(null);
+  const [delistRelistingId, setDelistRelistingId] = useState<string | null>(null);
   // AI optimize modal
   const [optimizeListing, setOptimizeListing] = useState<StagedListing | null>(null);
   const [optimizeDescView, setOptimizeDescView] = useState<'html' | 'preview'>('html');
@@ -205,6 +209,17 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
     } finally {
       setEnding(false);
       setEndConfirmId(null);
+    }
+  };
+
+  const handleDelistRelist = async (listing: StagedListing) => {
+    if (!onDelistRelist) return;
+    setDelistRelistingId(listing.id);
+    try {
+      await onDelistRelist(listing);
+    } finally {
+      setDelistRelistingId(null);
+      setDelistRelistConfirmId(null);
     }
   };
 
@@ -325,7 +340,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
     }
   };
 
-  const handleSaveOptimized = async (pushEbay: boolean) => {
+  const handleSaveOptimized = async (pushEbay: boolean, delistAndRelist: boolean = false) => {
     if (!optimizeListing || !optimizeResult) return;
     setOptimizeSaving(true);
     const updated: StagedListing = {
@@ -351,7 +366,17 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
       if (!saveResp.ok) { const d = await saveResp.json(); throw new Error(d.error || 'Save failed'); }
       onUpdateListing?.(updated);
 
-      // Push to eBay
+      // Delist + relist on eBay (immediate, fresh listing with the updated content)
+      if (delistAndRelist && optimizeListing.ebayDraftId && onDelistRelist) {
+        const result = await onDelistRelist(updated);
+        if (!result) throw new Error('Delist & relist failed');
+        setOptimizeListing(null);
+        setOptimizeResult(null);
+        setOptimizeInstructions('');
+        return;
+      }
+
+      // Push to eBay (revise in place)
       if (pushEbay && optimizeListing.ebayDraftId) {
         const conditionId = autoConditionId(updated.condition || '');
         const specifics = Object.entries(updated.itemSpecifics || {}).map(([name, value]) => ({ name, value: String(value) }));
@@ -504,6 +529,11 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
             <Wand2 size={18} />
           </button>
           <button className="btn-icon" title="Edit listing" onClick={() => setEditListing(listing)}><Pencil size={18} /></button>
+          {listing.ebayDraftId && !isArchived && onDelistRelist && (
+            <button className="btn-icon" title="Delist & relist on eBay (immediate, refreshes listing)" style={{ color: '#f59e0b' }} disabled={delistRelistingId === listing.id} onClick={() => setDelistRelistConfirmId(listing.id)}>
+              {delistRelistingId === listing.id ? <RefreshCw size={18} style={{ animation: 'spin 1s linear infinite' }} /> : <RotateCcw size={18} />}
+            </button>
+          )}
           {listing.ebayDraftId && !isArchived && (
             <button className="btn-icon" title="End listing on eBay" style={{ color: '#ef4444' }} onClick={() => setEndConfirmId(listing.id)}>
               <CircleSlash size={18} />
@@ -590,6 +620,11 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
         {listing.ebayDraftId && (
           <button className="btn-icon" title="Fetch view/watcher stats" onClick={() => fetchStats(listing)} disabled={loadingStatsId === listing.id} style={{ color: stats[listing.id] ? 'var(--accent-color)' : undefined }}>
             {loadingStatsId === listing.id ? <span style={{ fontSize: '10px' }}>...</span> : <Eye size={18} />}
+          </button>
+        )}
+        {listing.ebayDraftId && !isArchived && onDelistRelist && (
+          <button className="btn-icon" title="Delist & relist on eBay (immediate, refreshes listing)" style={{ color: '#f59e0b' }} disabled={delistRelistingId === listing.id} onClick={() => setDelistRelistConfirmId(listing.id)}>
+            {delistRelistingId === listing.id ? <RefreshCw size={17} style={{ animation: 'spin 1s linear infinite' }} /> : <RotateCcw size={17} />}
           </button>
         )}
         <button className="btn-icon" title="Cross-post to other platforms" onClick={() => setCrossPostListing(listing)}>
@@ -684,6 +719,24 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
                 onClick={() => { const l = listings.find(x => x.id === endConfirmId); if (l) handleEndListing(l); }}
                 disabled={ending}>
                 {ending ? 'Ending...' : 'End Listing on eBay'}
+              </button>
+            </div>
+          </div>
+        </div>, document.body
+      )}
+
+      {/* Delist + relist confirm modal */}
+      {delistRelistConfirmId && createPortal(
+        <div onClick={() => setDelistRelistConfirmId(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+          <div className="glass-panel" onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '420px', padding: '2rem' }}>
+            <h3 style={{ margin: '0 0 0.75rem 0', display: 'flex', alignItems: 'center', gap: '8px' }}><RotateCcw size={18} style={{ color: '#f59e0b' }} /> Delist & Relist on eBay?</h3>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>This ends the current eBay listing and immediately creates a fresh one with the same details (no scheduling). Useful for refreshing listing visibility. The item will get a new eBay item ID.</p>
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setDelistRelistConfirmId(null)} disabled={!!delistRelistingId}>Cancel</button>
+              <button style={{ flex: 2, background: 'rgba(245,158,11,0.2)', border: '1px solid rgba(245,158,11,0.4)', color: '#f59e0b', borderRadius: '8px', padding: '8px 16px', cursor: 'pointer', fontWeight: 600 }}
+                onClick={() => { const l = listings.find(x => x.id === delistRelistConfirmId); if (l) handleDelistRelist(l); }}
+                disabled={!!delistRelistingId}>
+                {delistRelistingId ? 'Working...' : 'Delist & Relist'}
               </button>
             </div>
           </div>
@@ -819,12 +872,23 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
 
                 {/* Action buttons */}
                 <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                  <button className="btn-secondary" style={{ flex: 1 }} disabled={optimizeSaving} onClick={() => handleSaveOptimized(false)}>
+                  <button className="btn-secondary" style={{ flex: '1 1 140px' }} disabled={optimizeSaving} onClick={() => handleSaveOptimized(false)}>
                     {optimizeSaving ? 'Saving…' : 'Save Only'}
                   </button>
                   {optimizeListing.ebayDraftId && (
-                    <button className="btn-primary" style={{ flex: 1, background: 'rgba(99,102,241,0.25)', borderColor: 'rgba(99,102,241,0.5)' }} disabled={optimizeSaving} onClick={() => handleSaveOptimized(true)}>
+                    <button className="btn-primary" style={{ flex: '1 1 140px', background: 'rgba(99,102,241,0.25)', borderColor: 'rgba(99,102,241,0.5)' }} disabled={optimizeSaving} onClick={() => handleSaveOptimized(true)}>
                       {optimizeSaving ? 'Saving…' : 'Save + Revise eBay'}
+                    </button>
+                  )}
+                  {optimizeListing.ebayDraftId && onDelistRelist && (
+                    <button
+                      className="btn-primary"
+                      style={{ flex: '1 1 140px', background: 'rgba(245,158,11,0.22)', borderColor: 'rgba(245,158,11,0.5)', color: '#f59e0b' }}
+                      disabled={optimizeSaving}
+                      title="Save changes, end the live eBay listing, and immediately push it back as a fresh listing (no scheduling)"
+                      onClick={() => handleSaveOptimized(false, true)}
+                    >
+                      {optimizeSaving ? 'Working…' : <><RotateCcw size={14} style={{ marginRight: '6px', verticalAlign: '-2px' }} />Save + Delist & Relist</>}
                     </button>
                   )}
                 </div>
