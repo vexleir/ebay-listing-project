@@ -1101,6 +1101,7 @@ app.post('/api/ebay/refresh-listings', async (req, res) => {
       const priceRecommendation = rawPrice ? `$${parseFloat(rawPrice).toFixed(2)}` : '';
       const condition = get('ConditionDisplayName') || '';
       const categoryName = get('CategoryName') || '';
+      const categoryId = get('PrimaryCategoryID') || get('CategoryID') || '';
       const sku = get('SKU') || '';
 
       if (byEbayId.has(ebayItemId)) {
@@ -1111,6 +1112,7 @@ app.post('/api/ebay/refresh-listings', async (req, res) => {
         if (priceRecommendation) patch.priceRecommendation = priceRecommendation;
         if (condition) patch.condition = condition;
         if (sku) patch.sku = sku;
+        if (categoryId) patch.categoryId = categoryId;
         updateOps.push({ updateOne: { filter: { _id: existing._id }, update: { $set: patch } } });
       } else {
         insertOps.push({
@@ -1120,6 +1122,7 @@ app.post('/api/ebay/refresh-listings', async (req, res) => {
           description: '',
           condition,
           category: categoryName,
+          categoryId,
           priceRecommendation,
           shippingEstimate: '',
           itemSpecifics: {},
@@ -1179,6 +1182,7 @@ app.post('/api/ebay/import-listings', async (req, res) => {
         description: '',
         condition: item.condition || '',
         category: item.categoryName || '',
+        categoryId: item.categoryId || '',
         priceRecommendation: item.price ? `$${parseFloat(item.price).toFixed(2)}` : '',
         shippingEstimate: '',
         itemSpecifics: {},
@@ -1274,7 +1278,7 @@ async function pushListingToEbay({ listing, overrideCategoryId, overrideConditio
     fulfillmentPolicy: overrideFulfillmentPolicyId || userSettings.defaultFulfillmentPolicyId || process.env.EBAY_FULFILLMENT_POLICY_ID,
     paymentPolicy: overridePaymentPolicyId || userSettings.defaultPaymentPolicyId || process.env.EBAY_PAYMENT_POLICY_ID,
     returnPolicy: overrideReturnPolicyId || userSettings.defaultReturnPolicyId || process.env.EBAY_RETURN_POLICY_ID,
-    categoryId: overrideCategoryId || process.env.EBAY_DEFAULT_CATEGORY_ID || '261068',
+    categoryId: overrideCategoryId || listing.categoryId || process.env.EBAY_DEFAULT_CATEGORY_ID || '261068',
     sellerZip: userSettings.sellerZip || process.env.SELLER_ZIP || '10001',
     sellerLocation: userSettings.sellerLocation || process.env.SELLER_LOCATION || 'United States',
   };
@@ -1522,6 +1526,7 @@ app.post('/api/ebay/relist', async (req, res) => {
     // if GetItem fails or the listing doesn't use Business Policies.
     let liveSku = '';
     let livePolicies = { shipping: null, return: null, payment: null };
+    let liveCategoryId = null;
     try {
       const getItemXml = `<?xml version="1.0" encoding="utf-8"?>
 <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -1545,8 +1550,12 @@ app.post('/api/ebay/relist', async (req, res) => {
       livePolicies.shipping = /<ShippingProfileID>(.*?)<\/ShippingProfileID>/.exec(profilesBlock)?.[1] || null;
       livePolicies.return = /<ReturnProfileID>(.*?)<\/ReturnProfileID>/.exec(profilesBlock)?.[1] || null;
       livePolicies.payment = /<PaymentProfileID>(.*?)<\/PaymentProfileID>/.exec(profilesBlock)?.[1] || null;
+      // PrimaryCategory.CategoryID — preserves the original eBay leaf category so
+      // the relisted item doesn't fall through to the hardcoded default.
+      const primaryCatBlock = /<PrimaryCategory>([\s\S]*?)<\/PrimaryCategory>/.exec(xml)?.[1] || '';
+      liveCategoryId = /<CategoryID>(.*?)<\/CategoryID>/.exec(primaryCatBlock)?.[1] || null;
       const ack = /<Ack>([^<]+)<\/Ack>/.exec(xml)?.[1] || '?';
-      console.log(`[relist] GetItem(${oldItemId}) Ack=${ack} — SKU="${liveSku}" (DB="${listing.sku || ''}"), policies: shipping=${livePolicies.shipping}, return=${livePolicies.return}, payment=${livePolicies.payment}`);
+      console.log(`[relist] GetItem(${oldItemId}) Ack=${ack} — SKU="${liveSku}" (DB="${listing.sku || ''}"), category=${liveCategoryId}, policies: shipping=${livePolicies.shipping}, return=${livePolicies.return}, payment=${livePolicies.payment}`);
     } catch (e) {
       console.warn(`[relist] could not fetch live SKU/policies for ${oldItemId}: ${e.message}`);
     }
@@ -1556,6 +1565,9 @@ app.post('/api/ebay/relist', async (req, res) => {
     const listingWithSku = { ...listing, sku: finalSku };
     if (liveSku && listingId && liveSku !== listing.sku) {
       try { await updateListing(req.companyId, listingId, { sku: liveSku }); } catch {}
+    }
+    if (liveCategoryId && listingId && liveCategoryId !== listing.categoryId) {
+      try { await updateListing(req.companyId, listingId, { categoryId: liveCategoryId }); } catch {}
     }
 
     // Step 1 — end the current listing
@@ -1582,7 +1594,7 @@ app.post('/api/ebay/relist', async (req, res) => {
     // returned nothing, the caller's overrides (or user defaults) win.
     const result = await pushListingToEbay({
       listing: listingWithSku,
-      overrideCategoryId: req.body.overrideCategoryId,
+      overrideCategoryId: liveCategoryId || req.body.overrideCategoryId || listing.categoryId,
       overrideConditionId: req.body.overrideConditionId,
       overrideFulfillmentPolicyId: livePolicies.shipping || req.body.overrideFulfillmentPolicyId,
       overrideReturnPolicyId: livePolicies.return || req.body.overrideReturnPolicyId,

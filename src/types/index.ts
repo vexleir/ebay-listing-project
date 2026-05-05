@@ -5,6 +5,7 @@ export interface StagedListing {
   condition: string;
   itemSpecifics: Record<string, string>;
   category: string;
+  categoryId?: string;
   priceRecommendation: string;
   shippingEstimate: string;
   images: string[]; // base64 or object URLs

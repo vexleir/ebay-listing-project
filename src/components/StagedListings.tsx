@@ -471,10 +471,22 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
     for (const listing of toListing) {
       try {
         const pw = appPassword || localStorage.getItem('app_password') || '';
+        // Resolve a category per listing — prefer a stored categoryId, otherwise
+        // ask eBay's GetSuggestedCategories using the listing's category text or
+        // first few title words. Without this, the server falls through to the
+        // hardcoded default (Action Figures).
+        let resolvedCategoryId: string | undefined = listing.categoryId;
+        if (!resolvedCategoryId) {
+          try {
+            const q = listing.category || listing.title.split(' ').slice(0, 4).join(' ');
+            const catResp = await fetch(`/api/ebay/categories?query=${encodeURIComponent(q)}`, { headers: { 'Authorization': `Bearer ${pw}` } }).then(r => r.json()).catch(() => []);
+            if (Array.isArray(catResp) && catResp[0]?.id) resolvedCategoryId = catResp[0].id;
+          } catch { /* leave undefined; server default takes over */ }
+        }
         const resp = await fetch('/api/ebay/draft', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pw}` },
-          body: JSON.stringify({ listing, overrideConditionId: autoConditionId(listing.condition), scheduleDate: scheduleIso, bestOffer: { enabled: true } })
+          body: JSON.stringify({ listing, overrideConditionId: autoConditionId(listing.condition), overrideCategoryId: resolvedCategoryId, scheduleDate: scheduleIso, bestOffer: { enabled: true } })
         });
         if (!resp.ok) throw new Error(await resp.text());
         const data = await resp.json();
