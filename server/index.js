@@ -1268,12 +1268,12 @@ function getConditionId(conditionStr) {
 // builds the AddFixedPriceItem XML, posts it, retries once on a condition
 // mismatch, and returns { draftId, conditionFallback, warnings }. Throws an
 // Error with .status and (optionally) .warnings on failure.
-async function pushListingToEbay({ listing, overrideCategoryId, overrideConditionId, overrideFulfillmentPolicyId, scheduleDate, bestOffer, companyId }) {
+async function pushListingToEbay({ listing, overrideCategoryId, overrideConditionId, overrideFulfillmentPolicyId, overrideReturnPolicyId, overridePaymentPolicyId, scheduleDate, bestOffer, companyId }) {
   const userSettings = await getSettings(companyId).catch(() => ({}));
   const config = {
     fulfillmentPolicy: overrideFulfillmentPolicyId || userSettings.defaultFulfillmentPolicyId || process.env.EBAY_FULFILLMENT_POLICY_ID,
-    paymentPolicy: userSettings.defaultPaymentPolicyId || process.env.EBAY_PAYMENT_POLICY_ID,
-    returnPolicy: userSettings.defaultReturnPolicyId || process.env.EBAY_RETURN_POLICY_ID,
+    paymentPolicy: overridePaymentPolicyId || userSettings.defaultPaymentPolicyId || process.env.EBAY_PAYMENT_POLICY_ID,
+    returnPolicy: overrideReturnPolicyId || userSettings.defaultReturnPolicyId || process.env.EBAY_RETURN_POLICY_ID,
     categoryId: overrideCategoryId || process.env.EBAY_DEFAULT_CATEGORY_ID || '261068',
     sellerZip: userSettings.sellerZip || process.env.SELLER_ZIP || '10001',
     sellerLocation: userSettings.sellerLocation || process.env.SELLER_LOCATION || 'United States',
@@ -1515,10 +1515,13 @@ app.post('/api/ebay/relist', async (req, res) => {
   try {
     const token = await getValidAccessToken(req.companyId);
 
-    // Step 0 — fetch the live SKU from eBay BEFORE delisting, so we don't lose it
-    // if the DB record is missing/stale. GetItem returns <SKU> at the Item level.
-    // We only override when eBay actually has one set.
+    // Step 0 — fetch the live SKU + Business Policies from eBay BEFORE delisting,
+    // so the relist preserves the exact shipping/return/payment profiles the
+    // seller had on the original listing (and the SKU, if the DB record is
+    // missing/stale). Falls back silently to caller overrides / user defaults
+    // if GetItem fails or the listing doesn't use Business Policies.
     let liveSku = '';
+    let livePolicies = { shipping: null, return: null, payment: null };
     try {
       const getItemXml = `<?xml version="1.0" encoding="utf-8"?>
 <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -1529,17 +1532,23 @@ app.post('/api/ebay/relist', async (req, res) => {
       const getItemRes = await axios.post('https://api.ebay.com/ws/api.dll', getItemXml, {
         headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1331', 'X-EBAY-API-CALL-NAME': 'GetItem', 'X-EBAY-API-SITEID': '0', 'X-EBAY-API-IAF-TOKEN': token, 'Content-Type': 'text/xml' }
       });
+      const xml = getItemRes.data;
       // The first <SKU> in the body is the Item-level SKU (variations come after).
       // Strip a CDATA wrapper if eBay returned one.
-      const skuMatch = /<SKU[^>]*>([\s\S]*?)<\/SKU>/.exec(getItemRes.data);
+      const skuMatch = /<SKU[^>]*>([\s\S]*?)<\/SKU>/.exec(xml);
       let raw = skuMatch ? skuMatch[1].trim() : '';
       const cdata = /^<!\[CDATA\[([\s\S]*?)\]\]>$/.exec(raw);
       if (cdata) raw = cdata[1];
       liveSku = raw;
-      const ack = /<Ack>([^<]+)<\/Ack>/.exec(getItemRes.data)?.[1] || '?';
-      console.log(`[relist] GetItem(${oldItemId}) Ack=${ack} — extracted SKU="${liveSku}" (DB had="${listing.sku || ''}")`);
+      // SellerProfiles only present when the listing uses Business Policies.
+      const profilesBlock = /<SellerProfiles>([\s\S]*?)<\/SellerProfiles>/.exec(xml)?.[1] || '';
+      livePolicies.shipping = /<ShippingProfileID>(.*?)<\/ShippingProfileID>/.exec(profilesBlock)?.[1] || null;
+      livePolicies.return = /<ReturnProfileID>(.*?)<\/ReturnProfileID>/.exec(profilesBlock)?.[1] || null;
+      livePolicies.payment = /<PaymentProfileID>(.*?)<\/PaymentProfileID>/.exec(profilesBlock)?.[1] || null;
+      const ack = /<Ack>([^<]+)<\/Ack>/.exec(xml)?.[1] || '?';
+      console.log(`[relist] GetItem(${oldItemId}) Ack=${ack} — SKU="${liveSku}" (DB="${listing.sku || ''}"), policies: shipping=${livePolicies.shipping}, return=${livePolicies.return}, payment=${livePolicies.payment}`);
     } catch (e) {
-      console.warn(`[relist] could not fetch live SKU for ${oldItemId}: ${e.message}`);
+      console.warn(`[relist] could not fetch live SKU/policies for ${oldItemId}: ${e.message}`);
     }
     // Prefer live SKU; fall back to whatever the DB record had. Either way,
     // pushListingToEbay will only emit <SKU> when the value is non-empty.
@@ -1568,12 +1577,16 @@ app.post('/api/ebay/relist', async (req, res) => {
       console.warn(`[relist] EndFixedPriceItem returned recoverable failure (${oldItemId}): ${longMsg}`);
     }
 
-    // Step 2 — push a fresh listing immediately (no scheduleDate)
+    // Step 2 — push a fresh listing immediately (no scheduleDate). Live policies
+    // from Step 0 take precedence over caller-supplied overrides; if Step 0
+    // returned nothing, the caller's overrides (or user defaults) win.
     const result = await pushListingToEbay({
       listing: listingWithSku,
       overrideCategoryId: req.body.overrideCategoryId,
       overrideConditionId: req.body.overrideConditionId,
-      overrideFulfillmentPolicyId: req.body.overrideFulfillmentPolicyId,
+      overrideFulfillmentPolicyId: livePolicies.shipping || req.body.overrideFulfillmentPolicyId,
+      overrideReturnPolicyId: livePolicies.return || req.body.overrideReturnPolicyId,
+      overridePaymentPolicyId: livePolicies.payment || req.body.overridePaymentPolicyId,
       bestOffer: req.body.bestOffer,
       companyId: req.companyId,
     });
