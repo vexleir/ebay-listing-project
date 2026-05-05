@@ -745,8 +745,8 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
 
       {/* AI Optimize modal */}
       {optimizeListing && createPortal(
-        <div onClick={() => setOptimizeListing(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', overflowY: 'auto' }}>
-          <div className="glass-panel" onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '700px', padding: '2rem', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', overflowY: 'auto' }}>
+          <div className="glass-panel" style={{ width: '100%', maxWidth: '700px', padding: '2rem', maxHeight: '90vh', overflowY: 'auto' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '1.25rem' }}>
               <Wand2 size={20} style={{ color: '#a78bfa' }} />
               <h3 style={{ margin: 0, flex: 1 }}>AI Optimize Listing</h3>
