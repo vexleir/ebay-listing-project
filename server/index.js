@@ -1011,6 +1011,7 @@ app.get('/api/ebay/active-listings', async (req, res) => {
         condition: get('ConditionDisplayName') || '',
         categoryId: get('CategoryID'),
         categoryName: get('CategoryName'),
+        sku: get('SKU') || '',
         images,
         endTime: get('EndTime'),
         quantity: get('Quantity') || '1',
@@ -1098,6 +1099,7 @@ app.post('/api/ebay/refresh-listings', async (req, res) => {
       const priceRecommendation = rawPrice ? `$${parseFloat(rawPrice).toFixed(2)}` : '';
       const condition = get('ConditionDisplayName') || '';
       const categoryName = get('CategoryName') || '';
+      const sku = get('SKU') || '';
 
       if (byEbayId.has(ebayItemId)) {
         const existing = byEbayId.get(ebayItemId);
@@ -1106,6 +1108,7 @@ app.post('/api/ebay/refresh-listings', async (req, res) => {
         if (title) patch.title = title;
         if (priceRecommendation) patch.priceRecommendation = priceRecommendation;
         if (condition) patch.condition = condition;
+        if (sku) patch.sku = sku;
         updateOps.push({ updateOne: { filter: { _id: existing._id }, update: { $set: patch } } });
       } else {
         insertOps.push({
@@ -1119,6 +1122,7 @@ app.post('/api/ebay/refresh-listings', async (req, res) => {
           shippingEstimate: '',
           itemSpecifics: {},
           images,
+          sku,
           status: 'listed',
           ebayDraftId: ebayItemId,
           createdAt: now,
@@ -1177,6 +1181,7 @@ app.post('/api/ebay/import-listings', async (req, res) => {
         shippingEstimate: '',
         itemSpecifics: {},
         images: Array.isArray(item.images) ? item.images : [],
+        sku: item.sku || '',
         status: 'listed',
         ebayDraftId: item.ebayItemId,
         createdAt: now,
