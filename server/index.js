@@ -964,6 +964,7 @@ app.get('/api/ebay/active-listings', async (req, res) => {
   <EndTimeFrom>${listNow.toISOString()}</EndTimeFrom>
   <EndTimeTo>${listEndTimeTo.toISOString()}</EndTimeTo>
   <DetailLevel>ReturnAll</DetailLevel>
+  <IncludeSKU>true</IncludeSKU>
   <Pagination>
     <EntriesPerPage>200</EntriesPerPage>
     <PageNumber>${page}</PageNumber>
@@ -1053,6 +1054,7 @@ app.post('/api/ebay/refresh-listings', async (req, res) => {
   <EndTimeFrom>${callNow.toISOString()}</EndTimeFrom>
   <EndTimeTo>${endTimeTo.toISOString()}</EndTimeTo>
   <DetailLevel>ReturnAll</DetailLevel>
+  <IncludeSKU>true</IncludeSKU>
   <Pagination>
     <EntriesPerPage>200</EntriesPerPage>
     <PageNumber>${page}</PageNumber>
@@ -1512,6 +1514,32 @@ app.post('/api/ebay/relist', async (req, res) => {
   if (!listing) return res.status(400).json({ error: 'listing required' });
   try {
     const token = await getValidAccessToken(req.companyId);
+
+    // Step 0 — fetch the live SKU from eBay BEFORE delisting, so we don't lose it
+    // if the DB record is missing/stale. GetItem returns <SKU> at the Item level
+    // by default. We only override when eBay actually has one set.
+    let liveSku = '';
+    try {
+      const getItemXml = `<?xml version="1.0" encoding="utf-8"?>
+<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <ItemID>${oldItemId}</ItemID>
+  <DetailLevel>ReturnAll</DetailLevel>
+  <IncludeItemSpecifics>false</IncludeItemSpecifics>
+</GetItemRequest>`;
+      const getItemRes = await axios.post('https://api.ebay.com/ws/api.dll', getItemXml, {
+        headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1331', 'X-EBAY-API-CALL-NAME': 'GetItem', 'X-EBAY-API-SITEID': '0', 'X-EBAY-API-IAF-TOKEN': token, 'Content-Type': 'text/xml' }
+      });
+      const skuMatch = /<SKU[^>]*>([\s\S]*?)<\/SKU>/.exec(getItemRes.data);
+      liveSku = skuMatch ? skuMatch[1].trim() : '';
+    } catch (e) {
+      console.warn(`[relist] could not fetch live SKU for ${oldItemId}: ${e.message}`);
+    }
+    const listingWithSku = liveSku ? { ...listing, sku: liveSku } : listing;
+    if (liveSku && listingId) {
+      // Backfill the DB so future operations have it without another GetItem
+      try { await updateListing(req.companyId, listingId, { sku: liveSku }); } catch {}
+    }
+
     // Step 1 — end the current listing
     const endXml = `<?xml version="1.0" encoding="utf-8"?>
 <EndFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -1533,7 +1561,7 @@ app.post('/api/ebay/relist', async (req, res) => {
 
     // Step 2 — push a fresh listing immediately (no scheduleDate)
     const result = await pushListingToEbay({
-      listing,
+      listing: listingWithSku,
       overrideCategoryId: req.body.overrideCategoryId,
       overrideConditionId: req.body.overrideConditionId,
       overrideFulfillmentPolicyId: req.body.overrideFulfillmentPolicyId,
