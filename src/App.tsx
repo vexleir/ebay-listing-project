@@ -489,11 +489,12 @@ function App() {
   // Delist + relist on eBay in one shot. Ends the current eBay item and
   // immediately pushes a fresh one with the same (or updated) data — no
   // scheduling. Stays on the Listings tab; updates the row's eBay ID in place.
-  const handleDelistAndRelist = async (listing: StagedListing): Promise<{ newDraftId: string } | null> => {
+  const handleDelistAndRelist = async (listing: StagedListing, options?: { allowOffers?: boolean }): Promise<{ newDraftId: string } | null> => {
     if (!listing.ebayDraftId) {
       toast('Listing has no eBay item ID to delist.', 'error');
       return null;
     }
+    const allowOffers = options?.allowOffers ?? true;
     const resp = await fetch('/api/ebay/relist', {
       method: 'POST',
       headers: apiHeaders(appPassword),
@@ -502,6 +503,7 @@ function App() {
         listingId: listing.id,
         listing,
         overrideConditionId: undefined,
+        bestOffer: { enabled: allowOffers },
       }),
     });
     const data = await resp.json();

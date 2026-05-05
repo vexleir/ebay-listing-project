@@ -15,7 +15,7 @@ interface ListedProductsProps {
   onArchive: (id: string) => void;
   onSyncSold?: () => void;
   onRelist?: (listing: StagedListing) => void;
-  onDelistRelist?: (listing: StagedListing) => Promise<{ newDraftId: string } | null>;
+  onDelistRelist?: (listing: StagedListing, options?: { allowOffers?: boolean }) => Promise<{ newDraftId: string } | null>;
   onMoveToStaged?: (listing: StagedListing) => void;
   onMarkSold?: (id: string, soldPrice: string, soldAt: number) => void;
   onUpdateListing?: (updated: StagedListing) => void;
@@ -181,6 +181,8 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
   // Delist + relist (live, immediate)
   const [delistRelistConfirmId, setDelistRelistConfirmId] = useState<string | null>(null);
   const [delistRelistingId, setDelistRelistingId] = useState<string | null>(null);
+  const [delistRelistAllowOffers, setDelistRelistAllowOffers] = useState<boolean>(true);
+  const [optimizeAllowOffers, setOptimizeAllowOffers] = useState<boolean>(true);
   // AI optimize modal
   const [optimizeListing, setOptimizeListing] = useState<StagedListing | null>(null);
   const [optimizeDescView, setOptimizeDescView] = useState<'html' | 'preview'>('html');
@@ -212,11 +214,11 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
     }
   };
 
-  const handleDelistRelist = async (listing: StagedListing) => {
+  const handleDelistRelist = async (listing: StagedListing, allowOffers: boolean) => {
     if (!onDelistRelist) return;
     setDelistRelistingId(listing.id);
     try {
-      await onDelistRelist(listing);
+      await onDelistRelist(listing, { allowOffers });
     } finally {
       setDelistRelistingId(null);
       setDelistRelistConfirmId(null);
@@ -368,7 +370,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
 
       // Delist + relist on eBay (immediate, fresh listing with the updated content)
       if (delistAndRelist && optimizeListing.ebayDraftId && onDelistRelist) {
-        const result = await onDelistRelist(updated);
+        const result = await onDelistRelist(updated, { allowOffers: optimizeAllowOffers });
         if (!result) throw new Error('Delist & relist failed');
         setOptimizeListing(null);
         setOptimizeResult(null);
@@ -730,11 +732,15 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
         <div onClick={() => setDelistRelistConfirmId(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
           <div className="glass-panel" onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '420px', padding: '2rem' }}>
             <h3 style={{ margin: '0 0 0.75rem 0', display: 'flex', alignItems: 'center', gap: '8px' }}><RotateCcw size={18} style={{ color: '#f59e0b' }} /> Delist & Relist on eBay?</h3>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>This ends the current eBay listing and immediately creates a fresh one with the same details (no scheduling). Useful for refreshing listing visibility. The item will get a new eBay item ID.</p>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>This ends the current eBay listing and immediately creates a fresh one with the same details (no scheduling). Useful for refreshing listing visibility. The item will get a new eBay item ID.</p>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', marginBottom: '1.25rem', cursor: 'pointer', userSelect: 'none' }}>
+              <input type="checkbox" checked={delistRelistAllowOffers} onChange={e => setDelistRelistAllowOffers(e.target.checked)} style={{ cursor: 'pointer' }} />
+              Allow offers (Best Offer enabled)
+            </label>
             <div style={{ display: 'flex', gap: '0.75rem' }}>
               <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setDelistRelistConfirmId(null)} disabled={!!delistRelistingId}>Cancel</button>
               <button style={{ flex: 2, background: 'rgba(245,158,11,0.2)', border: '1px solid rgba(245,158,11,0.4)', color: '#f59e0b', borderRadius: '8px', padding: '8px 16px', cursor: 'pointer', fontWeight: 600 }}
-                onClick={() => { const l = listings.find(x => x.id === delistRelistConfirmId); if (l) handleDelistRelist(l); }}
+                onClick={() => { const l = listings.find(x => x.id === delistRelistConfirmId); if (l) handleDelistRelist(l, delistRelistAllowOffers); }}
                 disabled={!!delistRelistingId}>
                 {delistRelistingId ? 'Working...' : 'Delist & Relist'}
               </button>
@@ -874,6 +880,14 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
                     onChange={e => setOptimizeResult((r: any) => ({ ...r, seoKeywords: e.target.value }))}
                     style={{ width: '100%' }} placeholder="vintage figure, collectible anime toy, 90s action figure…" />
                 </div>
+
+                {/* Allow offers (used by Save + Delist & Relist) */}
+                {optimizeListing.ebayDraftId && onDelistRelist && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '0.75rem', cursor: 'pointer', userSelect: 'none' }}>
+                    <input type="checkbox" checked={optimizeAllowOffers} onChange={e => setOptimizeAllowOffers(e.target.checked)} style={{ cursor: 'pointer' }} />
+                    Allow offers on relisted item (Best Offer enabled)
+                  </label>
+                )}
 
                 {/* Action buttons */}
                 <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
