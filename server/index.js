@@ -1516,8 +1516,8 @@ app.post('/api/ebay/relist', async (req, res) => {
     const token = await getValidAccessToken(req.companyId);
 
     // Step 0 — fetch the live SKU from eBay BEFORE delisting, so we don't lose it
-    // if the DB record is missing/stale. GetItem returns <SKU> at the Item level
-    // by default. We only override when eBay actually has one set.
+    // if the DB record is missing/stale. GetItem returns <SKU> at the Item level.
+    // We only override when eBay actually has one set.
     let liveSku = '';
     try {
       const getItemXml = `<?xml version="1.0" encoding="utf-8"?>
@@ -1529,14 +1529,23 @@ app.post('/api/ebay/relist', async (req, res) => {
       const getItemRes = await axios.post('https://api.ebay.com/ws/api.dll', getItemXml, {
         headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1331', 'X-EBAY-API-CALL-NAME': 'GetItem', 'X-EBAY-API-SITEID': '0', 'X-EBAY-API-IAF-TOKEN': token, 'Content-Type': 'text/xml' }
       });
+      // The first <SKU> in the body is the Item-level SKU (variations come after).
+      // Strip a CDATA wrapper if eBay returned one.
       const skuMatch = /<SKU[^>]*>([\s\S]*?)<\/SKU>/.exec(getItemRes.data);
-      liveSku = skuMatch ? skuMatch[1].trim() : '';
+      let raw = skuMatch ? skuMatch[1].trim() : '';
+      const cdata = /^<!\[CDATA\[([\s\S]*?)\]\]>$/.exec(raw);
+      if (cdata) raw = cdata[1];
+      liveSku = raw;
+      const ack = /<Ack>([^<]+)<\/Ack>/.exec(getItemRes.data)?.[1] || '?';
+      console.log(`[relist] GetItem(${oldItemId}) Ack=${ack} — extracted SKU="${liveSku}" (DB had="${listing.sku || ''}")`);
     } catch (e) {
       console.warn(`[relist] could not fetch live SKU for ${oldItemId}: ${e.message}`);
     }
-    const listingWithSku = liveSku ? { ...listing, sku: liveSku } : listing;
-    if (liveSku && listingId) {
-      // Backfill the DB so future operations have it without another GetItem
+    // Prefer live SKU; fall back to whatever the DB record had. Either way,
+    // pushListingToEbay will only emit <SKU> when the value is non-empty.
+    const finalSku = liveSku || listing.sku || '';
+    const listingWithSku = { ...listing, sku: finalSku };
+    if (liveSku && listingId && liveSku !== listing.sku) {
       try { await updateListing(req.companyId, listingId, { sku: liveSku }); } catch {}
     }
 

@@ -653,11 +653,17 @@ export default function ListingOptimizer({ appPassword }: Props) {
               <div style={{ fontWeight: 600, fontSize: '0.95rem', marginBottom: '2px', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                 {listing.title}
               </div>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
                 <span>{listing.categoryName}</span>
                 <span>·</span>
                 <span>${listing.price.toFixed(2)}</span>
                 {listing.conditionName && <><span>·</span><span>{listing.conditionName}</span></>}
+                {listing.sku && (
+                  <>
+                    <span>·</span>
+                    <span style={{ fontFamily: 'monospace', background: 'rgba(34,197,94,0.15)', color: '#86efac', padding: '1px 6px', borderRadius: '3px' }} title="SKU on the live eBay listing">SKU: {listing.sku}</span>
+                  </>
+                )}
                 {!listing.isOwner && (
                   <span style={{ color: '#f59e0b', display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <AlertTriangle size={11} /> Not your listing — analysis only

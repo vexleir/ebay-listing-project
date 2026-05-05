@@ -762,6 +762,11 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
                   <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>${optimizeListing.priceRecommendation}</span>
                   <HealthBadge listing={optimizeListing} />
                   {optimizeListing.ebayDraftId && <span style={{ fontSize: '0.75rem', background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', padding: '1px 7px', borderRadius: '4px' }}>eBay listed</span>}
+                  {optimizeListing.sku
+                    ? <span title="SKU stored locally — will be applied to the relisted item" style={{ fontSize: '0.72rem', background: 'rgba(34,197,94,0.18)', color: '#86efac', padding: '1px 7px', borderRadius: '4px', fontFamily: 'monospace' }}>SKU: {optimizeListing.sku}</span>
+                    : optimizeListing.ebayDraftId
+                      ? <span title="No SKU saved locally. On Delist & Relist, the server will fetch the live SKU from eBay (via GetItem) and apply it to the new listing." style={{ fontSize: '0.72rem', background: 'rgba(245,158,11,0.18)', color: '#fcd34d', padding: '1px 7px', borderRadius: '4px' }}>SKU: (will pull from eBay)</span>
+                      : null}
                 </div>
               </div>
             </div>
