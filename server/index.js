@@ -1376,6 +1376,36 @@ async function pushListingToEbay({ listing, overrideCategoryId, overrideConditio
 
     // Best Offer — opt-in via bestOffer.enabled. Auto-accept and minimum prices are
     // only sent when the user filled them in; otherwise eBay leaves those thresholds unset.
+    // Shipping package details — emitted only if any dimension/weight is set.
+    // Some Business Policies require these per-item even though the policy
+    // selects the carrier/service.
+    let shippingPackageDetailsXml = '';
+    {
+      const numOrNull = (v) => {
+        if (v == null || v === '') return null;
+        const n = parseFloat(String(v));
+        return isFinite(n) && n > 0 ? n : null;
+      };
+      const len = numOrNull(listing.packageLength);
+      const wid = numOrNull(listing.packageWidth);
+      const dep = numOrNull(listing.packageDepth);
+      const lbs = numOrNull(listing.packageWeightLbs);
+      const oz = numOrNull(listing.packageWeightOz);
+      if (len || wid || dep || lbs || oz) {
+        const parts = [];
+        if (len) parts.push(`<PackageLength unit="inches">${len}</PackageLength>`);
+        if (wid) parts.push(`<PackageWidth unit="inches">${wid}</PackageWidth>`);
+        if (dep) parts.push(`<PackageDepth unit="inches">${dep}</PackageDepth>`);
+        // WeightMajor = pounds, WeightMinor = ounces. Send 0 for the unset half
+        // when only one is provided so eBay doesn't reject the partial weight.
+        if (lbs || oz) {
+          parts.push(`<WeightMajor unit="lbs">${Math.floor(lbs || 0)}</WeightMajor>`);
+          parts.push(`<WeightMinor unit="oz">${oz || 0}</WeightMinor>`);
+        }
+        shippingPackageDetailsXml = `<ShippingPackageDetails>${parts.join('')}</ShippingPackageDetails>`;
+      }
+    }
+
     let bestOfferDetailsXml = '';
     let listingDetailsXml = '';
     if (bestOffer && bestOffer.enabled) {
@@ -1413,6 +1443,7 @@ async function pushListingToEbay({ listing, overrideCategoryId, overrideConditio
     <ListingType>FixedPriceItem</ListingType>
     ${pictureDetailsXml}
     ${itemSpecificsXml}
+    ${shippingPackageDetailsXml}
     ${bestOfferDetailsXml}
     ${listingDetailsXml}
     <PostalCode>${config.sellerZip}</PostalCode>
@@ -1527,6 +1558,7 @@ app.post('/api/ebay/relist', async (req, res) => {
     let liveSku = '';
     let livePolicies = { shipping: null, return: null, payment: null };
     let liveCategoryId = null;
+    let livePackage = { length: null, width: null, depth: null, lbs: null, oz: null };
     try {
       const getItemXml = `<?xml version="1.0" encoding="utf-8"?>
 <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -1554,20 +1586,53 @@ app.post('/api/ebay/relist', async (req, res) => {
       // the relisted item doesn't fall through to the hardcoded default.
       const primaryCatBlock = /<PrimaryCategory>([\s\S]*?)<\/PrimaryCategory>/.exec(xml)?.[1] || '';
       liveCategoryId = /<CategoryID>(.*?)<\/CategoryID>/.exec(primaryCatBlock)?.[1] || null;
+      // ShippingPackageDetails — preserve dimensions/weight so calculated-shipping
+      // policies don't reject the relist for missing package info.
+      const pkgBlock = /<ShippingPackageDetails>([\s\S]*?)<\/ShippingPackageDetails>/.exec(xml)?.[1] || '';
+      if (pkgBlock) {
+        livePackage.length = /<PackageLength[^>]*>(.*?)<\/PackageLength>/.exec(pkgBlock)?.[1] || null;
+        livePackage.width = /<PackageWidth[^>]*>(.*?)<\/PackageWidth>/.exec(pkgBlock)?.[1] || null;
+        livePackage.depth = /<PackageDepth[^>]*>(.*?)<\/PackageDepth>/.exec(pkgBlock)?.[1] || null;
+        livePackage.lbs = /<WeightMajor[^>]*>(.*?)<\/WeightMajor>/.exec(pkgBlock)?.[1] || null;
+        livePackage.oz = /<WeightMinor[^>]*>(.*?)<\/WeightMinor>/.exec(pkgBlock)?.[1] || null;
+      }
       const ack = /<Ack>([^<]+)<\/Ack>/.exec(xml)?.[1] || '?';
-      console.log(`[relist] GetItem(${oldItemId}) Ack=${ack} — SKU="${liveSku}" (DB="${listing.sku || ''}"), category=${liveCategoryId}, policies: shipping=${livePolicies.shipping}, return=${livePolicies.return}, payment=${livePolicies.payment}`);
+      console.log(`[relist] GetItem(${oldItemId}) Ack=${ack} — SKU="${liveSku}" (DB="${listing.sku || ''}"), category=${liveCategoryId}, policies: shipping=${livePolicies.shipping}, return=${livePolicies.return}, payment=${livePolicies.payment}, package: ${livePackage.length}x${livePackage.width}x${livePackage.depth} ${livePackage.lbs}lb ${livePackage.oz}oz`);
     } catch (e) {
       console.warn(`[relist] could not fetch live SKU/policies for ${oldItemId}: ${e.message}`);
     }
     // Prefer live SKU; fall back to whatever the DB record had. Either way,
     // pushListingToEbay will only emit <SKU> when the value is non-empty.
     const finalSku = liveSku || listing.sku || '';
-    const listingWithSku = { ...listing, sku: finalSku };
+    // For each package field: prefer what's already on the listing (user-entered
+    // in the optimize modal); fall back to whatever eBay had on the original item.
+    const listingWithSku = {
+      ...listing,
+      sku: finalSku,
+      packageLength: listing.packageLength || livePackage.length || '',
+      packageWidth: listing.packageWidth || livePackage.width || '',
+      packageDepth: listing.packageDepth || livePackage.depth || '',
+      packageWeightLbs: listing.packageWeightLbs || livePackage.lbs || '',
+      packageWeightOz: listing.packageWeightOz || livePackage.oz || '',
+    };
     if (liveSku && listingId && liveSku !== listing.sku) {
       try { await updateListing(req.companyId, listingId, { sku: liveSku }); } catch {}
     }
     if (liveCategoryId && listingId && liveCategoryId !== listing.categoryId) {
       try { await updateListing(req.companyId, listingId, { categoryId: liveCategoryId }); } catch {}
+    }
+    // Persist any newly-discovered package dimensions back to the DB so future
+    // pushes/relists have them locally and the modal pre-populates correctly.
+    if (listingId) {
+      const pkgPatch = {};
+      if (livePackage.length && !listing.packageLength) pkgPatch.packageLength = String(livePackage.length);
+      if (livePackage.width && !listing.packageWidth) pkgPatch.packageWidth = String(livePackage.width);
+      if (livePackage.depth && !listing.packageDepth) pkgPatch.packageDepth = String(livePackage.depth);
+      if (livePackage.lbs && !listing.packageWeightLbs) pkgPatch.packageWeightLbs = String(livePackage.lbs);
+      if (livePackage.oz && !listing.packageWeightOz) pkgPatch.packageWeightOz = String(livePackage.oz);
+      if (Object.keys(pkgPatch).length > 0) {
+        try { await updateListing(req.companyId, listingId, pkgPatch); } catch {}
+      }
     }
 
     // Step 1 — end the current listing
@@ -1579,10 +1644,12 @@ app.post('/api/ebay/relist', async (req, res) => {
     const endRes = await axios.post('https://api.ebay.com/ws/api.dll', endXml, {
       headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1331', 'X-EBAY-API-CALL-NAME': 'EndFixedPriceItem', 'X-EBAY-API-SITEID': '0', 'X-EBAY-API-IAF-TOKEN': token, 'Content-Type': 'text/xml' }
     });
-    // Treat "already ended" / "not active" as non-fatal so partial relists can recover.
+    // Treat any "already ended/closed/inactive" variant as non-fatal so partial
+    // relists can recover (the seller's intent is "end + relist"; if it's already
+    // ended, just proceed to the relist step).
     if (endRes.data.includes('<Ack>Failure</Ack>')) {
       const longMsg = endRes.data.match(/<LongMessage>(.*?)<\/LongMessage>/)?.[1] || '';
-      const recoverable = /already ended|not active|cannot be ended/i.test(longMsg);
+      const recoverable = /already (?:ended|closed|been ended|been closed)|not active|no longer active|cannot be ended|auction.*closed|listing.*ended/i.test(longMsg);
       if (!recoverable) {
         return res.status(400).json({ error: 'End listing failed: ' + (longMsg || 'Unknown error') });
       }

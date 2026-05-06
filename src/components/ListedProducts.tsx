@@ -191,6 +191,10 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
   const [optimizeResult, setOptimizeResult] = useState<any>(null);
   const [optimizeSaving, setOptimizeSaving] = useState(false);
   const [optimizeCollectionCodes, setOptimizeCollectionCodes] = useState<string[]>([]);
+  const [optimizeDimensions, setOptimizeDimensions] = useState<{
+    packageLength: string; packageWidth: string; packageDepth: string;
+    packageWeightLbs: string; packageWeightOz: string;
+  }>({ packageLength: '', packageWidth: '', packageDepth: '', packageWeightLbs: '', packageWeightOz: '' });
 
   const pw = appPassword || localStorage.getItem('app_password') || '';
 
@@ -356,6 +360,11 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
       tags: optimizeResult.tags || optimizeListing.tags,
       seoKeywords: optimizeResult.seoKeywords || optimizeListing.seoKeywords || '',
       collectionCodes: optimizeCollectionCodes.length > 0 ? optimizeCollectionCodes : optimizeListing.collectionCodes,
+      packageLength: optimizeDimensions.packageLength,
+      packageWidth: optimizeDimensions.packageWidth,
+      packageDepth: optimizeDimensions.packageDepth,
+      packageWeightLbs: optimizeDimensions.packageWeightLbs,
+      packageWeightOz: optimizeDimensions.packageWeightOz,
       updatedAt: Date.now(),
     };
     try {
@@ -526,7 +535,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
               <DollarSign size={17} /> Sold
             </button>
           )}
-          <button className="btn-icon" title="AI Optimize listing" onClick={() => { setOptimizeListing(listing); setOptimizeResult(null); setOptimizeInstructions(''); setOptimizeCollectionCodes(listing.collectionCodes || []); setOptimizeDescView('html'); }}
+          <button className="btn-icon" title="AI Optimize listing" onClick={() => { setOptimizeListing(listing); setOptimizeResult(null); setOptimizeInstructions(''); setOptimizeCollectionCodes(listing.collectionCodes || []); setOptimizeDescView('html'); setOptimizeDimensions({ packageLength: listing.packageLength || '', packageWidth: listing.packageWidth || '', packageDepth: listing.packageDepth || '', packageWeightLbs: listing.packageWeightLbs || '', packageWeightOz: listing.packageWeightOz || '' }); }}
             style={{ color: '#a78bfa' }}>
             <Wand2 size={18} />
           </button>
@@ -612,7 +621,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
             <DollarSign size={17} />
           </button>
         )}
-        <button className="btn-icon" title="AI Optimize listing" onClick={() => { setOptimizeListing(listing); setOptimizeResult(null); setOptimizeInstructions(''); setOptimizeCollectionCodes(listing.collectionCodes || []); setOptimizeDescView('html'); }}
+        <button className="btn-icon" title="AI Optimize listing" onClick={() => { setOptimizeListing(listing); setOptimizeResult(null); setOptimizeInstructions(''); setOptimizeCollectionCodes(listing.collectionCodes || []); setOptimizeDescView('html'); setOptimizeDimensions({ packageLength: listing.packageLength || '', packageWidth: listing.packageWidth || '', packageDepth: listing.packageDepth || '', packageWeightLbs: listing.packageWeightLbs || '', packageWeightOz: listing.packageWeightOz || '' }); }}
           style={{ color: '#a78bfa' }}>
           <Wand2 size={17} />
         </button>
@@ -879,6 +888,48 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
                     value={optimizeResult.seoKeywords || ''}
                     onChange={e => setOptimizeResult((r: any) => ({ ...r, seoKeywords: e.target.value }))}
                     style={{ width: '100%' }} placeholder="vintage figure, collectible anime toy, 90s action figure…" />
+                </div>
+
+                {/* Package dimensions (used for calculated shipping on relist/push) */}
+                <div style={{ marginBottom: '1rem', padding: '12px', background: 'rgba(255,255,255,0.04)', borderRadius: '6px' }}>
+                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '6px', fontWeight: 500 }}>
+                    Package Dimensions <span style={{ opacity: 0.6, fontWeight: 400 }}>(required by some shipping policies)</span>
+                  </label>
+                  <div style={{ display: 'flex', gap: '8px', marginBottom: '6px' }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-secondary)', marginBottom: '2px' }}>Length (in)</label>
+                      <input className="input-base" type="number" min={0} step="0.1" value={optimizeDimensions.packageLength}
+                        onChange={e => setOptimizeDimensions(d => ({ ...d, packageLength: e.target.value }))}
+                        style={{ width: '100%' }} placeholder="0" />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-secondary)', marginBottom: '2px' }}>Width (in)</label>
+                      <input className="input-base" type="number" min={0} step="0.1" value={optimizeDimensions.packageWidth}
+                        onChange={e => setOptimizeDimensions(d => ({ ...d, packageWidth: e.target.value }))}
+                        style={{ width: '100%' }} placeholder="0" />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-secondary)', marginBottom: '2px' }}>Depth (in)</label>
+                      <input className="input-base" type="number" min={0} step="0.1" value={optimizeDimensions.packageDepth}
+                        onChange={e => setOptimizeDimensions(d => ({ ...d, packageDepth: e.target.value }))}
+                        style={{ width: '100%' }} placeholder="0" />
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-secondary)', marginBottom: '2px' }}>Weight — lbs</label>
+                      <input className="input-base" type="number" min={0} step="1" value={optimizeDimensions.packageWeightLbs}
+                        onChange={e => setOptimizeDimensions(d => ({ ...d, packageWeightLbs: e.target.value }))}
+                        style={{ width: '100%' }} placeholder="0" />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-secondary)', marginBottom: '2px' }}>Weight — oz</label>
+                      <input className="input-base" type="number" min={0} step="0.1" value={optimizeDimensions.packageWeightOz}
+                        onChange={e => setOptimizeDimensions(d => ({ ...d, packageWeightOz: e.target.value }))}
+                        style={{ width: '100%' }} placeholder="0" />
+                    </div>
+                    <div style={{ flex: 1 }} />
+                  </div>
                 </div>
 
                 {/* Allow offers (used by Save + Delist & Relist) */}

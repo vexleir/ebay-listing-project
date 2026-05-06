@@ -33,6 +33,13 @@ export interface StagedListing {
   consignorPayoutAmount?: string; // Dollar amount paid out to consignor (computed at mark-paid time)
   // Inventory
   containerId?: string;
+  // Package dimensions (used by eBay for calculated shipping / shipping rate calcs).
+  // Strings so empty inputs round-trip cleanly through the form.
+  packageLength?: string;
+  packageWidth?: string;
+  packageDepth?: string;
+  packageWeightLbs?: string;
+  packageWeightOz?: string;
 }
 
 export type ContainerType = 'bin' | 'box' | 'shelf' | 'drawer' | 'tote' | 'pallet' | 'other';
