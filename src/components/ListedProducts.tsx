@@ -167,6 +167,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
   const [lightboxImages, setLightboxImages] = useState<string[] | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [tagsExpanded, setTagsExpanded] = useState<boolean>(false);
   const [stats, setStats] = useState<Record<string, { watchCount: string; hitCount: string; quantitySold: string } | null>>({});
   const [loadingStatsId, setLoadingStatsId] = useState<string | null>(null);
   const [refreshingImagesId, setRefreshingImagesId] = useState<string | null>(null);
@@ -988,15 +989,32 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
 
       {/* Tag filter bar */}
       {allTags.length > 0 && (
-        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '1rem', alignItems: 'center' }}>
-          <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', opacity: 0.7 }}>Tags:</span>
-          {allTags.map(tag => (
-            <button key={tag} onClick={() => setActiveTag(activeTag === tag ? null : tag)}
-              style={{ fontSize: '0.78rem', padding: '3px 10px', borderRadius: '4px', border: '1px solid', cursor: 'pointer', background: activeTag === tag ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.05)', borderColor: activeTag === tag ? 'var(--accent-color)' : 'var(--border-color)', color: activeTag === tag ? '#a5b4fc' : 'var(--text-secondary)', transition: 'all 0.15s' }}>
-              {tag}
+        <div style={{ marginBottom: '1rem' }}>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              onClick={() => setTagsExpanded(e => !e)}
+              style={{ fontSize: '0.78rem', padding: '3px 10px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+            >
+              <ChevronDown size={12} style={{ transform: tagsExpanded ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform 0.15s' }} />
+              Tags ({allTags.length})
             </button>
-          ))}
-          {activeTag && <button onClick={() => setActiveTag(null)} style={{ fontSize: '0.78rem', padding: '3px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer' }}>Clear</button>}
+            {activeTag && (
+              <span style={{ fontSize: '0.78rem', padding: '3px 10px', borderRadius: '4px', border: '1px solid var(--accent-color)', background: 'rgba(99,102,241,0.25)', color: '#a5b4fc' }}>
+                {activeTag}
+              </span>
+            )}
+            {activeTag && <button onClick={() => setActiveTag(null)} style={{ fontSize: '0.78rem', padding: '3px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer' }}>Clear</button>}
+          </div>
+          {tagsExpanded && (
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '8px' }}>
+              {allTags.map(tag => (
+                <button key={tag} onClick={() => setActiveTag(activeTag === tag ? null : tag)}
+                  style={{ fontSize: '0.78rem', padding: '3px 10px', borderRadius: '4px', border: '1px solid', cursor: 'pointer', background: activeTag === tag ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.05)', borderColor: activeTag === tag ? 'var(--accent-color)' : 'var(--border-color)', color: activeTag === tag ? '#a5b4fc' : 'var(--text-secondary)', transition: 'all 0.15s' }}>
+                  {tag}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
