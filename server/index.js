@@ -1559,12 +1559,13 @@ app.post('/api/ebay/relist', async (req, res) => {
     let livePolicies = { shipping: null, return: null, payment: null };
     let liveCategoryId = null;
     let livePackage = { length: null, width: null, depth: null, lbs: null, oz: null };
+    let liveItemSpecifics = {};
     try {
       const getItemXml = `<?xml version="1.0" encoding="utf-8"?>
 <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <ItemID>${oldItemId}</ItemID>
   <DetailLevel>ReturnAll</DetailLevel>
-  <IncludeItemSpecifics>false</IncludeItemSpecifics>
+  <IncludeItemSpecifics>true</IncludeItemSpecifics>
 </GetItemRequest>`;
       const getItemRes = await axios.post('https://api.ebay.com/ws/api.dll', getItemXml, {
         headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1331', 'X-EBAY-API-CALL-NAME': 'GetItem', 'X-EBAY-API-SITEID': '0', 'X-EBAY-API-IAF-TOKEN': token, 'Content-Type': 'text/xml' }
@@ -1596,8 +1597,25 @@ app.post('/api/ebay/relist', async (req, res) => {
         livePackage.lbs = /<WeightMajor[^>]*>(.*?)<\/WeightMajor>/.exec(pkgBlock)?.[1] || null;
         livePackage.oz = /<WeightMinor[^>]*>(.*?)<\/WeightMinor>/.exec(pkgBlock)?.[1] || null;
       }
+      // ItemSpecifics — preserve whatever was on the live listing (e.g. Size,
+      // Color, Department) so a relist can't drop a category-required aspect
+      // that the local DB record lost (typically because the AI optimizer
+      // returned a partial itemSpecifics object).
+      const specificsBlock = /<ItemSpecifics>([\s\S]*?)<\/ItemSpecifics>/.exec(xml)?.[1] || '';
+      if (specificsBlock) {
+        const stripCdata = (s) => {
+          const m = /^<!\[CDATA\[([\s\S]*?)\]\]>$/.exec(s.trim());
+          return m ? m[1] : s.trim();
+        };
+        for (const m of specificsBlock.matchAll(/<NameValueList>([\s\S]*?)<\/NameValueList>/g)) {
+          const nvl = m[1];
+          const name = stripCdata(/<Name>([\s\S]*?)<\/Name>/.exec(nvl)?.[1] || '');
+          const values = [...nvl.matchAll(/<Value>([\s\S]*?)<\/Value>/g)].map(v => stripCdata(v[1]));
+          if (name && values.length > 0) liveItemSpecifics[name] = values.length === 1 ? values[0] : values.join('; ');
+        }
+      }
       const ack = /<Ack>([^<]+)<\/Ack>/.exec(xml)?.[1] || '?';
-      console.log(`[relist] GetItem(${oldItemId}) Ack=${ack} — SKU="${liveSku}" (DB="${listing.sku || ''}"), category=${liveCategoryId}, policies: shipping=${livePolicies.shipping}, return=${livePolicies.return}, payment=${livePolicies.payment}, package: ${livePackage.length}x${livePackage.width}x${livePackage.depth} ${livePackage.lbs}lb ${livePackage.oz}oz`);
+      console.log(`[relist] GetItem(${oldItemId}) Ack=${ack} — SKU="${liveSku}" (DB="${listing.sku || ''}"), category=${liveCategoryId}, policies: shipping=${livePolicies.shipping}, return=${livePolicies.return}, payment=${livePolicies.payment}, package: ${livePackage.length}x${livePackage.width}x${livePackage.depth} ${livePackage.lbs}lb ${livePackage.oz}oz, liveSpecifics=${Object.keys(liveItemSpecifics).length} (${Object.keys(liveItemSpecifics).join(',')})`);
     } catch (e) {
       console.warn(`[relist] could not fetch live SKU/policies for ${oldItemId}: ${e.message}`);
     }
@@ -1606,9 +1624,16 @@ app.post('/api/ebay/relist', async (req, res) => {
     const finalSku = liveSku || listing.sku || '';
     // For each package field: prefer what's already on the listing (user-entered
     // in the optimize modal); fall back to whatever eBay had on the original item.
+    // Merge specifics: live (from eBay) underneath local (DB) so the local
+    // edits/AI optimizations still win, but any category-required aspect that
+    // exists live but is missing locally (e.g. Size on a clothing listing)
+    // gets restored — preventing relist failures like "item specific Size is missing".
+    const localSpecifics = listing.itemSpecifics || {};
+    const mergedSpecifics = { ...liveItemSpecifics, ...localSpecifics };
     const listingWithSku = {
       ...listing,
       sku: finalSku,
+      itemSpecifics: mergedSpecifics,
       packageLength: listing.packageLength || livePackage.length || '',
       packageWidth: listing.packageWidth || livePackage.width || '',
       packageDepth: listing.packageDepth || livePackage.depth || '',

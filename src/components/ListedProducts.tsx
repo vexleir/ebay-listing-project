@@ -357,7 +357,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
       priceRecommendation: optimizeResult.priceRecommendation || optimizeListing.priceRecommendation,
       category: optimizeResult.category || optimizeListing.category,
       condition: optimizeResult.condition || optimizeListing.condition,
-      itemSpecifics: optimizeResult.itemSpecifics || optimizeListing.itemSpecifics,
+      itemSpecifics: { ...(optimizeListing.itemSpecifics || {}), ...(optimizeResult.itemSpecifics || {}) },
       tags: optimizeResult.tags || optimizeListing.tags,
       seoKeywords: optimizeResult.seoKeywords || optimizeListing.seoKeywords || '',
       collectionCodes: optimizeCollectionCodes.length > 0 ? optimizeCollectionCodes : optimizeListing.collectionCodes,
