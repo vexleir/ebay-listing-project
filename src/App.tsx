@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, ShoppingBag, Shield, DollarSign, Zap, Download, ChevronLeft, ChevronRight, BookMarked, Layers, Users, Telescope, Package, HelpCircle } from 'lucide-react';
+import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, ShoppingBag, Shield, DollarSign, Zap, Download, ChevronLeft, ChevronRight, BookMarked, Layers, Users, Telescope, Package, HelpCircle, MessageSquare } from 'lucide-react';
 import './index.css';
 
 import Uploader from './components/Uploader';
@@ -19,6 +19,7 @@ import CatalogCodesTab from './components/CatalogCodesTab';
 import ConsignmentTab from './components/ConsignmentTab';
 import InventoryTab from './components/InventoryTab';
 import HelpPage from './components/HelpPage';
+import Feedback from './components/Feedback';
 import LoginScreen from './components/LoginScreen';
 import { generateListing } from './services/ai';
 import type { StagedListing, Consignor, Container, ContainerLooseItem } from './types';
@@ -60,7 +61,7 @@ function App() {
   });
 
   const [stagedListings, setStagedListings] = useState<StagedListing[]>([]);
-  const [activeTab, setActiveTab] = useState<'new' | 'bulk' | 'staged' | 'listed' | 'sold' | 'analytics' | 'settings' | 'source' | 'research' | 'optimizer' | 'admin' | 'ebay-import' | 'catalog-codes' | 'consignment' | 'inventory' | 'help'>('new');
+  const [activeTab, setActiveTab] = useState<'new' | 'bulk' | 'staged' | 'listed' | 'sold' | 'analytics' | 'settings' | 'source' | 'research' | 'optimizer' | 'admin' | 'ebay-import' | 'catalog-codes' | 'consignment' | 'inventory' | 'help' | 'feedback'>('new');
   const [listedProducts, setListedProducts] = useState<StagedListing[]>([]);
   const [consignors, setConsignors] = useState<Consignor[]>([]);
   const [containers, setContainers] = useState<Container[]>([]);
@@ -689,8 +690,11 @@ function App() {
           <button title="Settings" style={sidebarBtnStyle('settings')} onClick={() => setActiveTab('settings')}><Settings size={18} />{sidebarLabel('Settings')}</button>
         </div>
 
-        {/* Help link — pinned just above collapse toggle */}
-        <button title="Help" style={{ ...sidebarBtnStyle('help'), marginTop: '0.5rem' }} onClick={() => setActiveTab('help')}>
+        {/* Feedback + Help — pinned just above collapse toggle */}
+        <button title="Feedback" style={{ ...sidebarBtnStyle('feedback'), marginTop: '0.5rem' }} onClick={() => setActiveTab('feedback')}>
+          <MessageSquare size={18} />{sidebarLabel('Feedback')}
+        </button>
+        <button title="Help" style={sidebarBtnStyle('help')} onClick={() => setActiveTab('help')}>
           <HelpCircle size={18} />{sidebarLabel('Help')}
         </button>
 
@@ -852,6 +856,14 @@ function App() {
         ) : activeTab === 'admin' && currentUser?.role === 'superadmin' ? (
           <div className="animate-fade-in">
             <AdminPanel appPassword={appPassword} />
+          </div>
+        ) : activeTab === 'feedback' ? (
+          <div className="animate-fade-in">
+            <Feedback
+              appPassword={appPassword}
+              currentUserId={currentUser?.id || ''}
+              isSuperAdmin={currentUser?.role === 'superadmin'}
+            />
           </div>
         ) : activeTab === 'help' ? (
           <div className="animate-fade-in">

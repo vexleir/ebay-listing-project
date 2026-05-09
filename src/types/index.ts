@@ -104,3 +104,29 @@ export interface EbayPolicies {
   paymentPolicies: EbayPolicy[];
   returnPolicies: EbayPolicy[];
 }
+
+export type FeedbackStatus = 'not_started' | 'under_review' | 'pending' | 'implemented' | 'cancelled';
+
+export interface FeedbackReply {
+  id: string;
+  message: string;
+  authorId: string;
+  authorName: string;
+  isAdmin: boolean;
+  createdAt: number;
+}
+
+export interface FeedbackPost {
+  id: string;
+  title: string;
+  message: string;
+  images: string[];
+  status: FeedbackStatus;
+  authorId: string;
+  authorName: string;
+  authorEmail: string;
+  authorCompanyId?: string;
+  replies: FeedbackReply[];
+  createdAt: number;
+  updatedAt?: number;
+}
