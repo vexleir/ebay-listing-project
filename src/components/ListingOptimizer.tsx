@@ -330,7 +330,6 @@ export default function ListingOptimizer({ appPassword }: Props) {
 
   // AI accept state (null = pending, true = accepted, false = rejected)
   const [acceptTitle, setAcceptTitle] = useState<boolean | null>(null);
-  const [acceptPrice, setAcceptPrice] = useState<boolean | null>(null);
   const [acceptDesc, setAcceptDesc] = useState<boolean | null>(null);
   const [acceptSpecifics, setAcceptSpecifics] = useState<boolean | null>(null);
 
@@ -409,7 +408,6 @@ export default function ListingOptimizer({ appPassword }: Props) {
       Object.entries(listing.itemSpecifics).map(([name, value]) => ({ name, value }))
     );
     setAcceptTitle(null);
-    setAcceptPrice(null);
     setAcceptDesc(null);
     setAcceptSpecifics(null);
     setPhase('edit');
@@ -448,11 +446,6 @@ export default function ListingOptimizer({ appPassword }: Props) {
     if (aiSuggestions) { setEditTitle(aiSuggestions.title); setAcceptTitle(true); }
   };
   const rejectAiTitle = () => { setAcceptTitle(false); if (listing) setEditTitle(listing.title); };
-
-  const acceptAiPrice = () => {
-    if (aiSuggestions) { setEditPrice(aiSuggestions.priceRecommendation); setAcceptPrice(true); }
-  };
-  const rejectAiPrice = () => { setAcceptPrice(false); if (listing) setEditPrice(String(listing.price)); };
 
   const acceptAiDesc = () => {
     if (aiSuggestions) { setEditDescription(aiSuggestions.description); setAcceptDesc(true); }
@@ -926,6 +919,40 @@ export default function ListingOptimizer({ appPassword }: Props) {
               {/* Price */}
               <div>
                 <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>Price (USD)</label>
+                {(() => {
+                  if (!aiSuggestions) return null;
+                  const recNum = parseFloat(String(aiSuggestions.priceRecommendation).replace(/[^0-9.]/g, ''));
+                  if (!recNum || recNum <= 0) return null;
+                  const recStr = recNum.toFixed(2);
+                  const applied = parseFloat(editPrice) === recNum;
+                  return (
+                    <div style={{ marginBottom: '6px' }}>
+                      <button
+                        onClick={() => listing.isOwner && setEditPrice(recStr)}
+                        disabled={!listing.isOwner || applied}
+                        title={applied ? 'Recommended price applied' : 'Click to set the price to this recommendation'}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: '6px',
+                          padding: '5px 10px', borderRadius: '6px',
+                          background: applied ? 'rgba(16,185,129,0.15)' : 'rgba(139,92,246,0.15)',
+                          border: `1px solid ${applied ? 'rgba(16,185,129,0.4)' : 'rgba(139,92,246,0.4)'}`,
+                          color: applied ? '#86efac' : '#c4b5fd',
+                          fontSize: '0.78rem', fontWeight: 600,
+                          cursor: (!listing.isOwner || applied) ? 'default' : 'pointer',
+                        }}
+                      >
+                        {applied
+                          ? <><CheckCircle size={13} /> Suggested price applied: ${recStr}</>
+                          : <><Zap size={13} /> Suggested: ${recStr} — click to apply</>}
+                      </button>
+                      {aiSuggestions.priceRationale && (
+                        <div style={{ marginTop: '4px', fontSize: '0.73rem', color: 'var(--text-secondary)', fontStyle: 'italic' }}>
+                          {aiSuggestions.priceRationale}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
                 <input
                   type="number"
                   className="input-base"
@@ -936,17 +963,6 @@ export default function ListingOptimizer({ appPassword }: Props) {
                   disabled={!listing.isOwner}
                   style={{ maxWidth: '180px' }}
                 />
-                {aiSuggestions && (
-                  <AiSuggestionBox
-                    label="Price"
-                    original={`$${listing.price}`}
-                    suggested={`$${aiSuggestions.priceRecommendation}`}
-                    rationale={aiSuggestions.priceRationale}
-                    accepted={acceptPrice}
-                    onAccept={acceptAiPrice}
-                    onReject={rejectAiPrice}
-                  />
-                )}
               </div>
 
               {/* Description */}
