@@ -339,7 +339,10 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
       });
       const data = await resp.json();
       if (!resp.ok || data.error) throw new Error(data.error || 'AI optimization failed');
-      setOptimizeResult(data);
+      // Keep the AI's price as a suggestion only — don't overwrite the listing's actual price.
+      const origPrice = String(optimizeListing.priceRecommendation || '').replace(/[^0-9.]/g, '');
+      const aiSuggestedPrice = String(data.priceRecommendation || '').replace(/[^0-9.]/g, '');
+      setOptimizeResult({ ...data, aiSuggestedPrice, priceRecommendation: origPrice });
     } catch (e: any) {
       toast('AI optimization failed: ' + e.message, 'error');
     } finally {
@@ -817,6 +820,30 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
                 <div style={{ display: 'flex', gap: '12px', marginBottom: '0.75rem' }}>
                   <div style={{ flex: 1 }}>
                     <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '3px' }}>Price</label>
+                    {(() => {
+                      const recNum = parseFloat(String(optimizeResult.aiSuggestedPrice || '').replace(/[^0-9.]/g, ''));
+                      if (!recNum || recNum <= 0) return null;
+                      const recStr = recNum.toFixed(2);
+                      const applied = parseFloat(optimizeResult.priceRecommendation) === recNum;
+                      return (
+                        <button
+                          onClick={() => setOptimizeResult((r: any) => ({ ...r, priceRecommendation: recStr }))}
+                          disabled={applied}
+                          title={applied ? 'AI suggested price applied' : 'Click to apply the AI suggested price'}
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: '5px',
+                            marginBottom: '5px', padding: '4px 9px', borderRadius: '6px',
+                            background: applied ? 'rgba(16,185,129,0.15)' : 'rgba(139,92,246,0.15)',
+                            border: `1px solid ${applied ? 'rgba(16,185,129,0.4)' : 'rgba(139,92,246,0.4)'}`,
+                            color: applied ? '#86efac' : '#c4b5fd',
+                            fontSize: '0.75rem', fontWeight: 600,
+                            cursor: applied ? 'default' : 'pointer',
+                          }}
+                        >
+                          {applied ? `✓ AI price applied: $${recStr}` : `✨ AI suggests $${recStr} — click to apply`}
+                        </button>
+                      );
+                    })()}
                     <input className="input-base" value={optimizeResult.priceRecommendation || ''} onChange={e => setOptimizeResult((r: any) => ({ ...r, priceRecommendation: e.target.value }))} style={{ width: '100%' }} />
                   </div>
                   <div style={{ flex: 1 }}>
