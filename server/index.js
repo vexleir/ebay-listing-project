@@ -232,7 +232,54 @@ app.post('/api/ebay/revise', async (req, res) => {
     const condXml       = conditionId  ? `<ConditionID>${conditionId}</ConditionID>` : '';
     const qtyNum        = quantity != null ? Math.max(1, parseInt(quantity, 10) || 1) : null;
     const qtyXml        = qtyNum != null ? `<Quantity>${qtyNum}</Quantity>` : '';
-    const specificsXml  = buildItemSpecificsXml(itemSpecifics);
+
+    // ReviseFixedPriceItem treats <ItemSpecifics> as a full replacement, so
+    // pushing the (possibly partial) local specifics would wipe any aspect the
+    // local DB record never captured — causing failures like "item specific
+    // Size is missing". Mirror the relist merge: fetch the live specifics and
+    // layer the local edits on top so missing category-required aspects are
+    // preserved. Only do this when we're actually sending specifics.
+    let mergedSpecifics = itemSpecifics;
+    const hasLocalSpecifics = Array.isArray(itemSpecifics)
+      ? itemSpecifics.length > 0
+      : itemSpecifics && Object.keys(itemSpecifics).length > 0;
+    if (hasLocalSpecifics) {
+      try {
+        const getItemXml = `<?xml version="1.0" encoding="utf-8"?>
+<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <ItemID>${itemId}</ItemID>
+  <DetailLevel>ReturnAll</DetailLevel>
+  <IncludeItemSpecifics>true</IncludeItemSpecifics>
+</GetItemRequest>`;
+        const getItemRes = await axios.post('https://api.ebay.com/ws/api.dll', getItemXml, {
+          headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1331', 'X-EBAY-API-CALL-NAME': 'GetItem', 'X-EBAY-API-SITEID': '0', 'X-EBAY-API-IAF-TOKEN': token, 'Content-Type': 'text/xml' }
+        });
+        const liveItemSpecifics = {};
+        const specificsBlock = /<ItemSpecifics>([\s\S]*?)<\/ItemSpecifics>/.exec(getItemRes.data)?.[1] || '';
+        if (specificsBlock) {
+          const stripCdata = (s) => {
+            const m = /^<!\[CDATA\[([\s\S]*?)\]\]>$/.exec(s.trim());
+            return m ? m[1] : s.trim();
+          };
+          for (const m of specificsBlock.matchAll(/<NameValueList>([\s\S]*?)<\/NameValueList>/g)) {
+            const nvl = m[1];
+            const name = stripCdata(/<Name>([\s\S]*?)<\/Name>/.exec(nvl)?.[1] || '');
+            const values = [...nvl.matchAll(/<Value>([\s\S]*?)<\/Value>/g)].map(v => stripCdata(v[1]));
+            if (name && values.length > 0) liveItemSpecifics[name] = values.length === 1 ? values[0] : values.join('; ');
+          }
+        }
+        // Normalize the client payload (array of {name,value}) to an object,
+        // then merge: live underneath, local edits on top.
+        const localSpecifics = Array.isArray(itemSpecifics)
+          ? Object.fromEntries(itemSpecifics.filter(s => s && s.name).map(s => [s.name, s.value]))
+          : itemSpecifics;
+        mergedSpecifics = { ...liveItemSpecifics, ...localSpecifics };
+        console.log(`[revise] GetItem(${itemId}) merged specifics — live=${Object.keys(liveItemSpecifics).length} (${Object.keys(liveItemSpecifics).join(',')}), local=${Object.keys(localSpecifics).length}, merged=${Object.keys(mergedSpecifics).length}`);
+      } catch (e) {
+        console.warn(`[revise] could not fetch live specifics for ${itemId} — pushing local only: ${e.message}`);
+      }
+    }
+    const specificsXml  = buildItemSpecificsXml(mergedSpecifics);
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <Item>
