@@ -1721,6 +1721,7 @@ app.post('/api/ebay/relist', async (req, res) => {
     let liveSku = '';
     let livePolicies = { shipping: null, return: null, payment: null };
     let liveCategoryId = null;
+    let liveConditionId = null;
     let livePackage = { length: null, width: null, depth: null, lbs: null, oz: null };
     let liveItemSpecifics = {};
     try {
@@ -1750,6 +1751,12 @@ app.post('/api/ebay/relist', async (req, res) => {
       // the relisted item doesn't fall through to the hardcoded default.
       const primaryCatBlock = /<PrimaryCategory>([\s\S]*?)<\/PrimaryCategory>/.exec(xml)?.[1] || '';
       liveCategoryId = /<CategoryID>(.*?)<\/CategoryID>/.exec(primaryCatBlock)?.[1] || null;
+      // ConditionID — preserve the exact condition the original listing used. The
+      // local condition text maps through getConditionId() to a generic ID that
+      // some categories (e.g. Comics) reject; the live ID is known-valid for the
+      // category, so prefer it to avoid "condition id is invalid for the
+      // selected primary category id" failures on relist.
+      liveConditionId = /<ConditionID>(\d+)<\/ConditionID>/.exec(xml)?.[1] || null;
       // ShippingPackageDetails — preserve dimensions/weight so calculated-shipping
       // policies don't reject the relist for missing package info.
       const pkgBlock = /<ShippingPackageDetails>([\s\S]*?)<\/ShippingPackageDetails>/.exec(xml)?.[1] || '';
@@ -1778,7 +1785,7 @@ app.post('/api/ebay/relist', async (req, res) => {
         }
       }
       const ack = /<Ack>([^<]+)<\/Ack>/.exec(xml)?.[1] || '?';
-      console.log(`[relist] GetItem(${oldItemId}) Ack=${ack} — SKU="${liveSku}" (DB="${listing.sku || ''}"), category=${liveCategoryId}, policies: shipping=${livePolicies.shipping}, return=${livePolicies.return}, payment=${livePolicies.payment}, package: ${livePackage.length}x${livePackage.width}x${livePackage.depth} ${livePackage.lbs}lb ${livePackage.oz}oz, liveSpecifics=${Object.keys(liveItemSpecifics).length} (${Object.keys(liveItemSpecifics).join(',')})`);
+      console.log(`[relist] GetItem(${oldItemId}) Ack=${ack} — SKU="${liveSku}" (DB="${listing.sku || ''}"), category=${liveCategoryId}, condition=${liveConditionId}, policies: shipping=${livePolicies.shipping}, return=${livePolicies.return}, payment=${livePolicies.payment}, package: ${livePackage.length}x${livePackage.width}x${livePackage.depth} ${livePackage.lbs}lb ${livePackage.oz}oz, liveSpecifics=${Object.keys(liveItemSpecifics).length} (${Object.keys(liveItemSpecifics).join(',')})`);
     } catch (e) {
       console.warn(`[relist] could not fetch live SKU/policies for ${oldItemId}: ${e.message}`);
     }
@@ -1850,7 +1857,7 @@ app.post('/api/ebay/relist', async (req, res) => {
     const result = await pushListingToEbay({
       listing: listingWithSku,
       overrideCategoryId: liveCategoryId || req.body.overrideCategoryId || listing.categoryId,
-      overrideConditionId: req.body.overrideConditionId,
+      overrideConditionId: liveConditionId || req.body.overrideConditionId,
       overrideFulfillmentPolicyId: livePolicies.shipping || req.body.overrideFulfillmentPolicyId,
       overrideReturnPolicyId: livePolicies.return || req.body.overrideReturnPolicyId,
       overridePaymentPolicyId: livePolicies.payment || req.body.overridePaymentPolicyId,
