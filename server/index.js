@@ -864,9 +864,12 @@ app.get('/api/ebay/category-conditions', async (req, res) => {
   if (!categoryId) return res.status(400).json({ error: 'categoryId required' });
   try {
     const token = await getValidAccessToken(req.companyId);
+    // <DetailLevel>ReturnAll</DetailLevel> is REQUIRED for the <ConditionValues>
+    // block to appear in the response — without it eBay omits conditions entirely.
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <GetCategoryFeaturesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <CategoryID>${categoryId}</CategoryID>
+  <DetailLevel>ReturnAll</DetailLevel>
   <FeatureID>ConditionValues</FeatureID>
   <ViewAllNodes>true</ViewAllNodes>
 </GetCategoryFeaturesRequest>`;
@@ -1437,9 +1440,13 @@ function getConditionId(conditionStr) {
 // when our derived condition is rejected (e.g. Comics doesn't accept 3000/Used).
 async function getValidConditionIdsForCategory(categoryId, token) {
   try {
+    // <DetailLevel>ReturnAll</DetailLevel> is REQUIRED for eBay to include the
+    // <ConditionValues> block — without it the response omits conditions entirely
+    // (which is why category 259104/Comics looked like it accepted "none").
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <GetCategoryFeaturesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <CategoryID>${categoryId}</CategoryID>
+  <DetailLevel>ReturnAll</DetailLevel>
   <FeatureID>ConditionValues</FeatureID>
   <ViewAllNodes>true</ViewAllNodes>
 </GetCategoryFeaturesRequest>`;
@@ -1697,11 +1704,21 @@ async function pushListingToEbay({ listing, overrideCategoryId, overrideConditio
         // closest valid one. Falls back to 3000 only if the lookup yields nothing.
         const validIds = await getValidConditionIdsForCategory(config.categoryId, token);
         const fallbackId = pickFallbackConditionId(validIds, conditionId) || '3000';
-        if (fallbackId === conditionId) {
-          // Our condition is in the valid set — the error is something else; don't retry.
+        // Only treat the condition as "actually valid" when eBay returned a
+        // non-empty list that contains it — otherwise an empty list would
+        // collapse fallbackId to the same value and mask the real failure.
+        if (validIds.length > 0 && validIds.includes(String(conditionId))) {
           const errorMsg = trueErrors.join(' | ');
           console.error('[draft] eBay errors (condition reported valid for category):', errorMsg);
           const e = new Error('eBay API Error: ' + errorMsg);
+          e.status = 400;
+          e.warnings = warnings;
+          throw e;
+        }
+        if (fallbackId === conditionId) {
+          // No usable valid list and nothing better to try — surface a diagnostic.
+          const diag = ` [diag: category=${config.categoryId}, tried=${conditionId}, eBay-accepts=${validIds.join(',') || 'NONE (GetCategoryFeatures returned no ConditionValues)'}]`;
+          const e = new Error('eBay API Error: ' + trueErrors.join(' | ') + diag);
           e.status = 400;
           e.warnings = warnings;
           throw e;
@@ -1717,7 +1734,8 @@ async function pushListingToEbay({ listing, overrideCategoryId, overrideConditio
           return { draftId: retryItemId, conditionFallback: true, warnings };
         }
         const { errors: retryErrors, warnings: retryWarnings } = parseEbayErrors(retryRes.data);
-        const e = new Error('eBay API Error: ' + retryErrors.join(' | '));
+        const diag = ` [diag: category=${config.categoryId}, tried=${conditionId}→${fallbackId}, eBay-accepts=${validIds.join(',') || 'NONE (GetCategoryFeatures returned no ConditionValues)'}]`;
+        const e = new Error('eBay API Error: ' + retryErrors.join(' | ') + diag);
         e.status = 400;
         e.warnings = retryWarnings;
         throw e;
