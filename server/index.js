@@ -1431,6 +1431,40 @@ function getConditionId(conditionStr) {
   return '3000';
 }
 
+// Fetch the ConditionIDs eBay accepts for a given category via GetCategoryFeatures.
+// Returns an array of numeric ID strings (e.g. ['1000','2750','4000']), or [] if
+// the category allows any/none or the call fails. Used to pick a valid fallback
+// when our derived condition is rejected (e.g. Comics doesn't accept 3000/Used).
+async function getValidConditionIdsForCategory(categoryId, token) {
+  try {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetCategoryFeaturesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <CategoryID>${categoryId}</CategoryID>
+  <FeatureID>ConditionValues</FeatureID>
+  <ViewAllNodes>true</ViewAllNodes>
+</GetCategoryFeaturesRequest>`;
+    const resp = await axios.post('https://api.ebay.com/ws/api.dll', xml, {
+      headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1331', 'X-EBAY-API-CALL-NAME': 'GetCategoryFeatures', 'X-EBAY-API-SITEID': '0', 'X-EBAY-API-IAF-TOKEN': token, 'Content-Type': 'text/xml' }
+    });
+    return [...resp.data.matchAll(/<Condition>\s*<ID>(\d+)<\/ID>/g)].map(m => m[1]);
+  } catch (e) {
+    console.warn(`[draft] GetCategoryFeatures(${categoryId}) failed: ${e.message}`);
+    return [];
+  }
+}
+
+// Given the category's valid condition IDs and the one we tried, pick the closest
+// valid replacement. eBay condition IDs are ordered new→worn, so prefer the
+// numerically-nearest valid ID to preserve the seller's intended grade.
+function pickFallbackConditionId(validIds, attemptedId) {
+  if (!validIds || validIds.length === 0) return null;
+  const target = parseInt(attemptedId, 10);
+  if (validIds.includes(String(attemptedId))) return String(attemptedId);
+  return validIds
+    .map(id => ({ id, dist: Math.abs(parseInt(id, 10) - target) }))
+    .sort((a, b) => a.dist - b.dist)[0].id;
+}
+
 // Shared helper used by /api/ebay/draft and /api/ebay/relist. Uploads images,
 // builds the AddFixedPriceItem XML, posts it, retries once on a condition
 // mismatch, and returns { draftId, conditionFallback, warnings }. Throws an
@@ -1643,15 +1677,28 @@ async function pushListingToEbay({ listing, overrideCategoryId, overrideConditio
       const isConditionError = trueErrors.length > 0 && trueErrors.every(e =>
         e.toLowerCase().includes('condition') && (e.toLowerCase().includes('invalid') || e.toLowerCase().includes('not valid'))
       );
-      if (isConditionError && conditionId !== '3000') {
-        console.warn(`[draft] Condition ${conditionId} invalid for category ${config.categoryId} — retrying with 3000 (Used)`);
-        const retryXml = addItemXml.replace(`<ConditionID>${conditionId}</ConditionID>`, '<ConditionID>3000</ConditionID>');
+      if (isConditionError) {
+        // Ask eBay which conditions this category actually accepts, then pick the
+        // closest valid one. Falls back to 3000 only if the lookup yields nothing.
+        const validIds = await getValidConditionIdsForCategory(config.categoryId, token);
+        const fallbackId = pickFallbackConditionId(validIds, conditionId) || '3000';
+        if (fallbackId === conditionId) {
+          // Our condition is in the valid set — the error is something else; don't retry.
+          const errorMsg = trueErrors.join(' | ');
+          console.error('[draft] eBay errors (condition reported valid for category):', errorMsg);
+          const e = new Error('eBay API Error: ' + errorMsg);
+          e.status = 400;
+          e.warnings = warnings;
+          throw e;
+        }
+        console.warn(`[draft] Condition ${conditionId} invalid for category ${config.categoryId} — retrying with ${fallbackId} (valid: ${validIds.join(',') || 'none returned'})`);
+        const retryXml = addItemXml.replace(`<ConditionID>${conditionId}</ConditionID>`, `<ConditionID>${fallbackId}</ConditionID>`);
         const retryRes = await axios.post(TRADING_URL, retryXml, {
           headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1331', 'X-EBAY-API-CALL-NAME': 'AddFixedPriceItem', 'X-EBAY-API-SITEID': '0', 'X-EBAY-API-IAF-TOKEN': token, 'Content-Type': 'text/xml' }
         });
         if (!retryRes.data.includes('<Ack>Failure</Ack>') && !retryRes.data.includes('<Ack>Error</Ack>')) {
           const retryItemId = retryRes.data.match(/<ItemID>(.*?)<\/ItemID>/)?.[1] || 'Unknown ID';
-          console.log(`[draft] Retry succeeded with condition 3000. Item ID: ${retryItemId}`);
+          console.log(`[draft] Retry succeeded with condition ${fallbackId}. Item ID: ${retryItemId}`);
           return { draftId: retryItemId, conditionFallback: true, warnings };
         }
         const { errors: retryErrors, warnings: retryWarnings } = parseEbayErrors(retryRes.data);
