@@ -1545,7 +1545,22 @@ async function pushListingToEbay({ listing, overrideCategoryId, overrideConditio
 
     const rawPrice = (listing.priceRecommendation || '').replace(/[^0-9.]/g, '');
     const validPrice = rawPrice && !isNaN(parseFloat(rawPrice)) ? parseFloat(rawPrice).toFixed(2) : '50.00';
-    const conditionId = overrideConditionId || getConditionId(listing.condition);
+    let conditionId = overrideConditionId || getConditionId(listing.condition);
+
+    // Proactively validate the condition against the category we're ACTUALLY
+    // sending (config.categoryId), which can differ from whatever the client
+    // validated against (it may have used a suggested category, or none — in
+    // which case the server fell back to listing.categoryId / the default).
+    // Categories like Comics reject the generic IDs, so correct up front rather
+    // than relying solely on the post-failure retry.
+    const validConditionIds = await getValidConditionIdsForCategory(config.categoryId, token);
+    if (validConditionIds.length > 0 && !validConditionIds.includes(String(conditionId))) {
+      const corrected = pickFallbackConditionId(validConditionIds, conditionId);
+      console.warn(`[draft] Condition ${conditionId} not valid for category ${config.categoryId} — using ${corrected} (valid: ${validConditionIds.join(',')})`);
+      conditionId = corrected;
+    } else {
+      console.log(`[draft] Condition ${conditionId} for category ${config.categoryId} (valid: ${validConditionIds.join(',') || 'none returned by GetCategoryFeatures'})`);
+    }
 
     // ScheduleTime — validate within eBay's 21-day window, fall back to immediate if invalid
     let scheduleTimeXml = '';
