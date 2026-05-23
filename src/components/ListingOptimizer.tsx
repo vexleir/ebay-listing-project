@@ -56,7 +56,6 @@ interface AISuggestions {
   seoKeywords: string[];
   seoIssues: string[];
   overallTips: string[];
-  suggestedCollectionCodes?: string[];
 }
 
 interface SpecificRow { name: string; value: string; }
@@ -333,8 +332,6 @@ export default function ListingOptimizer({ appPassword }: Props) {
   const [acceptDesc, setAcceptDesc] = useState<boolean | null>(null);
   const [acceptSpecifics, setAcceptSpecifics] = useState<boolean | null>(null);
 
-  const [collectionCodes, setCollectionCodes] = useState<string[]>([]);
-
   // Push state
   const [showDiff, setShowDiff] = useState(false);
   const [pushing, setPushing] = useState(false);
@@ -428,9 +425,6 @@ export default function ListingOptimizer({ appPassword }: Props) {
       const data = await resp.json();
       if (!resp.ok || data.error) throw new Error(data.error || 'AI optimization failed');
       setAiSuggestions(data as AISuggestions);
-      if (data.suggestedCollectionCodes?.length) {
-        setCollectionCodes(data.suggestedCollectionCodes);
-      }
       // Enter edit mode if not already there
       if (phase !== 'edit') enterEditMode();
     } catch (e: any) {
@@ -499,14 +493,6 @@ export default function ListingOptimizer({ appPassword }: Props) {
       });
       const data = await resp.json();
       if (!resp.ok || data.error) throw new Error(data.error || 'Push failed');
-      // Save collection codes to the DB listing if it exists (fire-and-forget)
-      if (collectionCodes.length > 0) {
-        fetch(`/api/listings/by-ebay-id/${listing.itemId}`, {
-          method: 'PATCH',
-          headers: apiHeaders(appPassword),
-          body: JSON.stringify({ updates: { collectionCodes } }),
-        }).catch(() => {});
-      }
       setPushSuccess(true);
       setShowDiff(false);
       // Update local listing state to reflect pushed values

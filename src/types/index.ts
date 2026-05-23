@@ -24,15 +24,6 @@ export interface StagedListing {
   soldPrice?: string;
   shippingLabelCost?: string;
   seoKeywords?: string;
-  collectionCodes?: string[];
-  // Consignment
-  isConsignment?: boolean;
-  consignorId?: string;
-  consignmentFeePct?: number; // Our commission % (0-100); consignor gets the remainder
-  consignorPaidAt?: number;
-  consignorPayoutAmount?: string; // Dollar amount paid out to consignor (computed at mark-paid time)
-  // Inventory
-  containerId?: string;
   // Package dimensions (used by eBay for calculated shipping / shipping rate calcs).
   // Strings so empty inputs round-trip cleanly through the form.
   packageLength?: string;
@@ -42,42 +33,10 @@ export interface StagedListing {
   packageWeightOz?: string;
 }
 
-export type ContainerType = 'bin' | 'box' | 'shelf' | 'drawer' | 'tote' | 'pallet' | 'other';
-
-export interface ContainerLooseItem {
-  id: string;
-  label: string;
-  notes?: string;
-  createdAt: number;
-}
-
-export interface Container {
-  id: string;
-  name: string;
-  type: ContainerType;
-  location?: string;
-  notes?: string;
-  looseItems?: ContainerLooseItem[];
-  archived?: boolean;
-  createdAt: number;
-  updatedAt?: number;
-}
-
-export interface Consignor {
-  id: string;
-  name: string;
-  email?: string;
-  phone?: string;
-  notes?: string;
-  defaultSplitPct?: number; // Our default commission % for this consignor
-  createdAt: number;
-  updatedAt?: number;
-}
-
 export interface AppState {
   apiKey: string;
   ebayToken: string;
-  activeTab: 'new' | 'staged' | 'listed' | 'consignment';
+  activeTab: 'new' | 'staged' | 'listed';
   isSettingsOpen: boolean;
 }
 

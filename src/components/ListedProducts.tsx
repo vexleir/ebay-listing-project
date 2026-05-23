@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { ExternalLink, Calendar, CheckCircle, Trash2, Archive, ArchiveRestore, Search, ChevronDown, LayoutGrid, List, Download, RefreshCw, Eye, RotateCcw, CircleSlash, Share2, DollarSign, Pencil, Check, X, Wand2, ShieldCheck, ShieldAlert, ShieldX, Undo2, Package } from 'lucide-react';
-import type { StagedListing, Container } from '../types';
+import { ExternalLink, Calendar, CheckCircle, Trash2, Archive, ArchiveRestore, Search, ChevronDown, LayoutGrid, List, Download, RefreshCw, Eye, RotateCcw, CircleSlash, Share2, DollarSign, Pencil, Check, X, Wand2, ShieldCheck, ShieldAlert, ShieldX, Undo2 } from 'lucide-react';
+import type { StagedListing } from '../types';
 import ImageSearchButton from './ImageSearchButton';
 import Lightbox from './Lightbox';
 import { useToast } from '../context/ToastContext';
@@ -21,8 +21,6 @@ interface ListedProductsProps {
   onUpdateListing?: (updated: StagedListing) => void;
   isEbayConnected?: boolean;
   appPassword?: string;
-  containers?: Container[];
-  onOpenContainer?: (id: string) => void;
 }
 
 type SortOption = 'date-desc' | 'date-asc' | 'title-asc' | 'title-desc' | 'price-asc' | 'price-desc' | 'health-asc' | 'health-desc';
@@ -148,12 +146,7 @@ function HealthBadge({ listing }: { listing: StagedListing }) {
   );
 }
 
-export default function ListedProductsView({ listings, onDelete, onArchive, onSyncSold, onRelist, onDelistRelist, onMoveToStaged, onMarkSold, onUpdateListing, isEbayConnected, appPassword = '', containers = [], onOpenContainer }: ListedProductsProps) {
-  const containerNameById = (() => {
-    const m = new Map<string, string>();
-    for (const c of containers) m.set(c.id, c.name);
-    return m;
-  })();
+export default function ListedProductsView({ listings, onDelete, onArchive, onSyncSold, onRelist, onDelistRelist, onMoveToStaged, onMarkSold, onUpdateListing, isEbayConnected, appPassword = '' }: ListedProductsProps) {
   const { toast } = useToast();
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortOption>('date-desc');
@@ -191,7 +184,6 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
   const [optimizing, setOptimizing] = useState(false);
   const [optimizeResult, setOptimizeResult] = useState<any>(null);
   const [optimizeSaving, setOptimizeSaving] = useState(false);
-  const [optimizeCollectionCodes, setOptimizeCollectionCodes] = useState<string[]>([]);
   const [optimizeDimensions, setOptimizeDimensions] = useState<{
     packageLength: string; packageWidth: string; packageDepth: string;
     packageWeightLbs: string; packageWeightOz: string;
@@ -288,8 +280,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
       if (l.title.toLowerCase().includes(q)) return true;
       if ((l.sku || '').toLowerCase().includes(q)) return true;
       if ((l.category || '').toLowerCase().includes(q)) return true;
-      const cName = l.containerId ? containerNameById.get(l.containerId) : '';
-      return !!(cName && cName.toLowerCase().includes(q));
+      return false;
     })
     .sort((a, b) => {
       switch (sort) {
@@ -363,7 +354,6 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
       itemSpecifics: { ...(optimizeListing.itemSpecifics || {}), ...(optimizeResult.itemSpecifics || {}) },
       tags: optimizeResult.tags || optimizeListing.tags,
       seoKeywords: optimizeResult.seoKeywords || optimizeListing.seoKeywords || '',
-      collectionCodes: optimizeCollectionCodes.length > 0 ? optimizeCollectionCodes : optimizeListing.collectionCodes,
       packageLength: optimizeDimensions.packageLength,
       packageWidth: optimizeDimensions.packageWidth,
       packageDepth: optimizeDimensions.packageDepth,
@@ -492,15 +482,6 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
           <HealthBadge listing={listing} />
           <span style={{ fontSize: '0.8rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px' }}>{listing.category}</span>
           {listing.sku && <span style={{ fontSize: '0.8rem', background: 'rgba(99,102,241,0.25)', padding: '2px 8px', borderRadius: '4px', color: '#a5b4fc' }}>SKU: {listing.sku}</span>}
-          {listing.containerId && containerNameById.get(listing.containerId) && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onOpenContainer?.(listing.containerId!); }}
-              title="Open in Inventory"
-              style={{ fontSize: '0.8rem', background: 'rgba(34,197,94,0.18)', padding: '2px 8px', borderRadius: '4px', color: '#86efac', border: '1px solid rgba(34,197,94,0.35)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-            >
-              <Package size={11} /> {containerNameById.get(listing.containerId)}
-            </button>
-          )}
         </div>
         {listing.sellerNotes && <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', padding: '6px 8px', marginBottom: '0.75rem', fontStyle: 'italic' }}>📝 {listing.sellerNotes}</p>}
         {stats[listing.id] && (
@@ -539,7 +520,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
               <DollarSign size={17} /> Sold
             </button>
           )}
-          <button className="btn-icon" title="AI Optimize listing" onClick={() => { setOptimizeListing(listing); setOptimizeResult(null); setOptimizeInstructions(''); setOptimizeCollectionCodes(listing.collectionCodes || []); setOptimizeDescView('html'); setOptimizeDimensions({ packageLength: listing.packageLength || '', packageWidth: listing.packageWidth || '', packageDepth: listing.packageDepth || '', packageWeightLbs: listing.packageWeightLbs || '', packageWeightOz: listing.packageWeightOz || '' }); }}
+          <button className="btn-icon" title="AI Optimize listing" onClick={() => { setOptimizeListing(listing); setOptimizeResult(null); setOptimizeInstructions(''); setOptimizeDescView('html'); setOptimizeDimensions({ packageLength: listing.packageLength || '', packageWidth: listing.packageWidth || '', packageDepth: listing.packageDepth || '', packageWeightLbs: listing.packageWeightLbs || '', packageWeightOz: listing.packageWeightOz || '' }); }}
             style={{ color: '#a78bfa' }}>
             <Wand2 size={18} />
           </button>
@@ -604,15 +585,6 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
         <ProfitBadge price={listing.priceRecommendation} costBasis={listing.costBasis} category={listing.category} shippingLabelCost={listing.shippingLabelCost} />
         <HealthBadge listing={listing} />
         {listing.sku && <span style={{ fontSize: '0.78rem', background: 'rgba(99,102,241,0.25)', padding: '2px 8px', borderRadius: '4px', color: '#a5b4fc', whiteSpace: 'nowrap' }}>{listing.sku}</span>}
-        {listing.containerId && containerNameById.get(listing.containerId) && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onOpenContainer?.(listing.containerId!); }}
-            title="Open in Inventory"
-            style={{ fontSize: '0.78rem', background: 'rgba(34,197,94,0.18)', padding: '2px 8px', borderRadius: '4px', color: '#86efac', border: '1px solid rgba(34,197,94,0.35)', cursor: 'pointer', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-          >
-            <Package size={11} /> {containerNameById.get(listing.containerId)}
-          </button>
-        )}
       </div>
       <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', flexShrink: 0, minWidth: '80px', textAlign: 'right' }}>{new Date(listing.createdAt).toLocaleDateString()}</span>
       <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0, alignItems: 'center' }}>
@@ -625,7 +597,7 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
             <DollarSign size={17} />
           </button>
         )}
-        <button className="btn-icon" title="AI Optimize listing" onClick={() => { setOptimizeListing(listing); setOptimizeResult(null); setOptimizeInstructions(''); setOptimizeCollectionCodes(listing.collectionCodes || []); setOptimizeDescView('html'); setOptimizeDimensions({ packageLength: listing.packageLength || '', packageWidth: listing.packageWidth || '', packageDepth: listing.packageDepth || '', packageWeightLbs: listing.packageWeightLbs || '', packageWeightOz: listing.packageWeightOz || '' }); }}
+        <button className="btn-icon" title="AI Optimize listing" onClick={() => { setOptimizeListing(listing); setOptimizeResult(null); setOptimizeInstructions(''); setOptimizeDescView('html'); setOptimizeDimensions({ packageLength: listing.packageLength || '', packageWidth: listing.packageWidth || '', packageDepth: listing.packageDepth || '', packageWeightLbs: listing.packageWeightLbs || '', packageWeightOz: listing.packageWeightOz || '' }); }}
           style={{ color: '#a78bfa' }}>
           <Wand2 size={17} />
         </button>
@@ -683,7 +655,6 @@ export default function ListedProductsView({ listings, onDelete, onArchive, onSy
           appPassword={appPassword}
           onClose={() => setEditListing(null)}
           onSaved={updated => { setEditListing(null); onUpdateListing?.(updated); }}
-          containers={containers}
         />
       )}
 

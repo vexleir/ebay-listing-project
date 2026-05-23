@@ -17,7 +17,6 @@ interface GeneratedResult {
   shippingEstimate: string;
   tags?: string[];
   seoKeywords?: string;
-  collectionCodes?: string[];
 }
 
 interface Group {
@@ -248,7 +247,6 @@ export default function BulkUploader({ onStage, appPassword }: BulkUploaderProps
           shippingEstimate: r.shippingEstimate,
           tags: r.tags,
           seoKeywords: r.seoKeywords,
-          collectionCodes: r.collectionCodes,
           images: imageDataUrls,
         } as Omit<StagedListing, 'id' | 'createdAt'>);
         setGroups(prev => prev.map(x => x.id === g.id ? { ...x, staged: true } : x));

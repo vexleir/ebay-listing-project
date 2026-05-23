@@ -1,7 +1,7 @@
 import type React from 'react';
 import {
-  HelpCircle, PlusCircle, Layers, List, Check, Download, DollarSign, Users, Package,
-  BarChart2, ShoppingBag, Telescope, Zap, BookMarked, Settings, Shield,
+  HelpCircle, PlusCircle, Layers, List, Check, Download, DollarSign,
+  BarChart2, Telescope, Zap, Settings, Shield,
 } from 'lucide-react';
 
 const Section = ({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) => (
@@ -140,26 +140,6 @@ export default function HelpPage() {
         </ul>
       </Section>
 
-      <Section icon={<Users size={18} />} title="Consignment">
-        <p>Track items that belong to other people. Manage consignors, payout splits, and balances owed.</p>
-        <ol style={{ paddingLeft: '1.25rem', margin: 0 }}>
-          <Step n={1}>Add consignors (name, contact info, default fee %).</Step>
-          <Step n={2}>Assign existing staged items to a consignor — they move into the consignment view.</Step>
-          <Step n={3}>When an item sells, the system calculates the consignor's share automatically.</Step>
-          <Step n={4}>Mark items as <Kbd>Paid</Kbd> after you've issued payout.</Step>
-        </ol>
-      </Section>
-
-      <Section icon={<Package size={18} />} title="Inventory — Physical Storage">
-        <p>Track <em>where</em> items physically live (boxes, shelves, bins). Find any listing in seconds.</p>
-        <ul style={{ paddingLeft: '1.25rem', margin: 0 }}>
-          <li>Create containers (e.g., "Box A1", "Shelf 3 - Garage").</li>
-          <li>Assign listings to containers — a badge appears on each card showing its location.</li>
-          <li>Add <em>loose items</em> for inventory you haven't yet listed (rough notes only).</li>
-          <li>Click any container to see everything stored inside.</li>
-        </ul>
-      </Section>
-
       <Section icon={<BarChart2 size={18} />} title="Analytics">
         <p>Charts and KPIs for your selling activity:</p>
         <ul style={{ paddingLeft: '1.25rem', margin: 0 }}>
@@ -168,14 +148,6 @@ export default function HelpPage() {
           <li>Average days-to-sell</li>
           <li>Top-performing items and worst-performers</li>
         </ul>
-      </Section>
-
-      <Section icon={<ShoppingBag size={18} />} title="Source &amp; Sourcing Research">
-        <p><strong style={{ color: 'var(--text-primary)' }}>Source:</strong> AI-driven sourcing suggestions based
-          on what's selling well in your inventory — tells you what to buy and re-sell.</p>
-        <p style={{ marginBottom: 0 }}><strong style={{ color: 'var(--text-primary)' }}>Sourcing Research:</strong>
-          Look up sold-comp data for any item before you buy it. Click <Kbd>Build Listing</Kbd> on any result to
-          jump straight into the New Listing flow with the item pre-filled.</p>
       </Section>
 
       <Section icon={<Zap size={18} />} title="Optimizer">
@@ -192,11 +164,6 @@ export default function HelpPage() {
       <Section icon={<Telescope size={18} />} title="Repricing Advisor">
         <p>Available inside the Listed tab — analyzes each item's age, watch count, and market comps to recommend
           price drops or holds. Apply suggestions one at a time or in bulk.</p>
-      </Section>
-
-      <Section icon={<BookMarked size={18} />} title="Catalog Codes">
-        <p>Manage internal SKU/catalog codes and apply them across listings. Useful for matching listings to
-          physical receipts, tax records, or wholesale invoices.</p>
       </Section>
 
       <Section icon={<Settings size={18} />} title="Settings">

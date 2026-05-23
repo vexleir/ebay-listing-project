@@ -5,10 +5,9 @@ const axios = require('axios');
 const path = require('path');
 const { generateListing, generateListingFromUrls } = require('./ai');
 const { getAuthUrl, exchangeCodeForToken, getValidAccessToken, hasValidSession, getTokenExpiry } = require('./ebayAuth');
-const { getListings, createListing, updateListing, deleteListing, getAllListingsMeta, getActiveListings, getSettings, saveSettings, incrementTokenUsage, getTokenUsage, getConsignors, createConsignor, updateConsignor, deleteConsignor, getContainers, getContainerById, createContainer, updateContainer, deleteContainer, getListingsInContainer, addLooseItem, removeLooseItem } = require('./listings');
+const { getListings, createListing, updateListing, deleteListing, getAllListingsMeta, getActiveListings, getSettings, saveSettings, incrementTokenUsage, getTokenUsage } = require('./listings');
 const { fetchListingForOptimizer, fetchSoldComps, aiOptimizeListing } = require('./optimizer');
 const feedbackStore = require('./feedback');
-const catalog = require('./collections');
 const { uploadImage } = require('./cloudinary');
 const { getDb } = require('./db');
 const { signToken, authMiddleware, requireSuperAdmin } = require('./auth');
@@ -415,50 +414,6 @@ app.get('/api/ebay/auth-url', (req, res) => {
   }
 });
 
-// ─── Catalog Codes ────────────────────────────────────────────────────────────
-
-app.get('/api/catalog-codes', async (req, res) => {
-  try {
-    const codes = await catalog.listCollections(req.companyId);
-    res.json({ codes });
-  } catch (e) {
-    console.error('[catalog-codes] GET error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.post('/api/catalog-codes', async (req, res) => {
-  try {
-    const { code, name } = req.body || {};
-    const saved = await catalog.addCollection(req.companyId, code, name);
-    res.json({ success: true, code: saved });
-  } catch (e) {
-    console.error('[catalog-codes] POST error:', e.message);
-    res.status(400).json({ error: e.message });
-  }
-});
-
-app.put('/api/catalog-codes/:code', async (req, res) => {
-  try {
-    const { code, name } = req.body || {};
-    const saved = await catalog.updateCollection(req.companyId, req.params.code, code, name);
-    res.json({ success: true, code: saved });
-  } catch (e) {
-    console.error('[catalog-codes] PUT error:', e.message);
-    res.status(400).json({ error: e.message });
-  }
-});
-
-app.delete('/api/catalog-codes/:code', async (req, res) => {
-  try {
-    await catalog.deleteCollection(req.companyId, req.params.code);
-    res.json({ success: true });
-  } catch (e) {
-    console.error('[catalog-codes] DELETE error:', e.message);
-    res.status(400).json({ error: e.message });
-  }
-});
-
 // ─── Listings ─────────────────────────────────────────────────────────────────
 
 app.get('/api/listings', async (req, res) => {
@@ -644,138 +599,6 @@ app.delete('/api/feedback/:id/replies/:replyId', async (req, res) => {
   }
 });
 
-// ─── Consignors ───────────────────────────────────────────────────────────────
-
-app.get('/api/consignors', async (req, res) => {
-  try {
-    const consignors = await getConsignors(req.companyId);
-    res.json(consignors);
-  } catch (e) {
-    console.error('[consignors] GET error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.post('/api/consignors', async (req, res) => {
-  try {
-    const consignor = req.body.consignor;
-    if (!consignor?.id || !consignor?.name) {
-      return res.status(400).json({ error: 'id and name required' });
-    }
-    await createConsignor(req.companyId, consignor);
-    res.json({ success: true });
-  } catch (e) {
-    console.error('[consignors] POST error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.put('/api/consignors/:id', async (req, res) => {
-  try {
-    await updateConsignor(req.companyId, req.params.id, req.body.updates || {});
-    res.json({ success: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.delete('/api/consignors/:id', async (req, res) => {
-  try {
-    await deleteConsignor(req.companyId, req.params.id);
-    res.json({ success: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ─── Inventory containers ────────────────────────────────────────────────────
-
-const VALID_CONTAINER_TYPES = new Set(['bin', 'box', 'shelf', 'drawer', 'tote', 'pallet', 'other']);
-
-app.get('/api/containers', async (req, res) => {
-  try {
-    const containers = await getContainers(req.companyId);
-    res.json(containers);
-  } catch (e) {
-    console.error('[containers] GET error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.get('/api/containers/:id', async (req, res) => {
-  try {
-    const container = await getContainerById(req.companyId, req.params.id);
-    if (!container) return res.status(404).json({ error: 'Container not found' });
-    const listings = await getListingsInContainer(req.companyId, req.params.id);
-    res.json({ container, listings });
-  } catch (e) {
-    console.error('[containers] GET-by-id error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.post('/api/containers', async (req, res) => {
-  try {
-    const container = req.body.container;
-    if (!container?.id || !container?.name || !container?.type) {
-      return res.status(400).json({ error: 'id, name, and type required' });
-    }
-    if (!VALID_CONTAINER_TYPES.has(container.type)) {
-      return res.status(400).json({ error: `type must be one of ${Array.from(VALID_CONTAINER_TYPES).join(', ')}` });
-    }
-    await createContainer(req.companyId, container);
-    res.json({ success: true });
-  } catch (e) {
-    console.error('[containers] POST error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.put('/api/containers/:id', async (req, res) => {
-  try {
-    const updates = req.body.updates || {};
-    if (updates.type !== undefined && !VALID_CONTAINER_TYPES.has(updates.type)) {
-      return res.status(400).json({ error: `type must be one of ${Array.from(VALID_CONTAINER_TYPES).join(', ')}` });
-    }
-    await updateContainer(req.companyId, req.params.id, updates);
-    res.json({ success: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.delete('/api/containers/:id', async (req, res) => {
-  try {
-    await deleteContainer(req.companyId, req.params.id);
-    res.json({ success: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.post('/api/containers/:id/loose-items', async (req, res) => {
-  try {
-    const { label, notes } = req.body || {};
-    if (!label || typeof label !== 'string') {
-      return res.status(400).json({ error: 'label required' });
-    }
-    const item = { id: crypto.randomUUID(), label, notes: notes || '', createdAt: Date.now() };
-    await addLooseItem(req.companyId, req.params.id, item);
-    res.json({ success: true, item });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.delete('/api/containers/:id/loose-items/:itemId', async (req, res) => {
-  try {
-    await removeLooseItem(req.companyId, req.params.id, req.params.itemId);
-    res.json({ success: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
 // ─── Images ───────────────────────────────────────────────────────────────────
 
 app.post('/api/images/upload', async (req, res) => {
@@ -828,8 +651,7 @@ app.post('/api/generate', async (req, res) => {
     if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === 'YOUR_GEMINI_KEY_HERE') {
       return res.status(500).json({ error: 'Server missing GEMINI_API_KEY.' });
     }
-    const collectionsForAi = await catalog.getCollectionsForAI(req.companyId);
-    const result = await generateListing(imageParts, instructions, process.env.GEMINI_API_KEY, collectionsForAi);
+    const result = await generateListing(imageParts, instructions, process.env.GEMINI_API_KEY);
     if (result.tokenUsage) {
       incrementTokenUsage(req.companyId, result.tokenUsage.promptTokens, result.tokenUsage.completionTokens).catch(() => {});
     }
@@ -844,8 +666,7 @@ app.post('/api/generate-from-urls', async (req, res) => {
   try {
     const { imageUrls, instructions } = req.body;
     if (!process.env.GEMINI_API_KEY) return res.status(500).json({ error: 'Server missing GEMINI_API_KEY' });
-    const collectionsForAi = await catalog.getCollectionsForAI(req.companyId);
-    const result = await generateListingFromUrls(imageUrls || [], instructions || '', process.env.GEMINI_API_KEY, collectionsForAi);
+    const result = await generateListingFromUrls(imageUrls || [], instructions || '', process.env.GEMINI_API_KEY);
     if (result.tokenUsage) {
       incrementTokenUsage(req.companyId, result.tokenUsage.promptTokens, result.tokenUsage.completionTokens).catch(() => {});
     }
@@ -992,43 +813,6 @@ app.get('/api/reprice/suggestions', async (req, res) => {
     res.json({ suggestions, analyzedCount: active.length, flaggedCount: suggestions.length });
   } catch (e) {
     console.error('[reprice] error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.get('/api/source/analyze', async (req, res) => {
-  try {
-    const query = (req.query.query || '').trim();
-    const askingPrice = parseFloat(req.query.askingPrice || '0');
-    if (!query) return res.status(400).json({ error: 'query required' });
-    const token = await getApplicationToken();
-    const resp = await axios.get('https://api.ebay.com/buy/browse/v1/item_summary/search', {
-      headers: { 'Authorization': `Bearer ${token}`, 'X-EBAY-C-MARKETPLACE-ID': 'EBAY_US' },
-      params: { q: query, limit: 12, filter: 'buyingOptions:{FIXED_PRICE}', sort: 'price' }
-    });
-    const summaries = resp.data?.itemSummaries || [];
-    const prices = summaries.map(s => parseFloat(s.price?.value || '0')).filter(p => p > 0).sort((a, b) => a - b);
-    if (prices.length === 0) {
-      return res.json({ query, comps: [], stats: null, recommendation: null, reason: 'No active eBay listings found for this search. Try different keywords.', error: null });
-    }
-    const avg = prices.reduce((s, p) => s + p, 0) / prices.length;
-    const mid = Math.floor(prices.length / 2);
-    const median = prices.length % 2 === 0 ? (prices[mid - 1] + prices[mid]) / 2 : prices[mid];
-    const targetSellPrice = median * 0.95;
-    const ebayFee = targetSellPrice * 0.1325 + 0.30;
-    const netProfit = askingPrice > 0 ? targetSellPrice - askingPrice - ebayFee : null;
-    const roi = (netProfit !== null && askingPrice > 0) ? (netProfit / askingPrice) * 100 : null;
-    let recommendation = null;
-    let reason = 'Enter an asking price to get a buy recommendation.';
-    if (netProfit !== null && roi !== null) {
-      if (roi >= 100 && netProfit >= 15) { recommendation = 'buy'; reason = `Strong market at $${median.toFixed(2)} median. Est. net $${netProfit.toFixed(2)} after eBay fees — ${roi.toFixed(0)}% ROI. Buy with confidence.`; }
-      else if (roi >= 40 && netProfit >= 8) { recommendation = 'consider'; reason = `Decent margin — est. net $${netProfit.toFixed(2)} (${roi.toFixed(0)}% ROI). Verify condition carefully before buying.`; }
-      else if (netProfit > 0) { recommendation = 'pass'; reason = `Thin margin after eBay fees — est. net only $${netProfit.toFixed(2)} (${roi.toFixed(0)}% ROI) at this asking price. Negotiate down or skip.`; }
-      else { recommendation = 'pass'; reason = `Asking price is too high — would lose $${Math.abs(netProfit).toFixed(2)} after eBay fees at current market prices.`; }
-    }
-    res.json({ query, comps: summaries.slice(0, 8).map(s => ({ title: s.title || '', price: parseFloat(s.price?.value || '0').toFixed(2), condition: s.condition || '', url: s.itemWebUrl || '' })), stats: { count: prices.length, avg: parseFloat(avg.toFixed(2)), median: parseFloat(median.toFixed(2)), min: parseFloat(prices[0].toFixed(2)), max: parseFloat(prices[prices.length - 1].toFixed(2)) }, askingPrice, targetSellPrice: parseFloat(targetSellPrice.toFixed(2)), ebayFee: parseFloat(ebayFee.toFixed(2)), netProfit: netProfit !== null ? parseFloat(netProfit.toFixed(2)) : null, roi: roi !== null ? parseFloat(roi.toFixed(1)) : null, recommendation, reason, error: null });
-  } catch (e) {
-    console.error('[source/analyze] error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -2014,8 +1798,7 @@ app.post('/api/optimizer/ai-optimize', async (req, res) => {
   if (!listingData) return res.status(400).json({ error: 'listingData required' });
   if (!process.env.GEMINI_API_KEY) return res.status(500).json({ error: 'Server missing GEMINI_API_KEY' });
   try {
-    const collectionsForAi = await catalog.getCollectionsForAI(req.companyId);
-    const result = await aiOptimizeListing(listingData, process.env.GEMINI_API_KEY, collectionsForAi);
+    const result = await aiOptimizeListing(listingData, process.env.GEMINI_API_KEY);
     if (result.tokenUsage) {
       incrementTokenUsage(req.companyId, result.tokenUsage.promptTokens, result.tokenUsage.completionTokens).catch(() => {});
     }
