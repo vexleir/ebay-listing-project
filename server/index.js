@@ -28,6 +28,104 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = process.env.PORT || 3001;
 const EBAY_API_BASE = 'https://api.ebay.com';
+const DEBUG_ENDPOINTS_ENABLED = process.env.ENABLE_DEBUG_ENDPOINTS === 'true';
+
+function requireDebugEndpointsEnabled(req, res, next) {
+  if (!DEBUG_ENDPOINTS_ENABLED) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  next();
+}
+
+function parsePositiveIntEnv(name, fallback) {
+  const value = Number.parseInt(process.env[name] || '', 10);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function rateLimitKey(req) {
+  return req.companyId || req.user?.companyId || req.user?.userId || req.ip || req.headers['x-forwarded-for'] || 'unknown';
+}
+
+function createRateLimiter({ name, windowMs, max, message }) {
+  const buckets = new Map();
+  return (req, res, next) => {
+    const now = Date.now();
+    const key = `${name}:${rateLimitKey(req)}`;
+    let bucket = buckets.get(key);
+    if (!bucket || bucket.resetAt <= now) {
+      bucket = { count: 0, resetAt: now + windowMs };
+      buckets.set(key, bucket);
+    }
+    bucket.count += 1;
+
+    if (buckets.size > 10000) {
+      for (const [bucketKey, value] of buckets.entries()) {
+        if (value.resetAt <= now) buckets.delete(bucketKey);
+      }
+    }
+
+    const retryAfterSeconds = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
+    res.setHeader('RateLimit-Limit', String(max));
+    res.setHeader('RateLimit-Remaining', String(Math.max(0, max - bucket.count)));
+    res.setHeader('RateLimit-Reset', String(Math.ceil(bucket.resetAt / 1000)));
+
+    if (bucket.count > max) {
+      res.setHeader('Retry-After', String(retryAfterSeconds));
+      return res.status(429).json({
+        error: message,
+        code: 'RATE_LIMITED',
+        retryAfterSeconds,
+      });
+    }
+
+    next();
+  };
+}
+
+const globalApiRateLimit = createRateLimiter({
+  name: 'global-api',
+  windowMs: 60 * 1000,
+  max: parsePositiveIntEnv('API_RATE_LIMIT_PER_MINUTE', 300),
+  message: 'Too many requests. Try again shortly.',
+});
+const authenticatedApiRateLimit = createRateLimiter({
+  name: 'auth-api',
+  windowMs: 60 * 1000,
+  max: parsePositiveIntEnv('AUTH_API_RATE_LIMIT_PER_MINUTE', 900),
+  message: 'Too many authenticated requests. Try again shortly.',
+});
+const aiRateLimit = createRateLimiter({
+  name: 'ai',
+  windowMs: 60 * 60 * 1000,
+  max: parsePositiveIntEnv('AI_RATE_LIMIT_PER_HOUR', 20),
+  message: 'Too many AI requests. Try again later.',
+});
+const imageRateLimit = createRateLimiter({
+  name: 'images',
+  windowMs: 60 * 60 * 1000,
+  max: parsePositiveIntEnv('IMAGE_RATE_LIMIT_PER_HOUR', 60),
+  message: 'Too many image processing requests. Try again later.',
+});
+const ebayReadRateLimit = createRateLimiter({
+  name: 'ebay-read',
+  windowMs: 60 * 60 * 1000,
+  max: parsePositiveIntEnv('EBAY_READ_RATE_LIMIT_PER_HOUR', 240),
+  message: 'Too many eBay lookup requests. Try again later.',
+});
+const ebayWriteRateLimit = createRateLimiter({
+  name: 'ebay-write',
+  windowMs: 60 * 60 * 1000,
+  max: parsePositiveIntEnv('EBAY_WRITE_RATE_LIMIT_PER_HOUR', 120),
+  message: 'Too many eBay listing update requests. Try again later.',
+});
+const compsRateLimit = createRateLimiter({
+  name: 'comps',
+  windowMs: 60 * 60 * 1000,
+  max: parsePositiveIntEnv('COMPS_RATE_LIMIT_PER_HOUR', 180),
+  message: 'Too many comparable-sales requests. Try again later.',
+});
+
+app.use('/api/', globalApiRateLimit);
 
 // eBay aspects that must be sent via dedicated XML elements, not ItemSpecifics
 const RESERVED_SPECIFICS = new Set([
@@ -129,41 +227,9 @@ app.get('/api/ebay/callback', async (req, res) => {
   }
 });
 
-// DELETE /api/ebay/tokens — clear stored tokens so user can do a clean reconnect
-app.delete('/api/ebay/tokens', async (req, res) => {
-  try {
-    const db = await getDb();
-    await db.collection('tokens').deleteOne({ _id: `${req.companyId}_tokens` });
-    console.log(`[ebay-tokens] cleared tokens for company=${req.companyId}`);
-    res.json({ success: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Temporary public debug endpoint — remove after diagnosing eBay auth issue
-app.get('/api/ebay/debug-auth-public', async (req, res) => {
-  try {
-    const db = await getDb();
-    const companies = await db.collection('tokens').find({}).toArray();
-    res.json({
-      clientIdPrefix: (process.env.EBAY_CLIENT_ID || '(not set)').substring(0, 15) + '...',
-      hasClientSecret: !!(process.env.EBAY_CLIENT_SECRET),
-      ruName: process.env.EBAY_RU_NAME || '(not set)',
-      tokenDocs: companies.map(doc => ({
-        id: doc._id,
-        refreshTokenPrefix: doc.refresh_token ? doc.refresh_token.substring(0, 10) + '...' : null,
-        refreshTokenExpiry: doc.refresh_token_expires_at ? new Date(doc.refresh_token_expires_at).toISOString() : null,
-        accessTokenExpiry: doc.expires_at ? new Date(doc.expires_at).toISOString() : null,
-      })),
-    });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
 // ─── Auth middleware — all /api/* routes below this require a valid JWT ──────
 app.use('/api/', authMiddleware);
+app.use('/api/', authenticatedApiRateLimit);
 
 // GET /api/auth/me
 app.get('/api/auth/me', (req, res) => {
@@ -199,7 +265,19 @@ app.post('/api/settings', async (req, res) => {
 
 // ─── eBay Auth ────────────────────────────────────────────────────────────────
 
-app.get('/api/ebay/policies', async (req, res) => {
+// DELETE /api/ebay/tokens — clear stored tokens so user can do a clean reconnect
+app.delete('/api/ebay/tokens', async (req, res) => {
+  try {
+    const db = await getDb();
+    await db.collection('tokens').deleteOne({ _id: `${req.companyId}_tokens` });
+    console.log(`[ebay-tokens] cleared tokens for company=${req.companyId}`);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/ebay/policies', ebayReadRateLimit, async (req, res) => {
   try {
     const token = await getValidAccessToken(req.companyId);
     const headers = { 'Authorization': `Bearer ${token}`, 'Content-Language': 'en-US' };
@@ -220,7 +298,7 @@ app.get('/api/ebay/policies', async (req, res) => {
   }
 });
 
-app.post('/api/ebay/revise', async (req, res) => {
+app.post('/api/ebay/revise', ebayWriteRateLimit, async (req, res) => {
   const { itemId, newPrice, newTitle, description, conditionId, itemSpecifics, quantity } = req.body;
   if (!itemId) return res.status(400).json({ error: 'itemId required' });
   try {
@@ -344,7 +422,7 @@ app.post('/api/ebay/revise', async (req, res) => {
   }
 });
 
-app.post('/api/ebay/end-listing', async (req, res) => {
+app.post('/api/ebay/end-listing', ebayWriteRateLimit, async (req, res) => {
   const { itemId, reason } = req.body;
   if (!itemId) return res.status(400).json({ error: 'itemId required' });
   try {
@@ -376,19 +454,22 @@ app.get('/api/ebay/token-info', async (req, res) => {
   }
 });
 
-app.get('/api/ebay/debug-auth', async (req, res) => {
+app.get('/api/ebay/debug-auth', requireSuperAdmin, requireDebugEndpointsEnabled, async (req, res) => {
   try {
     const db = await getDb();
     const doc = await db.collection('tokens').findOne({ _id: `${req.companyId}_tokens` });
+    const accessTokenExpired = doc?.expires_at ? Date.now() >= new Date(doc.expires_at).getTime() : null;
+    const refreshTokenExpired = doc?.refresh_token_expires_at ? Date.now() >= new Date(doc.refresh_token_expires_at).getTime() : null;
     res.json({
       companyId: req.companyId,
-      clientIdPrefix: (process.env.EBAY_CLIENT_ID || '').substring(0, 12) + '...',
+      hasClientId: !!process.env.EBAY_CLIENT_ID,
       hasClientSecret: !!(process.env.EBAY_CLIENT_SECRET),
-      ruName: process.env.EBAY_RU_NAME || '(not set)',
+      hasRuName: !!process.env.EBAY_RU_NAME,
       tokenDocExists: !!doc,
-      refreshTokenPrefix: doc?.refresh_token ? doc.refresh_token.substring(0, 10) + '...' : null,
-      accessTokenExpiry: doc?.expires_at ? new Date(doc.expires_at).toISOString() : null,
-      refreshTokenExpiry: doc?.refresh_token_expires_at ? new Date(doc.refresh_token_expires_at).toISOString() : null,
+      hasRefreshToken: !!doc?.refresh_token,
+      hasAccessToken: !!doc?.access_token,
+      accessTokenExpired,
+      refreshTokenExpired,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -466,7 +547,7 @@ app.patch('/api/listings/by-ebay-id/:itemId', async (req, res) => {
   }
 });
 
-app.get('/api/listings/debug', async (req, res) => {
+app.get('/api/listings/debug', requireSuperAdmin, requireDebugEndpointsEnabled, async (req, res) => {
   try {
     const all = await getAllListingsMeta(req.companyId);
     res.json({ total: all.length, items: all });
@@ -601,7 +682,7 @@ app.delete('/api/feedback/:id/replies/:replyId', async (req, res) => {
 
 // ─── Images ───────────────────────────────────────────────────────────────────
 
-app.post('/api/images/upload', async (req, res) => {
+app.post('/api/images/upload', imageRateLimit, async (req, res) => {
   try {
     const { images } = req.body;
     if (!Array.isArray(images) || images.length === 0) {
@@ -619,7 +700,7 @@ app.post('/api/images/upload', async (req, res) => {
   }
 });
 
-app.post('/api/images/remove-bg', async (req, res) => {
+app.post('/api/images/remove-bg', imageRateLimit, async (req, res) => {
   const { imageBase64 } = req.body;
   if (!imageBase64) return res.status(400).json({ error: 'imageBase64 required' });
   const apiKey = process.env.REMOVEBG_API_KEY;
@@ -645,7 +726,7 @@ app.post('/api/images/remove-bg', async (req, res) => {
 
 // ─── AI Generation ────────────────────────────────────────────────────────────
 
-app.post('/api/generate', async (req, res) => {
+app.post('/api/generate', aiRateLimit, async (req, res) => {
   try {
     const { imageParts, instructions } = req.body;
     if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === 'YOUR_GEMINI_KEY_HERE') {
@@ -662,7 +743,7 @@ app.post('/api/generate', async (req, res) => {
   }
 });
 
-app.post('/api/generate-from-urls', async (req, res) => {
+app.post('/api/generate-from-urls', aiRateLimit, async (req, res) => {
   try {
     const { imageUrls, instructions } = req.body;
     if (!process.env.GEMINI_API_KEY) return res.status(500).json({ error: 'Server missing GEMINI_API_KEY' });
@@ -680,7 +761,7 @@ app.post('/api/generate-from-urls', async (req, res) => {
 // ─── eBay API helpers ─────────────────────────────────────────────────────────
 
 // Returns the valid ConditionIDs for a given category (varies by category type)
-app.get('/api/ebay/category-conditions', async (req, res) => {
+app.get('/api/ebay/category-conditions', ebayReadRateLimit, async (req, res) => {
   const { categoryId } = req.query;
   if (!categoryId) return res.status(400).json({ error: 'categoryId required' });
   try {
@@ -706,7 +787,7 @@ app.get('/api/ebay/category-conditions', async (req, res) => {
   }
 });
 
-app.get('/api/ebay/categories', async (req, res) => {
+app.get('/api/ebay/categories', ebayReadRateLimit, async (req, res) => {
   try {
     const query = (req.query.query || '').trim();
     if (!query) return res.json([]);
@@ -744,7 +825,7 @@ async function getApplicationToken() {
   return _appToken;
 }
 
-app.get('/api/ebay/sold-comps', async (req, res) => {
+app.get('/api/ebay/sold-comps', compsRateLimit, async (req, res) => {
   try {
     const query = (req.query.query || '').trim();
     if (!query) return res.json({ items: [], error: null });
@@ -771,7 +852,7 @@ app.get('/api/ebay/sold-comps', async (req, res) => {
   }
 });
 
-app.get('/api/reprice/suggestions', async (req, res) => {
+app.get('/api/reprice/suggestions', compsRateLimit, async (req, res) => {
   try {
     const token = await getApplicationToken();
     const active = await getActiveListings(req.companyId);
@@ -817,7 +898,7 @@ app.get('/api/reprice/suggestions', async (req, res) => {
   }
 });
 
-app.get('/api/ebay/settings', async (req, res) => {
+app.get('/api/ebay/settings', ebayReadRateLimit, async (req, res) => {
   try {
     const token = await getValidAccessToken(req.companyId);
     const headers = { 'Authorization': `Bearer ${token}`, 'Content-Language': 'en-US' };
@@ -842,7 +923,7 @@ app.get('/api/ebay/settings', async (req, res) => {
   }
 });
 
-app.get('/api/ebay/listing-stats', async (req, res) => {
+app.get('/api/ebay/listing-stats', ebayReadRateLimit, async (req, res) => {
   const { itemId } = req.query;
   if (!itemId) return res.status(400).json({ error: 'itemId required' });
   try {
@@ -865,7 +946,7 @@ app.get('/api/ebay/listing-stats', async (req, res) => {
   }
 });
 
-app.get('/api/ebay/sold-items', async (req, res) => {
+app.get('/api/ebay/sold-items', ebayReadRateLimit, async (req, res) => {
   try {
     const token = await getValidAccessToken(req.companyId);
     const xml = `<?xml version="1.0" encoding="utf-8"?>
@@ -901,7 +982,7 @@ app.get('/api/ebay/sold-items', async (req, res) => {
 // GET /api/ebay/active-listings?page=N
 // Fetches one page of active eBay listings from the Trading API (max 200/page).
 // The frontend calls this repeatedly to paginate through all listings.
-app.get('/api/ebay/active-listings', async (req, res) => {
+app.get('/api/ebay/active-listings', ebayReadRateLimit, async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const token = await getValidAccessToken(req.companyId);
@@ -981,7 +1062,7 @@ app.get('/api/ebay/active-listings', async (req, res) => {
 // Processes one page (200 items) of active eBay listings per call.
 // Updates existing DB records (images/title/price/condition) and inserts any not yet imported.
 // Frontend calls this repeatedly for each page, accumulating counts.
-app.post('/api/ebay/refresh-listings', async (req, res) => {
+app.post('/api/ebay/refresh-listings', ebayReadRateLimit, async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const token = await getValidAccessToken(req.companyId);
@@ -1102,7 +1183,7 @@ app.post('/api/ebay/refresh-listings', async (req, res) => {
 // POST /api/ebay/import-listings
 // Saves selected eBay active listings into the DB as status='listed'.
 // Skips any whose ebayDraftId already exists in the company's listings.
-app.post('/api/ebay/import-listings', async (req, res) => {
+app.post('/api/ebay/import-listings', ebayReadRateLimit, async (req, res) => {
   try {
     const { listings } = req.body;
     if (!Array.isArray(listings) || listings.length === 0) {
@@ -1159,7 +1240,7 @@ app.post('/api/ebay/import-listings', async (req, res) => {
 // POST /api/ebay/refresh-images/:id
 // Pulls the full PictureDetails for a single listing via GetItem (more reliable
 // than GetSellerList) and writes the image URLs back to the DB.
-app.post('/api/ebay/refresh-images/:id', async (req, res) => {
+app.post('/api/ebay/refresh-images/:id', ebayReadRateLimit, async (req, res) => {
   try {
     const { id } = req.params;
     const db = await getDb();
@@ -1558,7 +1639,7 @@ function sendEbayPushError(res, error) {
   res.status(status).json(payload);
 }
 
-app.post('/api/ebay/draft', async (req, res) => {
+app.post('/api/ebay/draft', ebayWriteRateLimit, async (req, res) => {
   try {
     const result = await pushListingToEbay({ ...req.body, companyId: req.companyId });
     res.json({ success: true, ...result });
@@ -1570,7 +1651,7 @@ app.post('/api/ebay/draft', async (req, res) => {
 // Delist + relist: ends the current eBay listing and immediately pushes a fresh
 // one (no scheduleDate). Used by the Optimize modal's "Delist & Relist" action
 // and by the per-listing "Delist & Relist" button on the Listings tab.
-app.post('/api/ebay/relist', async (req, res) => {
+app.post('/api/ebay/relist', ebayWriteRateLimit, async (req, res) => {
   const { oldItemId, listingId, listing } = req.body;
   if (!oldItemId) return res.status(400).json({ error: 'oldItemId required' });
   if (!listing) return res.status(400).json({ error: 'listing required' });
@@ -1780,7 +1861,7 @@ app.get('/api/optimizer/fetch', async (req, res) => {
   }
 });
 
-app.get('/api/optimizer/comps', async (req, res) => {
+app.get('/api/optimizer/comps', compsRateLimit, async (req, res) => {
   const { query, categoryId } = req.query;
   if (!query) return res.status(400).json({ error: 'query required' });
   try {
@@ -1793,7 +1874,7 @@ app.get('/api/optimizer/comps', async (req, res) => {
   }
 });
 
-app.post('/api/optimizer/ai-optimize', async (req, res) => {
+app.post('/api/optimizer/ai-optimize', aiRateLimit, async (req, res) => {
   const { listingData } = req.body;
   if (!listingData) return res.status(400).json({ error: 'listingData required' });
   if (!process.env.GEMINI_API_KEY) return res.status(500).json({ error: 'Server missing GEMINI_API_KEY' });
