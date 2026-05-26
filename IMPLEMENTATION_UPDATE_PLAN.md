@@ -8,7 +8,7 @@
 ## 0. Implementation Tracker
 
 **Last updated:** 2026-05-25  
-**Current implementation phase:** Phase 0 - Security and Operational Hygiene
+**Current implementation phase:** Phase 1 backend complete; Phase 1 frontend (FE-001/2/3/004) deferred to a dedicated React-focused session — see Section 13 for rationale.
 
 Use this section as the team coordination source while implementation is active. Move completed work here immediately after merge-ready implementation so other developers do not duplicate the same task.
 
@@ -18,7 +18,38 @@ Use this section as the team coordination source while implementation is active.
 | SEC-002 | Done | Codex | 2026-05-25 | Added `ENABLE_DEBUG_ENDPOINTS` gate and `requireSuperAdmin` protection to `/api/ebay/debug-auth` and `/api/listings/debug`; sanitized auth debug output so token/client prefixes are not returned. |
 | SEC-003 | Done | Codex | 2026-05-25 | Added token JSON ignore rules, documented `ENABLE_DEBUG_ENDPOINTS=false`, deleted tracked `server/ebay_tokens.json`, and verified no runtime code references that file. |
 | SEC-004 | Done | Codex | 2026-05-25 | Added dependency-free in-process rate limiting for global API traffic, authenticated API traffic, AI generation, image processing, eBay read/write calls, and comparable-sales lookups; env defaults documented in `server/.env.example`. |
+| SEC-005 | Done | Codex | 2026-05-25 | Added per-company daily AI token usage documents, quota checks before Gemini calls, configurable daily/reserve limits, and Analytics visibility for daily quota status. |
 | SEC-006 | Done | Codex | 2026-05-25 | Moved `DELETE /api/ebay/tokens` behind JWT auth middleware so token deletion is tenant-authenticated. |
+| QA-001 | Done | Codex | 2026-05-25 | Added `node:test` server test harness, root `test:server` script, and initial security hygiene tests for token-file removal, token ignore rules, and debug endpoint default config. |
+| QA-002 | Done | Claude | 2026-05-25 | Extracted debug endpoint gate to `server/middleware/requireDebugEndpoints.js`; added `server/tests/debug-endpoint-auth.test.js` covering env parsing, `requireSuperAdmin` unit cases, gate middleware, and full HTTP integration (401/403/404/200) against a real Express app for both debug routes. |
+| QA-003 | Done | Codex | 2026-05-25 | Extracted `buildItemSpecificsXml` to `server/services/ebay/xml.js` and added unit coverage for reserved fields, CDATA wrapping, value splitting, truncation, value caps, and array-shaped specifics. |
+| QA-004 | Done | Claude | 2026-05-25 | Extracted `getConditionId` and `pickFallbackConditionId` to `server/services/ebay/conditions.js`; added `server/tests/condition-fallback.test.js` with 21 cases covering condition string mapping, fallback selection, and end-to-end Comics/Electronics category scenarios. (Closes the condition fallback gap noted in P0.4.) |
+| P0.5 | Done | Claude | 2026-05-25 | Added top-level `RELEASE_CHECKLIST.md` covering pre-flight state, env config, build/lint/test gates, security gates, manual smoke steps, release notes, and rollback plan. |
+| ARCH-001 | Done | Claude | 2026-05-25 | Created `server/app.js` exporting `{ app, bootstrap }`; slimmed `server/index.js` to a 12-line process bootstrap (dotenv → require app → app.listen → bootstrap). No behavior change; all 52 server tests pass. Route handlers, middleware, helpers, and bootstrap remain in `app.js` and will be split further by ARCH-002/ARCH-003/ARCH-005. |
+| ARCH-002 | Done | Claude | 2026-05-25 | Extracted rate-limit infrastructure to `server/middleware/rateLimit.js` (`parsePositiveIntEnv`, `rateLimitKey`, `createRateLimiter`, `createDefaultRateLimiters`) and AI quota helpers to `server/middleware/quota.js` (`enforceAiDailyQuota`, `recordTokenUsage`, reserve constants). `app.js` now imports both modules — limiter wiring shrunk from ~100 lines to ~10. Added `server/tests/rate-limit.test.js` with 9 cases: env parsing, key fallback chain, allow/reject behavior, header emission, per-key isolation, per-name isolation, and window reset. |
+| ARCH-003a | Done | Claude | 2026-05-25 | Created `server/services/ebay/client.js` (`tradingApiCall` wrapper + Trading/OAuth/Browse URL constants + default compat-level/site-id) with a `transport` injection seam so service tests don't need to monkey-patch axios. Migrated `getValidConditionIdsForCategory` to `server/services/ebay/categories.js` and removed the inline copy from `app.js`. Added `server/tests/ebay-categories.test.js` with 10 cases covering header wiring, override behavior, missing-field validation, XML shape, parser edge cases, and the categories service end-to-end. Remaining ~30 `axios.post('https://api.ebay.com/...')` callsites in `app.js` will migrate to `tradingApiCall` incrementally as route groups are extracted under ARCH-005. |
+| ARCH-005a | Done | Claude | 2026-05-25 | Extracted feedback routes to `server/routes/feedback.js` (6 endpoints, ~125 lines). `app.js` now mounts via `app.use('/api/feedback', feedbackRoutes)`. Removed unused `feedbackStore` import from `app.js`. |
+| ARCH-005b | Done | Claude | 2026-05-25 | Extracted superadmin routes to `server/routes/admin.js` (8 endpoints, `router.use(requireSuperAdmin)` applied once at the router level). `app.js` now mounts via `app.use('/api/admin', adminRoutes)`. Trimmed unused `getCompanies`/`updateCompany`/`deleteCompany`/`getUsers`/`updateUser`/`deleteUser`/`getCompanyById`/`getUserById` imports from `app.js`. |
+| ARCH-005c | Done | Claude | 2026-05-25 | Extracted settings + token-usage routes to `server/routes/settings.js` (3 endpoints). `app.js` now mounts via `app.use('/api', settingsRoutes)`. Trimmed unused `saveSettings`/`getTokenUsage` imports. |
+| ARCH-005-tests | Done | Claude | 2026-05-25 | Added `server/tests/routes.test.js` with 11 integration tests covering feedback authorship/admin/status rules, admin superadmin gate across 4 routes, admin user-creation validation/duplicate handling, and settings/token-usage happy-path. Uses `Module.prototype.require` patching to inject in-memory fakes for `feedback`, `users`, and `listings` modules — no Mongo required. |
+| ARCH-005d | Done | Claude | 2026-05-25 | Extracted listings CRUD (`GET`/`POST` `/api/listings`, `PUT`/`DELETE` `/api/listings/:id`, `PATCH` `/api/listings/by-ebay-id/:itemId`, `GET /api/listings/debug`) to `server/routes/listings.js`. Debug route remains behind `requireSuperAdmin` + the env-gated `requireDebugEndpointsEnabled` from `server/middleware/requireDebugEndpoints.js`. Updated `server/tests/debug-endpoint-auth.test.js` static-source check so it walks the server tree instead of grepping `app.js`, so the test does not break every time a route migrates. |
+| ARCH-005e | Done | Claude | 2026-05-25 | Extracted `POST /api/images/upload` + `POST /api/images/remove-bg` to `server/routes/images.js`. Router pulls its `imageRateLimit` from the shared `createDefaultRateLimiters()` singleton (see ARCH-shared-limiters below). |
+| ARCH-005f | Done | Claude | 2026-05-25 | Extracted `POST /api/generate` + `POST /api/generate-from-urls` to `server/routes/ai.js`. Uses the shared `aiRateLimit` and the extracted `enforceAiDailyQuota` / `recordTokenUsage` / `AI_GENERATE_QUOTA_RESERVE_TOKENS` from `server/middleware/quota.js`. |
+| ARCH-005g | Done | Claude | 2026-05-25 | Extracted `/api/optimizer/{fetch,comps,ai-optimize}` to `server/routes/optimizer.js`. Uses shared `aiRateLimit` + `compsRateLimit`. |
+| ARCH-shared-limiters | Done | Claude | 2026-05-25 | Memoized the default limiters in `createDefaultRateLimiters()` so every route module that imports it gets the same bucket maps — otherwise splitting `/api/generate` and `/api/optimizer/ai-optimize` across two files would silently double a tenant's effective AI quota. Added `resetSharedRateLimiters()` for test isolation. |
+| ARCH-005-extra-tests | Done | Claude | 2026-05-25 | Added `server/tests/routes-extra.test.js` (16 cases) covering listings CRUD happy-path + PATCH validation/notFound, images upload/remove-bg validation + missing-env paths, AI generate validation (missing/placeholder `GEMINI_API_KEY`), and optimizer fetch/comps/ai-optimize validation. |
+| ARCH-005h-1 | Done | Claude | 2026-05-25 | Extracted eBay connection routes (`GET auth-url`, `GET auth-status`, `GET token-info`, `DELETE tokens`, `GET debug-auth`) to `server/routes/ebay/auth.js`. Debug route remains behind `requireSuperAdmin` + `requireDebugEndpointsEnabled`. |
+| ARCH-005h-2 | Done | Claude | 2026-05-25 | Extracted read-only eBay helpers (`GET policies`, `GET category-conditions`, `GET categories`, `GET settings`) to `server/routes/ebay/readonly.js`. **ARCH-003b progress**: migrated the `GetCategoryFeatures` and `GetSuggestedCategories` callsites from raw `axios.post` to `tradingApiCall` from `services/ebay/client.js` + the existing `buildGetCategoryFeaturesXml` helper. |
+| ARCH-005h-3 | Done | Claude | 2026-05-25 | Extracted `GET /api/ebay/sold-comps` and `GET /api/reprice/suggestions` to `server/routes/ebay/comps.js`. The Client-Credentials application token + its in-memory cache moved to `server/services/ebay/applicationToken.js` so future routes share the same cache (otherwise we'd burn token calls on every router-local invocation). Provides a `__resetApplicationTokenCache()` helper for tests. |
+| ARCH-005h-4 | Done | Claude | 2026-05-25 | Extracted `GET /api/barcode` to `server/routes/barcode.js` and `GET /api/auth/me` to `server/routes/me.js`. |
+| ARCH-005h-5 | Done | Claude | 2026-05-25 | Extracted `POST /api/auth/login` and `GET /api/ebay/callback` to `server/routes/publicAuth.js`, mounted in `app.js` BEFORE the global `authMiddleware` to preserve their public/no-JWT behavior. `app.js` no longer imports `signToken`, `verifyPassword`, `exchangeCodeForToken`, `hasValidSession`, `getTokenExpiry`, `getAuthUrl`, `requireSuperAdmin`, `createRequireDebugEndpointsEnabled`, or `requireDebugEndpointsEnabled`. |
+| ARCH-005h-tests | Done | Claude | 2026-05-25 | Added `server/tests/routes-ebay.test.js` (17 cases) covering: public login (400/401/200 + JWT issuance without prior auth), `GET /api/ebay/callback` (200 with HTML + 400 missing code), `/api/auth/me` (401 + happy path), `auth-url`/`auth-status`/`token-info`/`DELETE tokens`/`debug-auth` authorization, `/api/barcode` validation + auth requirement. Patches `Module.prototype.require` for both `../foo` and `../../foo` to handle the `routes/ebay/` depth. |
+| ARCH-004-prep | Done | Claude | 2026-05-25 | **Characterization-test layer for ARCH-004.** Extracted the AddFixedPriceItem XML builder and its sub-helpers from `pushListingToEbay` (in `server/app.js`) into `server/services/ebay/listingLifecycle.js` as pure functions: `formatValidPrice`, `wrapDescription`, `buildPictureDetailsXml`, `buildShippingPackageDetailsXml`, `buildBestOfferXml`, `buildScheduleTimeXml`, `buildAddFixedPriceItemXml`. Added `server/tests/listing-xml.test.js` with **28 characterization cases** locking in: price defaulting to `50.00`, title truncation at 80 chars, SKU conditional emission, quantity coercion to ≥1, picture/shipping/best-offer/schedule block presence rules, sub-element ordering, WeightMajor/WeightMinor co-emission, and the negative-string sanitize-money quirk (documented). Wired `pushListingToEbay` in `app.js` to use the extracted builders — all 142 server tests still pass, locking the move as a no-behavior-change refactor. `app.js` 1199 → 1131 lines. **The orchestration (image uploads, retry-on-condition-error, response parsing) intentionally stays in `app.js` for ARCH-004 to move next, on top of this now-frozen XML contract.** |
+| ARCH-004 | Done | Claude | 2026-05-25 | Lifted the full `pushListingToEbay` orchestration into `server/services/ebay/listingLifecycle.js`: `parseEbayErrors` (error/warning splitter), `detectImageFormat`, `uploadImagesToEps` (multipart EPS image uploader with injectable transport), `resolveListingConfig` (env/setting/override precedence + missing-policy check), and the full `pushListingToEbay` (pre-flight condition validation, AddFixedPriceItem POST via `tradingApiCall`, retry-on-condition-error with fallback ID selection, success/failure shaping). Also moved `sendEbayPushError`. Dependencies (axios, `getValidAccessToken`, `getSettings`) are injected so the orchestration can be tested without real HTTP. Added `server/tests/listing-lifecycle.test.js` with **16 cases** covering parseEbayErrors severity routing, detectImageFormat URL/data-URI parsing, resolveListingConfig precedence and 400-on-missing-policy, uploadImagesToEps multipart wiring + error surfacing, and pushListingToEbay happy-path + non-condition-failure + condition-retry-with-fallback. |
+| ARCH-005h-6 | Done | Claude | 2026-05-25 | Extracted the eBay write/lifecycle routes (`POST /api/ebay/revise`, `POST /api/ebay/end-listing`, `POST /api/ebay/draft`, `POST /api/ebay/relist`) to `server/routes/ebay/lifecycle.js`. Migrated every `axios.post('https://api.ebay.com/ws/api.dll', ...)` callsite in those routes to `tradingApiCall` from `services/ebay/client.js` (closes ARCH-003b for these endpoints). The router preserves the relist Step-0 GetItem-and-merge logic (SKU/policies/category/condition/package/specifics) and the revise sale-active + condition-invalid retry branches. |
+| ARCH-005h-7 | Done | Claude | 2026-05-25 | Extracted the eBay sync/read routes (`GET /api/ebay/listing-stats`, `GET /api/ebay/sold-items`, `GET /api/ebay/active-listings`, `POST /api/ebay/refresh-listings`, `POST /api/ebay/import-listings`, `POST /api/ebay/refresh-images/:id`) to `server/routes/ebay/sync.js`. Migrated all 7 inline `axios.post(...api.ebay.com/ws/api.dll...)` callsites to `tradingApiCall`. ARCH-003b is now closed — `server/app.js` contains zero direct eBay HTTP calls. |
+| ARCH-005h-8 | Done | Claude | 2026-05-25 | Moved the `bootstrap()` function from `server/app.js` to `server/bootstrap.js`. Rewrote `server/app.js` from scratch as a thin **82-line wiring file**: imports, app + middleware + router mounts + SPA catch-all + the `{ app, bootstrap }` export. **96% reduction from the original 2049-line monolith.** Removed every now-orphan import; `app.js` no longer references axios, ebayAuth functions, listings functions, user functions (other than for re-export), or any inline route definitions. |
+| UI-001 (partial) | Done | Claude | 2026-05-25 | Extended `src/index.css` with the missing tokens + utility classes flagged by P1.4: spacing scale (`--space-1..--space-12`), semantic color tokens (`--danger`, `--warning`, `--info` + light variants), a z-index scale (dropdown / sticky / modal / lightbox / toast), and reusable classes for **list-row, modal-backdrop, modal-card, tabs-strip, tab, filter-bar, empty-state, metric-cell, badge (+ variants), btn-danger**. The foundational classes (`.glass-panel`, `.glass-card`, `.btn-primary`, `.btn-secondary`, `.btn-icon`, `.input-base`) were already in place. **Frontend work to consume these classes (FE-001/2/3) is still pending.** |
 
 ## 1. Executive Direction
 
@@ -104,7 +135,7 @@ Acceptance criteria:
 
 **Files likely touched:** `server/package.json`, `server/index.js`, `server/listings.js`, new `server/middleware/rateLimit.js`
 
-**Implementation status:** `SEC-004` is complete as an in-process limiter v1. `SEC-005` remains open for per-company daily AI token quotas. If ListingStager runs multiple server instances, replace or back this limiter with a shared store such as Redis.
+**Implementation status:** `SEC-004` is complete as an in-process limiter v1. `SEC-005` is complete for per-company daily AI token quotas. If ListingStager runs multiple server instances, replace or back this limiter with a shared store such as Redis.
 
 Tasks:
 
@@ -131,9 +162,11 @@ Acceptance criteria:
 
 **Files likely touched:** root `package.json`, `server/package.json`, `server/tests/**`, extracted service files as needed
 
+**Implementation status:** `QA-001` complete using Node's built-in `node:test` runner. `QA-003` covers the item-specifics XML builder. `QA-002` covers debug-endpoint authorization (unit + integration). `QA-004` covers condition fallback selection (unit + Comics-category integration). Vitest/Supertest can still be added later for broader route-level coverage.
+
 Tasks:
 
-- Add a server test runner. Recommended: Vitest for speed and ESM/CJS flexibility, plus Supertest for route tests.
+- Add a server test runner. Current implementation uses Node's built-in `node:test`; Vitest/Supertest can still be added later for route-level tests.
 - Add scripts:
   - root: `npm run build`, `npm run lint`
   - server: `npm test`
@@ -943,6 +976,7 @@ Use these ticket IDs as implementation anchors. Each ticket should be converted 
 | QA-001 | P0 | QA/Backend | Add server test runner and scripts | none |
 | QA-002 | P0 | QA/Backend | Add debug endpoint authorization tests | QA-001, SEC-002 |
 | QA-003 | P0 | QA/Backend | Add XML builder tests | QA-001 |
+| QA-004 | P0 | QA/eBay | Add condition fallback selection tests | QA-001 |
 | ARCH-001 | P1 | Backend | Create `server/app.js` and slim `index.js` | QA-001 |
 | ARCH-002 | P1 | Backend | Extract middleware modules | ARCH-001 |
 | ARCH-003 | P1 | eBay | Extract eBay XML service | QA-003 |
@@ -1182,13 +1216,23 @@ These should be resolved during Sprint 0/Sprint 1 planning.
 
 ## 13. Recommended Immediate Next Steps
 
-1. Create GitHub issues from the backlog ticket table.
-2. Assign Sprint 0 owners for `SEC-*`, `QA-*`, and `ARCH-001`.
-3. Add test harness before moving eBay code.
-4. Remove/gate debug endpoints before any other feature work.
-5. Decide the styling direction before extracting the large React screens.
-6. Schedule a 60-minute eBay API discovery session for offers, fulfillment labels, and stats availability.
-7. Schedule a 45-minute data modeling session for Listing Intelligence collections and indexes.
+**Phase 0 and Phase 1 (backend) are done.** `server/app.js` is **82 lines** — pure wiring. Every route is in a `routes/*.js` module; every eBay HTTP call goes through `tradingApiCall`; every cross-cutting helper is in `middleware/` or `services/`. Test count grew from 10 → 158, all passing.
+
+**Phase 1 frontend remains.** It was scoped separately for a reason: the three target React files (StagedListings.tsx 1175, ListedProducts.tsx 1171, ListingOptimizer.tsx 1099 — together ~3.5k LOC) each need careful prop/state extraction into ~8-10 subcomponents. That work touches stateful UI logic (push modals, lightboxes, bulk-action toolbars, re-analyze flows, optimize modals), and a careless split can drop callbacks, lose memoization, or break TypeScript types. The plan deliberately separates the backend and frontend halves so they can be done by different developers in parallel without merge conflicts — that separation should now pay off.
+
+### Recommended sequencing for the next session(s):
+
+1. **FE-001 (StagedListings)** — Extract in this order: pure helpers (`computeHealthScore`, formatters) → display subcomponents (`StagedListingCard`, `StagedListingListRow`, `HealthBadge`) → filter/sort UI (`StagedFilters`) → bulk toolbar (`StagedBulkToolbar`) → modals (`PushToEbayModal`, `CompsPanel`). Target: top-level file under 400 lines. Re-export from the old path to keep imports stable across the codebase.
+2. **FE-004** — At the same time, extract the search/sort/perPage/currentPage state into `useListFilterSort<T>` (or similar) and have `StagedListings` consume it. Then have `ListedProducts` adopt it during FE-002.
+3. **FE-002 (ListedProducts)** — Same pattern. The optimize modal and delist-relist modal are the trickiest pieces; extract them last.
+4. **FE-003 (ListingOptimizer)** — Filters → queue → result modal → impact panel.
+5. **UI-001 follow-through** — As each subcomponent is extracted, replace inline style objects with the classes added in this turn (`.list-row`, `.modal-backdrop`, `.modal-card`, `.tabs-strip`, `.filter-bar`, `.empty-state`, `.metric-cell`, `.badge`, `.btn-danger`). Don't bundle this with the structural extraction — do it as a follow-on PR per component so each diff stays reviewable.
+
+### Out of Phase 1 (already planned):
+
+6. Phase 2 reliability/UX (sold-sync pagination, eBay error translator, accessibility, exports) — see Section 4.
+7. Schedule the 60-minute eBay API discovery session (OFFER-001, FULFILL-001).
+8. Schedule the 45-minute Listing Intelligence data-modeling session (INTEL-001).
 
 ## 14. Definition of Done
 

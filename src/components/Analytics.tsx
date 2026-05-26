@@ -15,6 +15,21 @@ interface TokenStats {
   completionTokens: number;
   totalTokens: number;
   callCount: number;
+  daily?: {
+    day: string;
+    limit: number;
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    callCount: number;
+    remainingTokens: number;
+    resetAt: string;
+  };
+  quota?: {
+    dailyTokenLimit: number;
+    remainingTokens: number;
+    resetAt: string;
+  };
 }
 
 function parsePrice(val: string | undefined): number {
@@ -138,6 +153,9 @@ export default function Analytics({ staged, listed, appPassword }: AnalyticsProp
   const estimatedCost = tokenStats
     ? (tokenStats.promptTokens / 1_000_000) * 0.075 + (tokenStats.completionTokens / 1_000_000) * 0.30
     : 0;
+  const dailyQuotaPct = tokenStats?.daily && tokenStats.daily.limit > 0
+    ? Math.min(100, (tokenStats.daily.totalTokens / tokenStats.daily.limit) * 100)
+    : null;
 
   const handleExportData = () => {
     const data = { exportedAt: new Date().toISOString(), staged, listed };
@@ -188,6 +206,15 @@ export default function Analytics({ staged, listed, appPassword }: AnalyticsProp
         )}
         {tokenStats && tokenStats.callCount > 0 && (
           <StatCard icon={<Zap size={18} />} label="AI Token Usage" value={tokenStats.totalTokens.toLocaleString()} sub={`${tokenStats.callCount} calls · ~$${estimatedCost.toFixed(4)} est. cost`} color="#a855f7" />
+        )}
+        {tokenStats?.daily && (
+          <StatCard
+            icon={<Zap size={18} />}
+            label="AI Daily Quota"
+            value={`${tokenStats.daily.remainingTokens.toLocaleString()} left`}
+            sub={`${tokenStats.daily.totalTokens.toLocaleString()} / ${tokenStats.daily.limit.toLocaleString()} today`}
+            color={tokenStats.daily.remainingTokens < 5000 ? '#f59e0b' : '#a855f7'}
+          />
         )}
       </div>
 
@@ -354,14 +381,27 @@ export default function Analytics({ staged, listed, appPassword }: AnalyticsProp
         {/* Token usage detail */}
         {tokenStats && tokenStats.callCount > 0 && (
           <div className="glass-panel" style={{ padding: '1.5rem' }}>
-            <h3 style={{ marginBottom: '1rem', fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '6px' }}><Zap size={16} /> AI Token Usage (this session)</h3>
+            <h3 style={{ marginBottom: '1rem', fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '6px' }}><Zap size={16} /> AI Token Usage</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.85rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-secondary)' }}>Generations</span><strong>{tokenStats.callCount}</strong></div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-secondary)' }}>Input tokens</span><strong>{tokenStats.promptTokens.toLocaleString()}</strong></div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-secondary)' }}>Output tokens</span><strong>{tokenStats.completionTokens.toLocaleString()}</strong></div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-secondary)' }}>Total tokens</span><strong>{tokenStats.totalTokens.toLocaleString()}</strong></div>
+              {tokenStats.daily && (
+                <>
+                  <div style={{ height: '1px', background: 'var(--border-color)', margin: '4px 0' }} />
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-secondary)' }}>Today</span><strong>{tokenStats.daily.totalTokens.toLocaleString()} tokens</strong></div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-secondary)' }}>Daily quota</span><strong>{tokenStats.daily.limit.toLocaleString()}</strong></div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-secondary)' }}>Remaining today</span><strong style={{ color: tokenStats.daily.remainingTokens < 5000 ? '#f59e0b' : '#a855f7' }}>{tokenStats.daily.remainingTokens.toLocaleString()}</strong></div>
+                  {dailyQuotaPct !== null && (
+                    <div style={{ height: '6px', background: 'rgba(255,255,255,0.08)', borderRadius: '999px', overflow: 'hidden' }}>
+                      <div style={{ width: `${dailyQuotaPct}%`, height: '100%', background: dailyQuotaPct > 90 ? '#ef4444' : dailyQuotaPct > 75 ? '#f59e0b' : '#a855f7' }} />
+                    </div>
+                  )}
+                </>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '6px', borderTop: '1px solid var(--border-color)' }}><span style={{ color: 'var(--text-secondary)' }}>Est. cost (Flash rates)</span><strong style={{ color: '#a855f7' }}>${estimatedCost.toFixed(4)}</strong></div>
-              <p style={{ margin: '4px 0 0 0', fontSize: '0.72rem', color: 'var(--text-secondary)', opacity: 0.6 }}>Resets on server restart. Based on Gemini 1.5 Flash pricing.</p>
+              <p style={{ margin: '4px 0 0 0', fontSize: '0.72rem', color: 'var(--text-secondary)', opacity: 0.6 }}>Daily quota resets at UTC midnight. Cost is estimated from configured Gemini token counts.</p>
             </div>
           </div>
         )}
