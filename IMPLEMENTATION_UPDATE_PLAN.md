@@ -8,7 +8,7 @@
 ## 0. Implementation Tracker
 
 **Last updated:** 2026-05-25  
-**Current implementation phase:** Phase 2 complete. All P2 tickets (REL-001/002/003, UX-001/002/003, DATA-001/002/003, AI-001/002) shipped. Phase 1 frontend (FE-001/2/3/004) still deferred to a dedicated React-focused session.
+**Current implementation phase:** Phase 1 frontend in progress. Vitest harness landed + FE-004 (shared `useListFilterSort` hook) + FE-001a (extracted pure helpers + HealthBadge) + FE-001b (StagedListings now consumes the hook). FE-001c/d (card/row/modal extraction) and FE-002/003 still pending.
 
 Use this section as the team coordination source while implementation is active. Move completed work here immediately after merge-ready implementation so other developers do not duplicate the same task.
 
@@ -60,6 +60,10 @@ Use this section as the team coordination source while implementation is active.
 | DATA-003 | Done | Claude | 2026-05-25 | Added a "12-Week Trend" panel to Analytics. Buckets sold items into weeks ending Sunday for 12 weeks, then renders revenue bars + week labels + an avg-sale-price sparkline + a sold-count heat strip. Each cell carries a hover tooltip with full numbers. |
 | UX-002 | Done | Claude | 2026-05-25 | The existing Lightbox already had full keyboard support (Escape/ArrowLeft/ArrowRight). Added a reusable `useEscapeKey(handler, enabled)` hook in `src/hooks/useEscapeKey.ts` and wired it into `EditListingModal` (disabled while save/push in flight to match the Cancel button's gating) and `ImportModal` (disabled during step 3, matching the existing no-backdrop-close behavior). The ConfirmDialog from UX-001 already handles Escape/Enter. Future modals can adopt this hook with one line. |
 | UX-003 | Done | Claude | 2026-05-25 | Refactored HelpPage to a data-driven section list with a search input at the top. Each section carries a `keywords` array (e.g. "token", "fees", "optimizer", "p&l by tag"); the filter matches title + keywords case-insensitively. Shows the visible count and a no-results message with the query echoed back. Search input has `aria-label`; X-clear button is keyboard accessible. |
+| Vitest harness | Done | Claude | 2026-05-25 | Added Vitest + happy-dom + @testing-library/react + jest-dom matchers as devDependencies, plus `vitest.config.ts`, `vitest.setup.ts` (jest-dom matchers + cleanup), and new scripts (`test`, `test:watch`, `test:server`, `test:all`). Added `vitest/globals` + `@testing-library/jest-dom` to the tsconfig types so `expect(...).toBeInTheDocument()` etc. type-check. First 34 frontend tests passing alongside the existing 188 server tests. |
+| FE-004 | Done | Claude | 2026-05-25 | Added `src/hooks/useListFilterSort.ts` — generic search + sort + paginate hook that returns `{ query, setQuery, perPage, setPerPage, currentPage, setCurrentPage, visible, paginated, totalPages, totalCount, filteredCount }`. Setters use `Dispatch<SetStateAction<T>>` so existing functional-update call sites (`setCurrentPage(p => p - 1)`) keep working. `setQuery` always resets `currentPage` to 1 in the same render to avoid effect-ordering races. 6 tests in `src/hooks/useListFilterSort.test.ts` cover defaults, filter, sort, pagination, clamp-on-shrink, and the query reset. |
+| FE-001a | Done | Claude | 2026-05-25 | Extracted pure helpers from `StagedListings.tsx` into `src/components/staged/helpers.ts`: `computeHealthScore`, `autoConditionId`, `timeAgo` (now takes injectable `now` for tests), `toArizonaLocalISO`, `EBAY_CONDITIONS`, `SortOption`, `compareStaged`, `matchesStagedQuery`. Added `src/components/staged/HealthBadge.tsx` (small, pure, with role/tabIndex/Enter+Space keyboard support — UX-002 compliant). 19 tests in `helpers.test.ts` + 6 in `HealthBadge.test.tsx`. |
+| FE-001b | Done | Claude | 2026-05-25 | `StagedListings.tsx` now consumes `useListFilterSort` + `compareStaged` + `matchesStagedQuery` + `autoConditionId` + `timeAgo` + `toArizonaLocalISO` + `EBAY_CONDITIONS` instead of duplicating them inline. Net change: ~80 lines of inline state/logic deleted; behavior identical (frontend build clean, all tests pass). The local feature-rich `HealthBadge` (with portal popover) stays in place until FE-001c lifts the popover into a dedicated subcomponent — `staged/HealthBadge.tsx` is the lighter version that future FE-001 splits and FE-002/003 will reuse. |
 
 ## 1. Executive Direction
 
@@ -1226,14 +1230,17 @@ These should be resolved during Sprint 0/Sprint 1 planning.
 
 ## 13. Recommended Immediate Next Steps
 
-**Phase 0 ✓, Phase 1 backend ✓, Phase 2 complete.** Server test count: 158 → **188 passing**. Every P2 ticket landed with paired tracker rows above.
+**Phase 0 ✓, Phase 1 backend ✓, Phase 2 ✓, Phase 1 frontend in progress.** Server tests: 188 passing. Frontend tests: 34 passing (Vitest + happy-dom + testing-library). FE-004 ✓, FE-001a/b ✓.
 
-**Remaining Phase 1 frontend** (still deferred to a dedicated React-focused session per the rationale in earlier turns):
+**Remaining Phase 1 frontend** — pick up in this order:
 
-- **FE-001 / FE-002 / FE-003** — split StagedListings (1175 LOC), ListedProducts (1171), ListingOptimizer (1099) into per-screen subcomponent trees.
-- **FE-004** — extract a shared `useListFilterSort` hook as those splits happen.
-- **UI-001 follow-through** — adopt the new `.list-row` / `.modal-backdrop` / `.modal-card` / `.tabs-strip` / `.filter-bar` / `.empty-state` / `.metric-cell` / `.badge` / `.btn-danger` classes inside the split components (one PR per component to keep diffs reviewable).
-- **Frontend test harness** — DATA-001's CSV helpers and UX-002's `useEscapeKey` are testable but no frontend test runner is configured yet. Add Vitest before FE-001 lands so subcomponents can ship with tests.
+- **FE-001c** — extract the inline `HealthBadge` popover from `StagedListings.tsx` into a dedicated `staged/HealthIssuesPopover.tsx` so the lighter `staged/HealthBadge.tsx` becomes the canonical one. Lift the `expandedHealthId` state into a small custom hook.
+- **FE-001d** — extract the staged-listing render functions (the grid card and the list row) into `staged/StagedListingCard.tsx` and `staged/StagedListingListRow.tsx`. Each takes the listing plus the action callbacks as props.
+- **FE-001e** — extract the search/sort toolbar + bulk-action bar into `staged/StagedFilters.tsx` and `staged/StagedBulkToolbar.tsx`.
+- **FE-001f** — extract the Push-to-eBay modal into `staged/PushToEbayModal.tsx`.
+- **FE-002** — repeat the pattern on `ListedProducts.tsx`. Reuse `useListFilterSort` and the lighter `staged/HealthBadge.tsx`.
+- **FE-003** — same for `ListingOptimizer.tsx`. Smaller scope; can wait until INTEL-004 demands it.
+- **UI-001 follow-through** — adopt `.list-row` / `.modal-backdrop` / `.modal-card` / `.tabs-strip` / `.filter-bar` / `.empty-state` / `.metric-cell` / `.badge` / `.btn-danger` as each subcomponent ships. Do it per-PR, not bundled with structural extraction.
 
 **Next phases:**
 

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Trash2, Edit2, Copy, Check, Calendar, LayoutGrid, List, Wand2, TrendingUp, X, RefreshCw, ImagePlus, GripVertical, UploadCloud, Search, ChevronDown, ShieldCheck, ShieldAlert, ShieldX, Share2, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import type { StagedListing, EbayPolicy } from '../types';
@@ -7,6 +7,20 @@ import ImageSearchButton from './ImageSearchButton';
 import Lightbox from './Lightbox';
 import { useToast } from '../context/ToastContext';
 import CrossPostModal from './CrossPostModal';
+import { useListFilterSort } from '../hooks/useListFilterSort';
+// staged/HealthBadge holds the simple badge used by future FE-001 splits; the
+// local HealthBadge below carries the inline issues popover and is kept in
+// place until FE-001c lifts the popover into a dedicated subcomponent.
+import {
+  computeHealthScore,
+  autoConditionId,
+  timeAgo,
+  toArizonaLocalISO,
+  EBAY_CONDITIONS,
+  compareStaged,
+  matchesStagedQuery,
+  type SortOption,
+} from './staged/helpers';
 
 interface StagedListingsProps {
   listings: StagedListing[];
@@ -19,89 +33,9 @@ interface StagedListingsProps {
 }
 
 type ViewMode = 'grid' | 'list';
-type SortOption = 'date-desc' | 'date-asc' | 'price-asc' | 'price-desc' | 'title-asc' | 'health-asc';
 
-interface HealthScore { score: number; issues: string[]; }
-
-function computeHealthScore(listing: StagedListing): HealthScore {
-  const issues: string[] = [];
-  let score = 0;
-
-  const titleLen = listing.title?.length || 0;
-  if (titleLen >= 70) score += 20;
-  else if (titleLen >= 50) { score += 10; issues.push(`Title short: ${titleLen}/80 chars`); }
-  else { issues.push(`Title very short: ${titleLen}/80 chars`); }
-
-  const imgCount = (listing.images || []).length;
-  if (imgCount >= 3) score += 20;
-  else if (imgCount >= 1) { score += 10; issues.push(`Only ${imgCount} image — add 3+ for best visibility`); }
-  else { issues.push('No images attached'); }
-
-  const hasCloudImages = (listing.images || []).some(img => img.startsWith('http'));
-  if (hasCloudImages) score += 10;
-  else if (imgCount > 0) issues.push('Images not uploaded to cloud — push may fail');
-
-  const descLen = listing.description?.length || 0;
-  if (descLen > 300) score += 15;
-  else if (descLen > 80) { score += 8; issues.push('Description is short'); }
-  else { issues.push('Description missing or very short'); }
-
-  const cat = listing.category || '';
-  if (cat && cat !== 'Unknown') score += 15;
-  else issues.push('Category not set');
-
-  const price = parseFloat((listing.priceRecommendation || '').replace(/[^0-9.]/g, ''));
-  if (price > 0) score += 10;
-  else issues.push('Price not set');
-
-  const specificsCount = Object.keys(listing.itemSpecifics || {}).length;
-  if (specificsCount >= 5) score += 10;
-  else if (specificsCount >= 2) { score += 5; issues.push(`Only ${specificsCount} item specifics`); }
-  else { issues.push('Item specifics missing'); }
-
-  return { score, issues };
-}
-
-// Format a Date as "YYYY-MM-DDTHH:mm" in Arizona time (UTC-7, no DST)
-const toArizonaLocalISO = (date: Date): string => {
-  const az = new Date(date.getTime() - 7 * 60 * 60 * 1000);
-  return az.toISOString().slice(0, 16);
-};
-
-const EBAY_CONDITIONS = [
-  { id: '1000', label: 'New' },
-  { id: '1500', label: 'New Other (open box)' },
-  { id: '2000', label: 'Certified Refurbished' },
-  { id: '2500', label: 'Seller Refurbished' },
-  { id: '3000', label: 'Used' },
-  { id: '4000', label: 'Very Good' },
-  { id: '5000', label: 'Good' },
-  { id: '6000', label: 'Acceptable' },
-  { id: '7000', label: 'For Parts / Not Working' },
-];
-
-function autoConditionId(conditionStr: string): string {
-  const s = (conditionStr || '').toLowerCase();
-  if (s.includes('for parts') || s.includes('not working')) return '7000';
-  if (s.includes('acceptable') || s.includes('heavy wear')) return '6000';
-  if (s.includes('good') && !s.includes('very good') && !s.includes('like new')) return '5000';
-  if (s.includes('very good')) return '4000';
-  if (s.includes('like new') || s.includes('mint') || s.includes('open box')) return '2500';
-  if (s.includes('refurbished') || s.includes('refurb')) return '2500';
-  if (s.includes('new other')) return '1500';
-  if (s.includes('new') && !s.includes('like')) return '1000';
-  return '3000';
-}
-
-function timeAgo(ts: number): string {
-  const diff = Date.now() - ts;
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
+// computeHealthScore, autoConditionId, timeAgo, toArizonaLocalISO,
+// EBAY_CONDITIONS, SortOption — extracted to ./staged/helpers (FE-001a).
 
 function ImageEditModal({ listing, appPassword, onSave, onClose }: {
   listing: StagedListing;
@@ -287,7 +221,6 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [pushingId, setPushingId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
-  const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<SortOption>('date-desc');
   const [pushModal, setPushModal] = useState<PushModal | null>(null);
   const [pushExtraSpecifics, setPushExtraSpecifics] = useState<{ name: string; value: string }[]>([]);
@@ -297,9 +230,25 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkPushingIds, setBulkPushingIds] = useState<Set<string>>(new Set());
-  // Pagination
-  const [perPage, setPerPage] = useState<number>(20);
-  const [currentPage, setCurrentPage] = useState(1);
+
+  // FE-004 — search / sort / pagination owned by the shared hook so the
+  // staged + listed + sold tabs converge on one contract.
+  const sortComparator = useMemo(() => (a: StagedListing, b: StagedListing) => compareStaged(a, b, sortBy), [sortBy]);
+  const list = useListFilterSort<StagedListing>({
+    items: listings,
+    filter: matchesStagedQuery,
+    sort: sortComparator,
+    perPage: 20,
+  });
+  const search = list.query;
+  const setSearch = list.setQuery;
+  const perPage = list.perPage;
+  const setPerPage = list.setPerPage;
+  const currentPage = list.currentPage;
+  const setCurrentPage = list.setCurrentPage;
+  const visibleListings = list.visible;
+  const paginatedListings = list.paginated;
+  const totalPages = list.totalPages;
 
   // Lightbox
   const [lightboxImages, setLightboxImages] = useState<string[] | null>(null);
@@ -318,26 +267,6 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
   // Image editing
   const [imageEditId, setImageEditId] = useState<string | null>(null);
   const [crossPostListing, setCrossPostListing] = useState<StagedListing | null>(null);
-
-  const visibleListings = (() => {
-    const q = search.toLowerCase();
-    let result = listings;
-    if (q) result = result.filter(l => {
-      if (l.title.toLowerCase().includes(q)) return true;
-      if ((l.sku || '').toLowerCase().includes(q)) return true;
-      if ((l.category || '').toLowerCase().includes(q)) return true;
-      return false;
-    });
-    return result.slice().sort((a, b) => {
-      if (sortBy === 'date-asc') return a.createdAt - b.createdAt;
-      if (sortBy === 'date-desc') return b.createdAt - a.createdAt;
-      if (sortBy === 'price-asc') return parseFloat(a.priceRecommendation || '0') - parseFloat(b.priceRecommendation || '0');
-      if (sortBy === 'price-desc') return parseFloat(b.priceRecommendation || '0') - parseFloat(a.priceRecommendation || '0');
-      if (sortBy === 'title-asc') return a.title.localeCompare(b.title);
-      if (sortBy === 'health-asc') return computeHealthScore(a).score - computeHealthScore(b).score;
-      return 0;
-    });
-  })();
 
   if (listings.length === 0) {
     return (
@@ -503,9 +432,11 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
     });
   };
 
-  useEffect(() => { setCurrentPage(1); }, [search, sortBy]);
-  const totalPages = perPage === 0 ? 1 : Math.ceil(visibleListings.length / perPage);
-  const paginatedListings = perPage === 0 ? visibleListings : visibleListings.slice((currentPage - 1) * perPage, currentPage * perPage);
+  // Pagination clamping + reset-on-query are owned by useListFilterSort.
+  // We still need to reset to page 1 when the sort changes, since the hook
+  // intentionally only resets on query changes (sort doesn't change
+  // result-set composition, just order).
+  useEffect(() => { setCurrentPage(1); }, [sortBy, setCurrentPage]);
 
   const selectAll = () => setSelectedIds(new Set(visibleListings.map(l => l.id)));
   const clearSelection = () => setSelectedIds(new Set());
