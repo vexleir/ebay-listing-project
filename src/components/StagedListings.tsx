@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Wand2, X, RefreshCw, ImagePlus, GripVertical, UploadCloud, ShieldCheck, ShieldAlert, ShieldX, AlertTriangle } from 'lucide-react';
-import type { StagedListing, EbayPolicy } from '../types';
+import type { StagedListing } from '../types';
 import ResultsEditor from './ResultsEditor';
 import Lightbox from './Lightbox';
 import { useToast } from '../context/ToastContext';
@@ -17,11 +17,11 @@ import CompsPanel from './staged/CompsPanel';
 import StagedListingActions from './staged/StagedListingActions';
 import StagedListingCard from './staged/StagedListingCard';
 import StagedListingListRow from './staged/StagedListingListRow';
+import PushToEbayModal, { type PushModalState } from './staged/PushToEbayModal';
 import {
   computeHealthScore,
   autoConditionId,
   toArizonaLocalISO,
-  EBAY_CONDITIONS,
   compareStaged,
   matchesStagedQuery,
   type SortOption,
@@ -206,19 +206,9 @@ function ImageEditModal({ listing, appPassword, onSave, onClose }: {
   );
 }
 
-interface PushModal {
-  listing: StagedListing;
-  conditionId: string;
-  validConditions: { id: string; label: string }[];
-  scheduleDate: string; // datetime-local string, empty = list immediately
-  fulfillmentPolicyId: string;
-  categoryId: string;
-  fulfillmentPolicies: EbayPolicy[];
-  loading: boolean;
-  acceptOffers: boolean;
-  autoAcceptPrice: string;
-  minOfferPrice: string;
-}
+// PushModal state shape lives in staged/PushToEbayModal.tsx — re-alias here
+// so the parent's local `pushModal` typing matches what the modal expects.
+type PushModal = PushModalState;
 
 export default function StagedListingsView({ listings, onUpdate, onDelete, onBulkDelete, onMoveToListed, isEbayConnected, appPassword = '' }: StagedListingsProps) {
   const { toast } = useToast();
@@ -611,186 +601,15 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
       )}
 
       {/* Push confirmation modal */}
-      {pushModal && createPortal(
-        <div onClick={() => setPushModal(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
-          <div className="glass-panel" onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '520px', padding: '2rem', maxHeight: '90vh', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
-              <h3 style={{ margin: 0, fontSize: '1.1rem' }}>Confirm Push to eBay</h3>
-              <button onClick={() => setPushModal(null)} className="btn-icon"><X size={18} /></button>
-            </div>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1.25rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {pushModal.listing.title}
-            </p>
-            {pushModal.loading ? (
-              <div style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-                <RefreshCw size={18} style={{ animation: 'spin 1s linear infinite', marginRight: '8px', verticalAlign: 'middle' }} />Loading policies & category...
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>eBay Condition</label>
-                  <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0 0 6px 0' }}>AI assessed: "{pushModal.listing.condition?.substring(0, 80)}"</p>
-                  <select className="input-base" value={pushModal.conditionId} onChange={e => setPushModal(prev => prev ? { ...prev, conditionId: e.target.value } : null)}>
-                    {(pushModal.validConditions.length > 0 ? pushModal.validConditions : EBAY_CONDITIONS)
-                      .map(c => <option key={c.id} value={c.id}>{c.id} — {c.label}</option>)}
-                  </select>
-                  {pushModal.validConditions.length > 0 && pushModal.validConditions.length < EBAY_CONDITIONS.length && (
-                    <p style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', margin: '4px 0 0 0' }}>
-                      Showing {pushModal.validConditions.length} condition{pushModal.validConditions.length !== 1 ? 's' : ''} valid for this category
-                    </p>
-                  )}
-                </div>
-                {pushModal.fulfillmentPolicies.length > 0 && (
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>Shipping Policy</label>
-                    <select className="input-base" value={pushModal.fulfillmentPolicyId} onChange={e => setPushModal(prev => prev ? { ...prev, fulfillmentPolicyId: e.target.value } : null)}>
-                      <option value="">— Use server default —</option>
-                      {pushModal.fulfillmentPolicies.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
-                  </div>
-                )}
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>eBay Category ID</label>
-                  <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0 0 6px 0' }}>AI category: "{pushModal.listing.category}"</p>
-                  <input className="input-base" value={pushModal.categoryId} onChange={e => setPushModal(prev => prev ? { ...prev, categoryId: e.target.value } : null)} placeholder="Leave blank to use server default" />
-                </div>
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                    <label style={{ fontSize: '0.85rem', fontWeight: 500 }}>Schedule Listing</label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-                      <input
-                        type="checkbox"
-                        checked={!!pushModal.scheduleDate}
-                        onChange={e => {
-                          if (e.target.checked) {
-                            const d = new Date(Date.now() + 21 * 24 * 60 * 60 * 1000);
-                            setPushModal(prev => prev ? { ...prev, scheduleDate: toArizonaLocalISO(d) } : null);
-                          } else {
-                            setPushModal(prev => prev ? { ...prev, scheduleDate: '' } : null);
-                          }
-                        }}
-                        style={{ accentColor: 'var(--accent-color)', width: '14px', height: '14px' }}
-                      />
-                      Schedule for later
-                    </label>
-                  </div>
-                  {pushModal.scheduleDate ? (
-                    <>
-                      <input
-                        type="datetime-local"
-                        className="input-base"
-                        value={pushModal.scheduleDate}
-                        min={toArizonaLocalISO(new Date(Date.now() + 5 * 60 * 1000))}
-                        max={toArizonaLocalISO(new Date(Date.now() + 21 * 24 * 60 * 60 * 1000))}
-                        onChange={e => setPushModal(prev => prev ? { ...prev, scheduleDate: e.target.value } : null)}
-                      />
-                      <p style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', margin: '4px 0 0 0' }}>
-                        eBay will make this listing live at the selected time (max 21 days out)
-                      </p>
-                    </>
-                  ) : (
-                    <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>Listing will go live immediately when pushed</p>
-                  )}
-                </div>
-                {/* Best Offer */}
-                <div>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>
-                    <input
-                      type="checkbox"
-                      checked={pushModal.acceptOffers}
-                      onChange={e => setPushModal(prev => prev ? { ...prev, acceptOffers: e.target.checked } : null)}
-                      style={{ accentColor: 'var(--accent-color)', width: '14px', height: '14px' }}
-                    />
-                    Accept Best Offers
-                  </label>
-                  {pushModal.acceptOffers && (
-                    <>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                        <div>
-                          <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>Auto-accept at ($)</label>
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            inputMode="decimal"
-                            className="input-base"
-                            value={pushModal.autoAcceptPrice}
-                            onChange={e => setPushModal(prev => prev ? { ...prev, autoAcceptPrice: e.target.value } : null)}
-                            placeholder="(off)"
-                            style={{ fontSize: '0.85rem', padding: '6px 10px' }}
-                          />
-                        </div>
-                        <div>
-                          <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>Auto-decline below ($)</label>
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            inputMode="decimal"
-                            className="input-base"
-                            value={pushModal.minOfferPrice}
-                            onChange={e => setPushModal(prev => prev ? { ...prev, minOfferPrice: e.target.value } : null)}
-                            placeholder="(off)"
-                            style={{ fontSize: '0.85rem', padding: '6px 10px' }}
-                          />
-                        </div>
-                      </div>
-                      <p style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', margin: '4px 0 0 0' }}>
-                        Leave blank to review every offer manually. eBay only auto-accepts/declines when a value is set.
-                      </p>
-                    </>
-                  )}
-                </div>
-                {/* Item Specifics quick-fix */}
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                    <label style={{ fontSize: '0.85rem', fontWeight: 500 }}>
-                      Item Specifics
-                      <span style={{ fontSize: '0.75rem', fontWeight: 400, color: 'var(--text-secondary)', marginLeft: '6px' }}>
-                        ({Object.keys(pushModal.listing.itemSpecifics || {}).length} set)
-                      </span>
-                    </label>
-                    <button
-                      className="btn-icon"
-                      style={{ fontSize: '0.72rem', padding: '2px 8px' }}
-                      onClick={() => setPushExtraSpecifics(prev => [...prev, { name: '', value: '' }])}
-                    >+ Add field</button>
-                  </div>
-                  {!Object.keys(pushModal.listing.itemSpecifics || {}).some(k => k.toLowerCase() === 'type') &&
-                   !pushExtraSpecifics.some(s => s.name.toLowerCase() === 'type') && (
-                    <div style={{ fontSize: '0.78rem', color: '#f59e0b', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
-                      <AlertTriangle size={12} /> "Type" is required for most eBay categories — fill it in below
-                    </div>
-                  )}
-                  {pushExtraSpecifics.map((s, i) => (
-                    <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '6px', marginBottom: '6px' }}>
-                      <input
-                        className="input-base"
-                        value={s.name}
-                        onChange={e => setPushExtraSpecifics(prev => prev.map((r, idx) => idx === i ? { ...r, name: e.target.value } : r))}
-                        placeholder="Name (e.g. Type)"
-                        style={{ fontSize: '0.8rem', padding: '6px 10px' }}
-                      />
-                      <input
-                        className="input-base"
-                        value={s.value}
-                        onChange={e => setPushExtraSpecifics(prev => prev.map((r, idx) => idx === i ? { ...r, value: e.target.value } : r))}
-                        placeholder="Value (e.g. T-Shirt)"
-                        style={{ fontSize: '0.8rem', padding: '6px 10px' }}
-                      />
-                      <button className="btn-icon" style={{ color: '#ef4444', padding: '4px 8px' }} onClick={() => setPushExtraSpecifics(prev => prev.filter((_, idx) => idx !== i))}>✕</button>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '0.5rem' }}>
-                  <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setPushModal(null)}>Cancel</button>
-                  <button className="btn-primary" style={{ flex: 2 }} onClick={confirmPushToEbay}>Push to eBay</button>
-                </div>
-              </div>
-            )}
-          </div>
-          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-        </div>, document.body
+      {pushModal && (
+        <PushToEbayModal
+          state={pushModal}
+          onChange={(patch) => setPushModal((prev) => prev ? { ...prev, ...patch } : null)}
+          extraSpecifics={pushExtraSpecifics}
+          onExtraSpecificsChange={setPushExtraSpecifics}
+          onClose={() => setPushModal(null)}
+          onConfirm={confirmPushToEbay}
+        />
       )}
 
       {/* Lightbox — portalled to avoid transform ancestor issues */}
