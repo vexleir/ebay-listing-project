@@ -7,8 +7,8 @@
 
 ## 0. Implementation Tracker
 
-**Last updated:** 2026-05-25  
-**Current implementation phase:** Phase 1 frontend in progress. Vitest harness landed + FE-004 (shared `useListFilterSort` hook) + FE-001a (extracted pure helpers + HealthBadge) + FE-001b (StagedListings now consumes the hook). FE-001c/d (card/row/modal extraction) and FE-002/003 still pending.
+**Last updated:** 2026-05-27  
+**Current implementation phase:** Phase 1 frontend in progress. Vitest + FE-004 + FE-001a/b/c/d/e landed. Push-to-eBay modal extraction (FE-001f) is the last piece of FE-001; FE-002/003 not yet started.
 
 Use this section as the team coordination source while implementation is active. Move completed work here immediately after merge-ready implementation so other developers do not duplicate the same task.
 
@@ -64,6 +64,9 @@ Use this section as the team coordination source while implementation is active.
 | FE-004 | Done | Claude | 2026-05-25 | Added `src/hooks/useListFilterSort.ts` — generic search + sort + paginate hook that returns `{ query, setQuery, perPage, setPerPage, currentPage, setCurrentPage, visible, paginated, totalPages, totalCount, filteredCount }`. Setters use `Dispatch<SetStateAction<T>>` so existing functional-update call sites (`setCurrentPage(p => p - 1)`) keep working. `setQuery` always resets `currentPage` to 1 in the same render to avoid effect-ordering races. 6 tests in `src/hooks/useListFilterSort.test.ts` cover defaults, filter, sort, pagination, clamp-on-shrink, and the query reset. |
 | FE-001a | Done | Claude | 2026-05-25 | Extracted pure helpers from `StagedListings.tsx` into `src/components/staged/helpers.ts`: `computeHealthScore`, `autoConditionId`, `timeAgo` (now takes injectable `now` for tests), `toArizonaLocalISO`, `EBAY_CONDITIONS`, `SortOption`, `compareStaged`, `matchesStagedQuery`. Added `src/components/staged/HealthBadge.tsx` (small, pure, with role/tabIndex/Enter+Space keyboard support — UX-002 compliant). 19 tests in `helpers.test.ts` + 6 in `HealthBadge.test.tsx`. |
 | FE-001b | Done | Claude | 2026-05-25 | `StagedListings.tsx` now consumes `useListFilterSort` + `compareStaged` + `matchesStagedQuery` + `autoConditionId` + `timeAgo` + `toArizonaLocalISO` + `EBAY_CONDITIONS` instead of duplicating them inline. Net change: ~80 lines of inline state/logic deleted; behavior identical (frontend build clean, all tests pass). The local feature-rich `HealthBadge` (with portal popover) stays in place until FE-001c lifts the popover into a dedicated subcomponent — `staged/HealthBadge.tsx` is the lighter version that future FE-001 splits and FE-002/003 will reuse. |
+| FE-001c | Done | Claude | 2026-05-27 | Extracted the portal popover from the local `HealthBadge` into `src/components/staged/HealthIssuesPopover.tsx` (handles Escape dismiss, backdrop click, `role=dialog` + `aria-label`). The local HealthBadge keeps its bespoke trigger styling but composes the new popover; added `aria-expanded` + `aria-label` on the trigger button (UX-002 polish). 6 tests in `HealthIssuesPopover.test.tsx` covering empty-issues no-render, backdrop dismiss vs panel click, Escape dismiss, singular/plural copy. |
+| FE-001e | Done | Claude | 2026-05-27 | Extracted the search/sort toolbar and the bulk-action+view-mode toolbar into `src/components/staged/StagedFilters.tsx` and `src/components/staged/StagedBulkToolbar.tsx`. Both are stateless — parent owns the values + setters. New components carry `aria-label` / `aria-pressed` for keyboard + screen-reader users (UX-002 continuation). 4 tests in `StagedFilters.test.tsx` + 9 tests in `StagedBulkToolbar.test.tsx` covering search/sort change events, search-count copy, select-all → bulk actions toggle, disconnected-eBay Push gating, bulkPushing disabled state, view-mode toggle wiring. `StagedListings.tsx` is now ~50 lines smaller and free of `LayoutGrid`/`List`/`Search`/`ChevronDown` imports. |
+| FE-001d | Done | Claude | 2026-05-27 | Extracted the per-listing render functions and the dependencies they pulled in: `staged/CompsPanel.tsx` (active-eBay-prices subtree, `aria-label` on close), `staged/StagedListingActions.tsx` (full action button row with `healthBadge` accepted as a ReactNode prop so parent can keep the bespoke trigger styling), `staged/StagedListingCard.tsx` (grid card — checkbox is `role=checkbox` + Space/Enter keyboard, image overlays, sellerNotes pill, slots for `actions` + `compsPanel`), `staged/StagedListingListRow.tsx` (list row — same composition + thumbnail-only lightbox). All four are stateless; the parent supplies callbacks. **StagedListings.tsx is now 941 lines** (down from 1175 at the start of FE-001a). The local `HealthBadge` + `ActionButtons` adapter remain because they bridge closure state (`expandedHealthId`, `pushingId`, `compsId`, etc.) into the extracted components. Added 6 + 8 + 11 + 8 = **33 new tests**. |
 
 ## 1. Executive Direction
 
@@ -1230,15 +1233,12 @@ These should be resolved during Sprint 0/Sprint 1 planning.
 
 ## 13. Recommended Immediate Next Steps
 
-**Phase 0 ✓, Phase 1 backend ✓, Phase 2 ✓, Phase 1 frontend in progress.** Server tests: 188 passing. Frontend tests: 34 passing (Vitest + happy-dom + testing-library). FE-004 ✓, FE-001a/b ✓.
+**Phase 0 ✓, Phase 1 backend ✓, Phase 2 ✓, Phase 1 frontend in progress.** Server tests: 188 passing. Frontend tests: 86 passing across 11 files (Vitest + happy-dom + testing-library). FE-004 ✓, FE-001a/b/c/d/e ✓. `StagedListings.tsx` is **941 lines**, down from 1175 at the start.
 
 **Remaining Phase 1 frontend** — pick up in this order:
 
-- **FE-001c** — extract the inline `HealthBadge` popover from `StagedListings.tsx` into a dedicated `staged/HealthIssuesPopover.tsx` so the lighter `staged/HealthBadge.tsx` becomes the canonical one. Lift the `expandedHealthId` state into a small custom hook.
-- **FE-001d** — extract the staged-listing render functions (the grid card and the list row) into `staged/StagedListingCard.tsx` and `staged/StagedListingListRow.tsx`. Each takes the listing plus the action callbacks as props.
-- **FE-001e** — extract the search/sort toolbar + bulk-action bar into `staged/StagedFilters.tsx` and `staged/StagedBulkToolbar.tsx`.
-- **FE-001f** — extract the Push-to-eBay modal into `staged/PushToEbayModal.tsx`.
-- **FE-002** — repeat the pattern on `ListedProducts.tsx`. Reuse `useListFilterSort` and the lighter `staged/HealthBadge.tsx`.
+- **FE-001f** — extract the Push-to-eBay modal into `staged/PushToEbayModal.tsx`. Currently ~150 lines of inline JSX with its own validation; pulls in `EBAY_CONDITIONS` and `toArizonaLocalISO` from `staged/helpers.ts` already. After this lands, `StagedListings.tsx` should land near ~600-700 lines.
+- **FE-002** — repeat the pattern on `ListedProducts.tsx` (1171 LOC). Reuse `useListFilterSort`, `staged/HealthBadge.tsx`, `staged/HealthIssuesPopover.tsx`, `staged/StagedListingActions.tsx`, and the StagedFilters/StagedBulkToolbar pattern. Several pieces will move from `staged/` to a shared location (e.g. `src/components/listings/shared/`) since they're no longer staged-specific.
 - **FE-003** — same for `ListingOptimizer.tsx`. Smaller scope; can wait until INTEL-004 demands it.
 - **UI-001 follow-through** — adopt `.list-row` / `.modal-backdrop` / `.modal-card` / `.tabs-strip` / `.filter-bar` / `.empty-state` / `.metric-cell` / `.badge` / `.btn-danger` as each subcomponent ships. Do it per-PR, not bundled with structural extraction.
 

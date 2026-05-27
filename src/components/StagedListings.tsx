@@ -1,20 +1,25 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Trash2, Edit2, Copy, Check, Calendar, LayoutGrid, List, Wand2, TrendingUp, X, RefreshCw, ImagePlus, GripVertical, UploadCloud, Search, ChevronDown, ShieldCheck, ShieldAlert, ShieldX, Share2, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Wand2, X, RefreshCw, ImagePlus, GripVertical, UploadCloud, ShieldCheck, ShieldAlert, ShieldX, AlertTriangle } from 'lucide-react';
 import type { StagedListing, EbayPolicy } from '../types';
 import ResultsEditor from './ResultsEditor';
-import ImageSearchButton from './ImageSearchButton';
 import Lightbox from './Lightbox';
 import { useToast } from '../context/ToastContext';
 import CrossPostModal from './CrossPostModal';
 import { useListFilterSort } from '../hooks/useListFilterSort';
-// staged/HealthBadge holds the simple badge used by future FE-001 splits; the
-// local HealthBadge below carries the inline issues popover and is kept in
-// place until FE-001c lifts the popover into a dedicated subcomponent.
+// staged/HealthBadge is the lighter badge used by future FE-001 splits and
+// by FE-002 (ListedProducts); the local HealthBadge below composes a custom
+// trigger button with the extracted HealthIssuesPopover.
+import HealthIssuesPopover from './staged/HealthIssuesPopover';
+import StagedFilters from './staged/StagedFilters';
+import StagedBulkToolbar from './staged/StagedBulkToolbar';
+import CompsPanel from './staged/CompsPanel';
+import StagedListingActions from './staged/StagedListingActions';
+import StagedListingCard from './staged/StagedListingCard';
+import StagedListingListRow from './staged/StagedListingListRow';
 import {
   computeHealthScore,
   autoConditionId,
-  timeAgo,
   toArizonaLocalISO,
   EBAY_CONDITIONS,
   compareStaged,
@@ -521,101 +526,60 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
       <div style={{ position: 'relative' }}>
         <button onClick={() => setExpandedHealthId(isExpanded ? null : listing.id)}
           title={`Listing health: ${score}/100`}
+          aria-label={`Listing health ${score} of 100, ${issues.length} issue${issues.length === 1 ? '' : 's'}`}
+          aria-expanded={isExpanded}
           style={{ display: 'flex', alignItems: 'center', gap: '3px', background: 'transparent', border: 'none', color, cursor: 'pointer', padding: '2px 4px', borderRadius: '4px', fontSize: '0.78rem', fontWeight: 600 }}>
           <Icon size={15} /> {score}
         </button>
-        {isExpanded && issues.length > 0 && createPortal(
-          <div onClick={() => setExpandedHealthId(null)} style={{ position: 'fixed', inset: 0, zIndex: 8500 }}>
-            <div onClick={e => e.stopPropagation()} style={{ position: 'fixed', bottom: '1.5rem', left: '50%', transform: 'translateX(-50%)', background: 'var(--glass-bg)', backdropFilter: 'blur(12px)', border: '1px solid var(--glass-border)', borderRadius: '10px', padding: '1rem 1.25rem', minWidth: '280px', maxWidth: '400px', zIndex: 8501, boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}>
-              <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.82rem', fontWeight: 600, color }}>Health: {score}/100 — {issues.length} issue{issues.length > 1 ? 's' : ''}</p>
-              {issues.map((issue, i) => <p key={i} style={{ margin: '3px 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>• {issue}</p>)}
-            </div>
-          </div>, document.body
-        )}
+        <HealthIssuesPopover
+          open={isExpanded}
+          score={score}
+          issues={issues}
+          color={color}
+          onDismiss={() => setExpandedHealthId(null)}
+        />
       </div>
     );
   };
 
+  // Thin adapter — wires closure state/setters into the extracted
+  // StagedListingActions row so the per-listing render functions don't
+  // have to thread them through.
   const ActionButtons = ({ listing }: { listing: StagedListing }) => (
-    <>
-      <HealthBadge listing={listing} />
-      <button className="btn-primary"
-        style={{ fontSize: '0.85rem', padding: '6px 12px', opacity: !isEbayConnected ? 0.5 : 1, whiteSpace: 'nowrap' }}
-        onClick={() => openPushModal(listing)}
-        disabled={pushingId === listing.id || bulkPushingIds.has(listing.id)}
-        title={!isEbayConnected ? 'Connect to eBay first' : 'Push to eBay'}
-      >
-        {(pushingId === listing.id || bulkPushingIds.has(listing.id)) ? 'Pushing...' : 'Push to eBay'}
-      </button>
-      <button className="btn-icon" title="Find Sold Comps" onClick={() => handleFetchComps(listing)} style={{ color: compsId === listing.id ? 'var(--success)' : undefined }}>
-        <TrendingUp size={18} />
-      </button>
-      <button className="btn-icon" title="Re-analyze with AI" onClick={() => { setReanalyzeId(listing.id); setReanalyzeInstructions(''); }}>
-        <Wand2 size={18} />
-      </button>
-      <button className="btn-icon" title="Copy HTML Description" onClick={() => handleCopyHtml(listing.id, listing.description)}>
-        {copiedId === listing.id ? <Check size={18} color="var(--success)" /> : <Copy size={18} />}
-      </button>
-      <button className="btn-icon" onClick={() => setImageEditId(listing.id)} title="Edit / Add Images">
-        <ImagePlus size={18} />
-      </button>
-      <button className="btn-icon" onClick={() => setEditingId(listing.id)} title="Edit Listing">
-        <Edit2 size={18} />
-      </button>
-      <button className="btn-icon" title="Cross-post to other platforms" onClick={() => setCrossPostListing(listing)}>
-        <Share2 size={18} />
-      </button>
-      <button
-        className="btn-icon"
-        title="Mark as Listed without pushing to eBay (for items already on eBay)"
-        onClick={() => {
-          const id = window.prompt(
-            `Mark "${listing.title.substring(0, 40)}..." as Listed without pushing to eBay?\n\nEnter the eBay item ID for this listing (or leave blank if unknown):`,
-            ''
-          );
-          if (id === null) return; // user cancelled
-          onMoveToListed(listing, id.trim());
-          toast('Listing moved to Listed.', 'success');
-        }}
-      >
-        <CheckCircle2 size={18} />
-      </button>
-      <button className="btn-icon" style={{ color: '#ef4444' }}
-        onClick={() => onDelete(listing.id)}
-        title="Delete Listing">
-        <Trash2 size={18} />
-      </button>
-    </>
+    <StagedListingActions
+      listing={listing}
+      healthBadge={<HealthBadge listing={listing} />}
+      isEbayConnected={isEbayConnected}
+      isPushing={pushingId === listing.id || bulkPushingIds.has(listing.id)}
+      isCompsActive={compsId === listing.id}
+      isCopied={copiedId === listing.id}
+      onPush={openPushModal}
+      onFetchComps={handleFetchComps}
+      onReanalyze={(l) => { setReanalyzeId(l.id); setReanalyzeInstructions(''); }}
+      onCopyHtml={(l) => handleCopyHtml(l.id, l.description)}
+      onEditImages={(l) => setImageEditId(l.id)}
+      onEdit={(l) => setEditingId(l.id)}
+      onCrossPost={setCrossPostListing}
+      onMoveToListed={(l) => {
+        const id = window.prompt(
+          `Mark "${l.title.substring(0, 40)}..." as Listed without pushing to eBay?\n\nEnter the eBay item ID for this listing (or leave blank if unknown):`,
+          '',
+        );
+        if (id === null) return;
+        onMoveToListed(l, id.trim());
+        toast('Listing moved to Listed.', 'success');
+      }}
+      onDelete={(l) => onDelete(l.id)}
+    />
   );
 
-  const CompsPanel = ({ listing }: { listing: StagedListing }) => {
-    if (compsId !== listing.id) return null;
-    return (
-      <div style={{ padding: '0 1.25rem 1.25rem', borderTop: '1px solid var(--border-color)', marginTop: '0.5rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem', paddingTop: '0.75rem' }}>
-          <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--success)' }}>📊 Active eBay Prices</span>
-          <button onClick={() => setCompsId(null)} className="btn-icon" style={{ padding: '2px' }}><X size={14} /></button>
-        </div>
-        {compsLoading && <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Loading...</p>}
-        {!compsLoading && compsData.length === 0 && <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>No results found.</p>}
-        {!compsLoading && compsData.map((comp, i) => (
-          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '6px 0', borderBottom: i < compsData.length - 1 ? '1px solid var(--border-color)' : 'none', gap: '8px' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <a href={comp.url} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: 'none' }}
-                onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-primary)')}
-                onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-secondary)')}>
-                {comp.title}
-              </a>
-              {comp.condition && <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', opacity: 0.7 }}>{comp.condition}</span>}
-            </div>
-            <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--success)', flexShrink: 0 }}>
-              ${comp.price}
-            </span>
-          </div>
-        ))}
-      </div>
-    );
-  };
+  // The extracted CompsPanel is unconditionally rendered; the parent gates
+  // visibility by passing nothing when it's not the active listing.
+  const renderCompsPanel = (listing: StagedListing) => (
+    compsId === listing.id
+      ? <CompsPanel loading={compsLoading} comps={compsData} onDismiss={() => setCompsId(null)} />
+      : null
+  );
 
   const imageEditListing = imageEditId ? listings.find(l => l.id === imageEditId) : null;
 
@@ -880,192 +844,63 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
         />
       )}
 
-      {/* Search + Sort controls */}
-      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
-        <div style={{ position: 'relative', flex: 1, minWidth: '200px' }}>
-          <Search size={15} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)', pointerEvents: 'none' }} />
-          <input type="text" className="input-base" placeholder="Search title, SKU, category..." value={search} onChange={e => setSearch(e.target.value)} style={{ paddingLeft: '32px' }} />
-        </div>
-        <div style={{ position: 'relative' }}>
-          <select className="input-base" value={sortBy} onChange={e => setSortBy(e.target.value as SortOption)} style={{ paddingRight: '2rem', appearance: 'none', cursor: 'pointer', minWidth: '180px' }}>
-            <option value="date-desc">Date: Newest First</option>
-            <option value="date-asc">Date: Oldest First</option>
-            <option value="price-desc">Price: High → Low</option>
-            <option value="price-asc">Price: Low → High</option>
-            <option value="title-asc">Title: A → Z</option>
-            <option value="health-asc">Health Score: Lowest First</option>
-          </select>
-          <ChevronDown size={13} style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-secondary)' }} />
-        </div>
-      </div>
-
-      {/* Toolbar */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', gap: '0.75rem', flexWrap: 'wrap' }}>
-        <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-          {visibleListings.length}{search ? ` of ${listings.length}` : ''} listing{visibleListings.length !== 1 ? 's' : ''}
-          {search && <span style={{ opacity: 0.6 }}> matching "{search}"</span>}
-        </span>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          {selectedIds.size === 0 ? (
-            <button onClick={selectAll} style={{ fontSize: '0.8rem', padding: '5px 10px', background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border-color)', color: 'var(--text-secondary)', borderRadius: '6px', cursor: 'pointer' }}>
-              Select All
-            </button>
-          ) : (
-            <>
-              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{selectedIds.size} selected</span>
-              <button onClick={handleBulkPush} disabled={bulkPushingIds.size > 0} className="btn-primary" style={{ fontSize: '0.8rem', padding: '5px 12px', opacity: !isEbayConnected ? 0.5 : 1 }}>
-                Push {selectedIds.size} to eBay
-              </button>
-              <button onClick={handleBulkDelete} style={{ fontSize: '0.8rem', padding: '5px 10px', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', color: '#ef4444', borderRadius: '6px', cursor: 'pointer' }}>
-                Delete Selected
-              </button>
-              <button onClick={clearSelection} className="btn-icon" style={{ padding: '5px' }} title="Clear selection">
-                <X size={16} />
-              </button>
-            </>
-          )}
-          <button onClick={() => setViewMode('grid')} title="Grid view"
-            style={{ padding: '6px 10px', background: viewMode === 'grid' ? 'var(--glass-bg)' : 'transparent', border: '1px solid', borderColor: viewMode === 'grid' ? 'var(--glass-border)' : 'transparent', color: 'var(--text-primary)', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
-            <LayoutGrid size={18} />
-          </button>
-          <button onClick={() => setViewMode('list')} title="List view"
-            style={{ padding: '6px 10px', background: viewMode === 'list' ? 'var(--glass-bg)' : 'transparent', border: '1px solid', borderColor: viewMode === 'list' ? 'var(--glass-border)' : 'transparent', color: 'var(--text-primary)', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
-            <List size={18} />
-          </button>
-        </div>
-      </div>
+      <StagedFilters
+        search={search}
+        onSearchChange={setSearch}
+        sortBy={sortBy}
+        onSortChange={setSortBy}
+      />
+      <StagedBulkToolbar
+        visibleCount={visibleListings.length}
+        totalCount={listings.length}
+        search={search}
+        selectedCount={selectedIds.size}
+        onSelectAll={selectAll}
+        onClearSelection={clearSelection}
+        onBulkPush={handleBulkPush}
+        onBulkDelete={handleBulkDelete}
+        bulkPushing={bulkPushingIds.size > 0}
+        isEbayConnected={isEbayConnected}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+      />
 
       {/* Grid view */}
       {viewMode === 'grid' && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '1.5rem' }}>
-          {paginatedListings.map(listing => {
-            const isSelected = selectedIds.has(listing.id);
-            return (
-              <div key={listing.id} className="glass-card" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', outline: isSelected ? '2px solid var(--accent-color)' : 'none', outlineOffset: '2px' }}>
-                {/* Images */}
-                <div style={{ display: 'flex', height: '140px', background: 'rgba(0,0,0,0.5)', position: 'relative' }}>
-                  {/* Checkbox */}
-                  <div onClick={() => toggleSelect(listing.id)} style={{ position: 'absolute', top: '8px', left: '8px', zIndex: 3, cursor: 'pointer', width: '22px', height: '22px', borderRadius: '5px', background: isSelected ? 'var(--accent-color)' : 'rgba(0,0,0,0.6)', border: `2px solid ${isSelected ? 'var(--accent-color)' : 'rgba(255,255,255,0.4)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s' }}>
-                    {isSelected && <Check size={13} color="white" />}
-                  </div>
-                  {/* Edit images button — overlay on image area */}
-                  <button
-                    onClick={() => setImageEditId(listing.id)}
-                    title="Edit / Add Images"
-                    style={{ position: 'absolute', bottom: '8px', right: '8px', zIndex: 3, background: 'rgba(0,0,0,0.65)', border: '1px solid rgba(255,255,255,0.2)', color: 'white', borderRadius: '6px', padding: '4px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.72rem', backdropFilter: 'blur(4px)' }}
-                  >
-                    <ImagePlus size={13} /> Edit
-                  </button>
-                  {listing.images && listing.images.length > 0 ? (
-                    <>
-                      <div style={{ flex: 2, height: '100%', position: 'relative', cursor: 'pointer' }} onClick={() => { setLightboxImages(listing.images); setLightboxIndex(0); }}>
-                        <img src={listing.images[0]} alt="Main" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                        <ImageSearchButton src={listing.images[0]} />
-                      </div>
-                      {listing.images.length > 1 && (
-                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px', marginLeft: '2px' }}>
-                          {listing.images.slice(1, 3).map((img, i) => (
-                            <div key={i} style={{ flex: 1, height: '50%', position: 'relative', cursor: 'pointer' }} onClick={() => { setLightboxImages(listing.images); setLightboxIndex(i + 1); }}>
-                              <img src={img} alt={`Thumb ${i}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                              <ImageSearchButton src={img} size="sm" />
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>No images</div>
-                  )}
-                </div>
-
-                <div style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', flex: 1 }}>
-                  <h3 style={{ fontSize: '1.1rem', marginBottom: '0.5rem', lineHeight: 1.3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                    {listing.title}
-                  </h3>
-                  <div style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}><Calendar size={13} /> {new Date(listing.createdAt).toLocaleDateString()}</span>
-                    {listing.updatedAt && listing.updatedAt !== listing.createdAt && (
-                      <span style={{ opacity: 0.7 }}>· updated {timeAgo(listing.updatedAt)}</span>
-                    )}
-                  </div>
-                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '1rem', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                    {listing.condition}
-                  </p>
-                  <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: '0.8rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px' }}>${listing.priceRecommendation}</span>
-                    <span style={{ fontSize: '0.8rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px' }}>{listing.category}</span>
-                    {listing.sku && <span style={{ fontSize: '0.8rem', background: 'rgba(99,102,241,0.25)', padding: '2px 8px', borderRadius: '4px', color: '#a5b4fc' }}>SKU: {listing.sku}</span>}
-                  </div>
-                  {listing.sellerNotes && (
-                    <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', padding: '6px 8px', marginBottom: '0.5rem', fontStyle: 'italic' }}>
-                      📝 {listing.sellerNotes}
-                    </p>
-                  )}
-                  <div style={{ marginTop: 'auto', display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', alignItems: 'center', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)', flexWrap: 'wrap' }}>
-                    <span style={{ marginRight: 'auto' }} />
-                    <ActionButtons listing={listing} />
-                  </div>
-                </div>
-
-                <CompsPanel listing={listing} />
-              </div>
-            );
-          })}
+          {paginatedListings.map((listing) => (
+            <StagedListingCard
+              key={listing.id}
+              listing={listing}
+              isSelected={selectedIds.has(listing.id)}
+              onToggleSelect={toggleSelect}
+              onEditImages={(id) => setImageEditId(id)}
+              onOpenLightbox={(imgs, idx) => { setLightboxImages(imgs); setLightboxIndex(idx); }}
+              actions={<ActionButtons listing={listing} />}
+              compsPanel={renderCompsPanel(listing)}
+            />
+          ))}
         </div>
       )}
 
       {/* List view */}
       {viewMode === 'list' && (
         <div className="glass-panel" style={{ padding: 0, overflow: 'hidden' }}>
-          {paginatedListings.map((listing, idx) => {
-            const isSelected = selectedIds.has(listing.id);
-            return (
-              <div key={listing.id}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.75rem 1.25rem', background: isSelected ? 'rgba(99,102,241,0.06)' : 'none', borderBottom: '1px solid var(--border-color)' }}>
-                  {/* Checkbox */}
-                  <div onClick={() => toggleSelect(listing.id)} style={{ width: '18px', height: '18px', flexShrink: 0, borderRadius: '4px', background: isSelected ? 'var(--accent-color)' : 'transparent', border: `2px solid ${isSelected ? 'var(--accent-color)' : 'var(--border-color)'}`, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    {isSelected && <Check size={11} color="white" />}
-                  </div>
-
-                  {/* Thumbnail */}
-                  <div style={{ width: '56px', height: '56px', flexShrink: 0, borderRadius: '6px', overflow: 'hidden', background: 'rgba(0,0,0,0.4)', position: 'relative', cursor: listing.images?.[0] ? 'pointer' : 'default' }}
-                    onClick={() => listing.images?.[0] && (setLightboxImages(listing.images), setLightboxIndex(0))}>
-                    {listing.images?.[0] ? (
-                      <><img src={listing.images[0]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /><ImageSearchButton src={listing.images[0]} size="sm" /></>
-                    ) : (
-                      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', fontSize: '0.7rem' }}>—</div>
-                    )}
-                  </div>
-
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ margin: 0, fontWeight: 500, fontSize: '0.95rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{listing.title}</p>
-                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '2px' }}>
-                      {listing.sellerNotes && <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontStyle: 'italic', flex: 1 }}>📝 {listing.sellerNotes}</p>}
-                      {listing.updatedAt && listing.updatedAt !== listing.createdAt && <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', flexShrink: 0, opacity: 0.7 }}>updated {timeAgo(listing.updatedAt)}</span>}
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
-                    <span style={{ fontSize: '0.78rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px', whiteSpace: 'nowrap' }}>${listing.priceRecommendation}</span>
-                    {listing.sku && <span style={{ fontSize: '0.78rem', background: 'rgba(99,102,241,0.25)', padding: '2px 8px', borderRadius: '4px', color: '#a5b4fc', whiteSpace: 'nowrap' }}>{listing.sku}</span>}
-                  </div>
-
-                  <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', flexShrink: 0, minWidth: '80px', textAlign: 'right' }}>
-                    {new Date(listing.createdAt).toLocaleDateString()}
-                  </span>
-
-                  <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0, alignItems: 'center' }}>
-                    <ActionButtons listing={listing} />
-                  </div>
+          {paginatedListings.map((listing, idx) => (
+            <StagedListingListRow
+              key={listing.id}
+              listing={listing}
+              isSelected={selectedIds.has(listing.id)}
+              onToggleSelect={toggleSelect}
+              onOpenLightbox={(imgs, i) => { setLightboxImages(imgs); setLightboxIndex(i); }}
+              actions={<ActionButtons listing={listing} />}
+              compsPanel={compsId === listing.id ? (
+                <div style={{ padding: '0 1.25rem', borderBottom: idx < paginatedListings.length - 1 ? '1px solid var(--border-color)' : 'none' }}>
+                  {renderCompsPanel(listing)}
                 </div>
-                {compsId === listing.id && (
-                  <div style={{ padding: '0 1.25rem', borderBottom: idx < paginatedListings.length - 1 ? '1px solid var(--border-color)' : 'none' }}>
-                    <CompsPanel listing={listing} />
-                  </div>
-                )}
-              </div>
-            );
-          })}
+              ) : null}
+            />
+          ))}
         </div>
       )}
 
