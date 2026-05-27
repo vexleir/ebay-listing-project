@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Trash2, RotateCcw, Search, ChevronDown, LayoutGrid, List, DollarSign, TrendingUp, Package, Check, X } from 'lucide-react';
+import { Trash2, RotateCcw, Search, ChevronDown, LayoutGrid, List, DollarSign, TrendingUp, Package, Check, X, Download } from 'lucide-react';
 import type { StagedListing } from '../types';
 import { useToast } from '../context/ToastContext';
 import { calculateNetProfit } from '../utils/fees';
+import { buildSoldExportCsv, buildSoldExportFilename } from '../utils/soldExport';
+import { downloadCsv } from '../utils/csv';
 
 interface SoldListingsProps {
   listings: StagedListing[];
@@ -59,6 +61,16 @@ export default function SoldListings({ listings, onDelete, onUnmarkSold, onRelis
   const selectAllFiltered = () => setSelectedIds(new Set(filtered.map(l => l.id)));
   const clearSelection = () => setSelectedIds(new Set());
   const handleBulkDelete = () => { Array.from(selectedIds).forEach(id => onDelete(id)); clearSelection(); };
+
+  // DATA-001 — export visible (filtered + sorted) sold items as CSV.
+  // Uses the same fee math as Analytics so seller's bookkeeping matches the
+  // in-app totals.
+  const handleExportCsv = () => {
+    if (filtered.length === 0) { toast('No sold items to export.', 'info'); return; }
+    const csv = buildSoldExportCsv(filtered);
+    downloadCsv(buildSoldExportFilename(), csv);
+    toast(`Exported ${filtered.length} sold item${filtered.length === 1 ? '' : 's'} to CSV.`, 'success');
+  };
 
   const totalRevenue = listings.reduce((sum, l) => sum + parsePrice(l.soldPrice), 0);
   const totalProfit = listings.reduce((sum, l) => {
@@ -246,6 +258,10 @@ export default function SoldListings({ listings, onDelete, onUnmarkSold, onRelis
         <button onClick={selectedIds.size > 0 ? clearSelection : selectAllFiltered}
           style={{ fontSize: '0.8rem', padding: '5px 10px', background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border-color)', color: 'var(--text-secondary)', borderRadius: '6px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
           {selectedIds.size > 0 ? 'Deselect All' : `Select All (${filtered.length})`}
+        </button>
+        <button onClick={handleExportCsv} title="Export visible sold items as CSV"
+          style={{ fontSize: '0.8rem', padding: '5px 10px', background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.3)', color: 'var(--success)', borderRadius: '6px', cursor: 'pointer', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '5px' }}>
+          <Download size={13} /> Export CSV
         </button>
         <div style={{ display: 'flex', gap: '0.25rem' }}>
           <button onClick={() => setViewMode('grid')} title="Grid view" style={{ padding: '6px 10px', background: viewMode === 'grid' ? 'var(--glass-bg)' : 'transparent', border: '1px solid', borderColor: viewMode === 'grid' ? 'var(--glass-border)' : 'transparent', color: 'var(--text-primary)', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>

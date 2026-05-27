@@ -14,6 +14,9 @@ async function loadGenAI() {
 // Disable Gemini 2.5 "thinking" — we just need structured listing output.
 const GENERATION_CONFIG = { thinkingConfig: { thinkingBudget: 0 } };
 
+// AI-001 prompt registry — see services/ai/prompts.js.
+const { optimizerPrompt, OPTIMIZER_VERSION } = require('./services/ai/prompts');
+
 // ─── XML Helpers ──────────────────────────────────────────────────────────────
 
 function extractTag(xml, tag) {
@@ -282,41 +285,16 @@ async function aiOptimizeListing(listingData, apiKey) {
   const descPlain = (description || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').substring(0, 800);
   const currentSpecifics = JSON.stringify(itemSpecifics || {}, null, 2);
 
-  const prompt = `You are an expert eBay seller, SEO specialist, and Cassini algorithm expert. Optimize the following existing eBay listing.
-
-CURRENT LISTING:
-Title (${title.length}/80 chars): "${title}"
-Category: "${categoryName}"
-Price: $${price}
-Condition: ${conditionName}
-Description (excerpt): "${descPlain}"
-Current Item Specifics:
-${currentSpecifics}
-${required.length ? `Required Category Specifics (MUST include all): ${required.join(', ')}` : ''}
-${recommended.length ? `Recommended Category Specifics: ${recommended.join(', ')}` : ''}
-
-OPTIMIZATION RULES:
-- Title must use all 80 characters if possible, NEVER exceed 80
-- Front-load most important keywords (brand, model, key feature first)
-- Remove filler/spam words: "look", "l@@k", "wow", "nice", "great", "check", "hot", "fast ship", "free ship", "must see", "see pics"
-- Description: keep the core content but enhance formatting, add call to action, make scannable with HTML. The CTA must be styled text only (bold/colored emphasized line) — NEVER a button, pill, or clickable-looking element. eBay strips links and interactive elements, so do not use anchor or button tags or button-style CSS (solid-filled rounded boxes, padded "click here" blocks, etc.).
-- Item specifics: include ALL required fields, fill in as many recommended fields as possible using context from the listing
-- Price suggestion: based on the listing condition and category, suggest a competitive price
-
-Respond ONLY with a valid JSON object (no markdown wrappers):
-{
-  "title": "optimized title, max 80 chars",
-  "titleRationale": "brief explanation of changes",
-  "description": "improved HTML description with inline CSS, headers, bullets, CTA",
-  "descriptionRationale": "what was improved",
-  "itemSpecifics": { "SpecificName": "Value" },
-  "itemSpecificsRationale": "what was added or corrected",
-  "priceRecommendation": "suggested price as decimal number string e.g. 49.99",
-  "priceRationale": "why this price",
-  "seoKeywords": ["keyword1", "keyword2", "keyword3", "keyword4", "keyword5"],
-  "seoIssues": ["issue 1 found in original title/listing", "issue 2"],
-  "overallTips": ["actionable tip 1", "actionable tip 2", "actionable tip 3"]
-}`;
+  const prompt = optimizerPrompt({
+    title,
+    categoryName,
+    price,
+    conditionName,
+    descPlain,
+    currentSpecifics,
+    required,
+    recommended,
+  });
 
   const result = await ai.models.generateContent({
     model: modelName,
@@ -345,6 +323,7 @@ Respond ONLY with a valid JSON object (no markdown wrappers):
       completionTokens: usage?.candidatesTokenCount || 0,
       totalTokens: (usage?.promptTokenCount || 0) + (usage?.candidatesTokenCount || 0),
       model: modelName,
+      promptVersion: OPTIMIZER_VERSION,
     },
   };
 }

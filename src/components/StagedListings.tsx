@@ -1,12 +1,31 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Trash2, Edit2, Copy, Check, Calendar, LayoutGrid, List, Wand2, TrendingUp, X, RefreshCw, ImagePlus, GripVertical, UploadCloud, Search, ChevronDown, ShieldCheck, ShieldAlert, ShieldX, Share2, AlertTriangle, CheckCircle2 } from 'lucide-react';
-import type { StagedListing, EbayPolicy } from '../types';
+import { Wand2, X, RefreshCw, ImagePlus, GripVertical, UploadCloud, ShieldCheck, ShieldAlert, ShieldX, AlertTriangle } from 'lucide-react';
+import type { StagedListing } from '../types';
 import ResultsEditor from './ResultsEditor';
-import ImageSearchButton from './ImageSearchButton';
 import Lightbox from './Lightbox';
 import { useToast } from '../context/ToastContext';
 import CrossPostModal from './CrossPostModal';
+import { useListFilterSort } from '../hooks/useListFilterSort';
+// staged/HealthBadge is the lighter badge used by future FE-001 splits and
+// by FE-002 (ListedProducts); the local HealthBadge below composes a custom
+// trigger button with the extracted HealthIssuesPopover.
+import HealthIssuesPopover from './staged/HealthIssuesPopover';
+import StagedFilters from './staged/StagedFilters';
+import StagedBulkToolbar from './staged/StagedBulkToolbar';
+import CompsPanel from './staged/CompsPanel';
+import StagedListingActions from './staged/StagedListingActions';
+import StagedListingCard from './staged/StagedListingCard';
+import StagedListingListRow from './staged/StagedListingListRow';
+import PushToEbayModal, { type PushModalState } from './staged/PushToEbayModal';
+import {
+  computeHealthScore,
+  autoConditionId,
+  toArizonaLocalISO,
+  compareStaged,
+  matchesStagedQuery,
+  type SortOption,
+} from './staged/helpers';
 
 interface StagedListingsProps {
   listings: StagedListing[];
@@ -19,89 +38,9 @@ interface StagedListingsProps {
 }
 
 type ViewMode = 'grid' | 'list';
-type SortOption = 'date-desc' | 'date-asc' | 'price-asc' | 'price-desc' | 'title-asc' | 'health-asc';
 
-interface HealthScore { score: number; issues: string[]; }
-
-function computeHealthScore(listing: StagedListing): HealthScore {
-  const issues: string[] = [];
-  let score = 0;
-
-  const titleLen = listing.title?.length || 0;
-  if (titleLen >= 70) score += 20;
-  else if (titleLen >= 50) { score += 10; issues.push(`Title short: ${titleLen}/80 chars`); }
-  else { issues.push(`Title very short: ${titleLen}/80 chars`); }
-
-  const imgCount = (listing.images || []).length;
-  if (imgCount >= 3) score += 20;
-  else if (imgCount >= 1) { score += 10; issues.push(`Only ${imgCount} image — add 3+ for best visibility`); }
-  else { issues.push('No images attached'); }
-
-  const hasCloudImages = (listing.images || []).some(img => img.startsWith('http'));
-  if (hasCloudImages) score += 10;
-  else if (imgCount > 0) issues.push('Images not uploaded to cloud — push may fail');
-
-  const descLen = listing.description?.length || 0;
-  if (descLen > 300) score += 15;
-  else if (descLen > 80) { score += 8; issues.push('Description is short'); }
-  else { issues.push('Description missing or very short'); }
-
-  const cat = listing.category || '';
-  if (cat && cat !== 'Unknown') score += 15;
-  else issues.push('Category not set');
-
-  const price = parseFloat((listing.priceRecommendation || '').replace(/[^0-9.]/g, ''));
-  if (price > 0) score += 10;
-  else issues.push('Price not set');
-
-  const specificsCount = Object.keys(listing.itemSpecifics || {}).length;
-  if (specificsCount >= 5) score += 10;
-  else if (specificsCount >= 2) { score += 5; issues.push(`Only ${specificsCount} item specifics`); }
-  else { issues.push('Item specifics missing'); }
-
-  return { score, issues };
-}
-
-// Format a Date as "YYYY-MM-DDTHH:mm" in Arizona time (UTC-7, no DST)
-const toArizonaLocalISO = (date: Date): string => {
-  const az = new Date(date.getTime() - 7 * 60 * 60 * 1000);
-  return az.toISOString().slice(0, 16);
-};
-
-const EBAY_CONDITIONS = [
-  { id: '1000', label: 'New' },
-  { id: '1500', label: 'New Other (open box)' },
-  { id: '2000', label: 'Certified Refurbished' },
-  { id: '2500', label: 'Seller Refurbished' },
-  { id: '3000', label: 'Used' },
-  { id: '4000', label: 'Very Good' },
-  { id: '5000', label: 'Good' },
-  { id: '6000', label: 'Acceptable' },
-  { id: '7000', label: 'For Parts / Not Working' },
-];
-
-function autoConditionId(conditionStr: string): string {
-  const s = (conditionStr || '').toLowerCase();
-  if (s.includes('for parts') || s.includes('not working')) return '7000';
-  if (s.includes('acceptable') || s.includes('heavy wear')) return '6000';
-  if (s.includes('good') && !s.includes('very good') && !s.includes('like new')) return '5000';
-  if (s.includes('very good')) return '4000';
-  if (s.includes('like new') || s.includes('mint') || s.includes('open box')) return '2500';
-  if (s.includes('refurbished') || s.includes('refurb')) return '2500';
-  if (s.includes('new other')) return '1500';
-  if (s.includes('new') && !s.includes('like')) return '1000';
-  return '3000';
-}
-
-function timeAgo(ts: number): string {
-  const diff = Date.now() - ts;
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
+// computeHealthScore, autoConditionId, timeAgo, toArizonaLocalISO,
+// EBAY_CONDITIONS, SortOption — extracted to ./staged/helpers (FE-001a).
 
 function ImageEditModal({ listing, appPassword, onSave, onClose }: {
   listing: StagedListing;
@@ -267,19 +206,9 @@ function ImageEditModal({ listing, appPassword, onSave, onClose }: {
   );
 }
 
-interface PushModal {
-  listing: StagedListing;
-  conditionId: string;
-  validConditions: { id: string; label: string }[];
-  scheduleDate: string; // datetime-local string, empty = list immediately
-  fulfillmentPolicyId: string;
-  categoryId: string;
-  fulfillmentPolicies: EbayPolicy[];
-  loading: boolean;
-  acceptOffers: boolean;
-  autoAcceptPrice: string;
-  minOfferPrice: string;
-}
+// PushModal state shape lives in staged/PushToEbayModal.tsx — re-alias here
+// so the parent's local `pushModal` typing matches what the modal expects.
+type PushModal = PushModalState;
 
 export default function StagedListingsView({ listings, onUpdate, onDelete, onBulkDelete, onMoveToListed, isEbayConnected, appPassword = '' }: StagedListingsProps) {
   const { toast } = useToast();
@@ -287,7 +216,6 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [pushingId, setPushingId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
-  const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<SortOption>('date-desc');
   const [pushModal, setPushModal] = useState<PushModal | null>(null);
   const [pushExtraSpecifics, setPushExtraSpecifics] = useState<{ name: string; value: string }[]>([]);
@@ -297,9 +225,25 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkPushingIds, setBulkPushingIds] = useState<Set<string>>(new Set());
-  // Pagination
-  const [perPage, setPerPage] = useState<number>(20);
-  const [currentPage, setCurrentPage] = useState(1);
+
+  // FE-004 — search / sort / pagination owned by the shared hook so the
+  // staged + listed + sold tabs converge on one contract.
+  const sortComparator = useMemo(() => (a: StagedListing, b: StagedListing) => compareStaged(a, b, sortBy), [sortBy]);
+  const list = useListFilterSort<StagedListing>({
+    items: listings,
+    filter: matchesStagedQuery,
+    sort: sortComparator,
+    perPage: 20,
+  });
+  const search = list.query;
+  const setSearch = list.setQuery;
+  const perPage = list.perPage;
+  const setPerPage = list.setPerPage;
+  const currentPage = list.currentPage;
+  const setCurrentPage = list.setCurrentPage;
+  const visibleListings = list.visible;
+  const paginatedListings = list.paginated;
+  const totalPages = list.totalPages;
 
   // Lightbox
   const [lightboxImages, setLightboxImages] = useState<string[] | null>(null);
@@ -318,26 +262,6 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
   // Image editing
   const [imageEditId, setImageEditId] = useState<string | null>(null);
   const [crossPostListing, setCrossPostListing] = useState<StagedListing | null>(null);
-
-  const visibleListings = (() => {
-    const q = search.toLowerCase();
-    let result = listings;
-    if (q) result = result.filter(l => {
-      if (l.title.toLowerCase().includes(q)) return true;
-      if ((l.sku || '').toLowerCase().includes(q)) return true;
-      if ((l.category || '').toLowerCase().includes(q)) return true;
-      return false;
-    });
-    return result.slice().sort((a, b) => {
-      if (sortBy === 'date-asc') return a.createdAt - b.createdAt;
-      if (sortBy === 'date-desc') return b.createdAt - a.createdAt;
-      if (sortBy === 'price-asc') return parseFloat(a.priceRecommendation || '0') - parseFloat(b.priceRecommendation || '0');
-      if (sortBy === 'price-desc') return parseFloat(b.priceRecommendation || '0') - parseFloat(a.priceRecommendation || '0');
-      if (sortBy === 'title-asc') return a.title.localeCompare(b.title);
-      if (sortBy === 'health-asc') return computeHealthScore(a).score - computeHealthScore(b).score;
-      return 0;
-    });
-  })();
 
   if (listings.length === 0) {
     return (
@@ -503,9 +427,11 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
     });
   };
 
-  useEffect(() => { setCurrentPage(1); }, [search, sortBy]);
-  const totalPages = perPage === 0 ? 1 : Math.ceil(visibleListings.length / perPage);
-  const paginatedListings = perPage === 0 ? visibleListings : visibleListings.slice((currentPage - 1) * perPage, currentPage * perPage);
+  // Pagination clamping + reset-on-query are owned by useListFilterSort.
+  // We still need to reset to page 1 when the sort changes, since the hook
+  // intentionally only resets on query changes (sort doesn't change
+  // result-set composition, just order).
+  useEffect(() => { setCurrentPage(1); }, [sortBy, setCurrentPage]);
 
   const selectAll = () => setSelectedIds(new Set(visibleListings.map(l => l.id)));
   const clearSelection = () => setSelectedIds(new Set());
@@ -590,101 +516,60 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
       <div style={{ position: 'relative' }}>
         <button onClick={() => setExpandedHealthId(isExpanded ? null : listing.id)}
           title={`Listing health: ${score}/100`}
+          aria-label={`Listing health ${score} of 100, ${issues.length} issue${issues.length === 1 ? '' : 's'}`}
+          aria-expanded={isExpanded}
           style={{ display: 'flex', alignItems: 'center', gap: '3px', background: 'transparent', border: 'none', color, cursor: 'pointer', padding: '2px 4px', borderRadius: '4px', fontSize: '0.78rem', fontWeight: 600 }}>
           <Icon size={15} /> {score}
         </button>
-        {isExpanded && issues.length > 0 && createPortal(
-          <div onClick={() => setExpandedHealthId(null)} style={{ position: 'fixed', inset: 0, zIndex: 8500 }}>
-            <div onClick={e => e.stopPropagation()} style={{ position: 'fixed', bottom: '1.5rem', left: '50%', transform: 'translateX(-50%)', background: 'var(--glass-bg)', backdropFilter: 'blur(12px)', border: '1px solid var(--glass-border)', borderRadius: '10px', padding: '1rem 1.25rem', minWidth: '280px', maxWidth: '400px', zIndex: 8501, boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}>
-              <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.82rem', fontWeight: 600, color }}>Health: {score}/100 — {issues.length} issue{issues.length > 1 ? 's' : ''}</p>
-              {issues.map((issue, i) => <p key={i} style={{ margin: '3px 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>• {issue}</p>)}
-            </div>
-          </div>, document.body
-        )}
+        <HealthIssuesPopover
+          open={isExpanded}
+          score={score}
+          issues={issues}
+          color={color}
+          onDismiss={() => setExpandedHealthId(null)}
+        />
       </div>
     );
   };
 
+  // Thin adapter — wires closure state/setters into the extracted
+  // StagedListingActions row so the per-listing render functions don't
+  // have to thread them through.
   const ActionButtons = ({ listing }: { listing: StagedListing }) => (
-    <>
-      <HealthBadge listing={listing} />
-      <button className="btn-primary"
-        style={{ fontSize: '0.85rem', padding: '6px 12px', opacity: !isEbayConnected ? 0.5 : 1, whiteSpace: 'nowrap' }}
-        onClick={() => openPushModal(listing)}
-        disabled={pushingId === listing.id || bulkPushingIds.has(listing.id)}
-        title={!isEbayConnected ? 'Connect to eBay first' : 'Push to eBay'}
-      >
-        {(pushingId === listing.id || bulkPushingIds.has(listing.id)) ? 'Pushing...' : 'Push to eBay'}
-      </button>
-      <button className="btn-icon" title="Find Sold Comps" onClick={() => handleFetchComps(listing)} style={{ color: compsId === listing.id ? 'var(--success)' : undefined }}>
-        <TrendingUp size={18} />
-      </button>
-      <button className="btn-icon" title="Re-analyze with AI" onClick={() => { setReanalyzeId(listing.id); setReanalyzeInstructions(''); }}>
-        <Wand2 size={18} />
-      </button>
-      <button className="btn-icon" title="Copy HTML Description" onClick={() => handleCopyHtml(listing.id, listing.description)}>
-        {copiedId === listing.id ? <Check size={18} color="var(--success)" /> : <Copy size={18} />}
-      </button>
-      <button className="btn-icon" onClick={() => setImageEditId(listing.id)} title="Edit / Add Images">
-        <ImagePlus size={18} />
-      </button>
-      <button className="btn-icon" onClick={() => setEditingId(listing.id)} title="Edit Listing">
-        <Edit2 size={18} />
-      </button>
-      <button className="btn-icon" title="Cross-post to other platforms" onClick={() => setCrossPostListing(listing)}>
-        <Share2 size={18} />
-      </button>
-      <button
-        className="btn-icon"
-        title="Mark as Listed without pushing to eBay (for items already on eBay)"
-        onClick={() => {
-          const id = window.prompt(
-            `Mark "${listing.title.substring(0, 40)}..." as Listed without pushing to eBay?\n\nEnter the eBay item ID for this listing (or leave blank if unknown):`,
-            ''
-          );
-          if (id === null) return; // user cancelled
-          onMoveToListed(listing, id.trim());
-          toast('Listing moved to Listed.', 'success');
-        }}
-      >
-        <CheckCircle2 size={18} />
-      </button>
-      <button className="btn-icon" style={{ color: '#ef4444' }}
-        onClick={() => onDelete(listing.id)}
-        title="Delete Listing">
-        <Trash2 size={18} />
-      </button>
-    </>
+    <StagedListingActions
+      listing={listing}
+      healthBadge={<HealthBadge listing={listing} />}
+      isEbayConnected={isEbayConnected}
+      isPushing={pushingId === listing.id || bulkPushingIds.has(listing.id)}
+      isCompsActive={compsId === listing.id}
+      isCopied={copiedId === listing.id}
+      onPush={openPushModal}
+      onFetchComps={handleFetchComps}
+      onReanalyze={(l) => { setReanalyzeId(l.id); setReanalyzeInstructions(''); }}
+      onCopyHtml={(l) => handleCopyHtml(l.id, l.description)}
+      onEditImages={(l) => setImageEditId(l.id)}
+      onEdit={(l) => setEditingId(l.id)}
+      onCrossPost={setCrossPostListing}
+      onMoveToListed={(l) => {
+        const id = window.prompt(
+          `Mark "${l.title.substring(0, 40)}..." as Listed without pushing to eBay?\n\nEnter the eBay item ID for this listing (or leave blank if unknown):`,
+          '',
+        );
+        if (id === null) return;
+        onMoveToListed(l, id.trim());
+        toast('Listing moved to Listed.', 'success');
+      }}
+      onDelete={(l) => onDelete(l.id)}
+    />
   );
 
-  const CompsPanel = ({ listing }: { listing: StagedListing }) => {
-    if (compsId !== listing.id) return null;
-    return (
-      <div style={{ padding: '0 1.25rem 1.25rem', borderTop: '1px solid var(--border-color)', marginTop: '0.5rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem', paddingTop: '0.75rem' }}>
-          <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--success)' }}>📊 Active eBay Prices</span>
-          <button onClick={() => setCompsId(null)} className="btn-icon" style={{ padding: '2px' }}><X size={14} /></button>
-        </div>
-        {compsLoading && <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Loading...</p>}
-        {!compsLoading && compsData.length === 0 && <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>No results found.</p>}
-        {!compsLoading && compsData.map((comp, i) => (
-          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '6px 0', borderBottom: i < compsData.length - 1 ? '1px solid var(--border-color)' : 'none', gap: '8px' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <a href={comp.url} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: 'none' }}
-                onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-primary)')}
-                onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-secondary)')}>
-                {comp.title}
-              </a>
-              {comp.condition && <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', opacity: 0.7 }}>{comp.condition}</span>}
-            </div>
-            <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--success)', flexShrink: 0 }}>
-              ${comp.price}
-            </span>
-          </div>
-        ))}
-      </div>
-    );
-  };
+  // The extracted CompsPanel is unconditionally rendered; the parent gates
+  // visibility by passing nothing when it's not the active listing.
+  const renderCompsPanel = (listing: StagedListing) => (
+    compsId === listing.id
+      ? <CompsPanel loading={compsLoading} comps={compsData} onDismiss={() => setCompsId(null)} />
+      : null
+  );
 
   const imageEditListing = imageEditId ? listings.find(l => l.id === imageEditId) : null;
 
@@ -716,186 +601,15 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
       )}
 
       {/* Push confirmation modal */}
-      {pushModal && createPortal(
-        <div onClick={() => setPushModal(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
-          <div className="glass-panel" onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '520px', padding: '2rem', maxHeight: '90vh', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
-              <h3 style={{ margin: 0, fontSize: '1.1rem' }}>Confirm Push to eBay</h3>
-              <button onClick={() => setPushModal(null)} className="btn-icon"><X size={18} /></button>
-            </div>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1.25rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {pushModal.listing.title}
-            </p>
-            {pushModal.loading ? (
-              <div style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-                <RefreshCw size={18} style={{ animation: 'spin 1s linear infinite', marginRight: '8px', verticalAlign: 'middle' }} />Loading policies & category...
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>eBay Condition</label>
-                  <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0 0 6px 0' }}>AI assessed: "{pushModal.listing.condition?.substring(0, 80)}"</p>
-                  <select className="input-base" value={pushModal.conditionId} onChange={e => setPushModal(prev => prev ? { ...prev, conditionId: e.target.value } : null)}>
-                    {(pushModal.validConditions.length > 0 ? pushModal.validConditions : EBAY_CONDITIONS)
-                      .map(c => <option key={c.id} value={c.id}>{c.id} — {c.label}</option>)}
-                  </select>
-                  {pushModal.validConditions.length > 0 && pushModal.validConditions.length < EBAY_CONDITIONS.length && (
-                    <p style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', margin: '4px 0 0 0' }}>
-                      Showing {pushModal.validConditions.length} condition{pushModal.validConditions.length !== 1 ? 's' : ''} valid for this category
-                    </p>
-                  )}
-                </div>
-                {pushModal.fulfillmentPolicies.length > 0 && (
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>Shipping Policy</label>
-                    <select className="input-base" value={pushModal.fulfillmentPolicyId} onChange={e => setPushModal(prev => prev ? { ...prev, fulfillmentPolicyId: e.target.value } : null)}>
-                      <option value="">— Use server default —</option>
-                      {pushModal.fulfillmentPolicies.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
-                  </div>
-                )}
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>eBay Category ID</label>
-                  <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0 0 6px 0' }}>AI category: "{pushModal.listing.category}"</p>
-                  <input className="input-base" value={pushModal.categoryId} onChange={e => setPushModal(prev => prev ? { ...prev, categoryId: e.target.value } : null)} placeholder="Leave blank to use server default" />
-                </div>
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                    <label style={{ fontSize: '0.85rem', fontWeight: 500 }}>Schedule Listing</label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-                      <input
-                        type="checkbox"
-                        checked={!!pushModal.scheduleDate}
-                        onChange={e => {
-                          if (e.target.checked) {
-                            const d = new Date(Date.now() + 21 * 24 * 60 * 60 * 1000);
-                            setPushModal(prev => prev ? { ...prev, scheduleDate: toArizonaLocalISO(d) } : null);
-                          } else {
-                            setPushModal(prev => prev ? { ...prev, scheduleDate: '' } : null);
-                          }
-                        }}
-                        style={{ accentColor: 'var(--accent-color)', width: '14px', height: '14px' }}
-                      />
-                      Schedule for later
-                    </label>
-                  </div>
-                  {pushModal.scheduleDate ? (
-                    <>
-                      <input
-                        type="datetime-local"
-                        className="input-base"
-                        value={pushModal.scheduleDate}
-                        min={toArizonaLocalISO(new Date(Date.now() + 5 * 60 * 1000))}
-                        max={toArizonaLocalISO(new Date(Date.now() + 21 * 24 * 60 * 60 * 1000))}
-                        onChange={e => setPushModal(prev => prev ? { ...prev, scheduleDate: e.target.value } : null)}
-                      />
-                      <p style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', margin: '4px 0 0 0' }}>
-                        eBay will make this listing live at the selected time (max 21 days out)
-                      </p>
-                    </>
-                  ) : (
-                    <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>Listing will go live immediately when pushed</p>
-                  )}
-                </div>
-                {/* Best Offer */}
-                <div>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>
-                    <input
-                      type="checkbox"
-                      checked={pushModal.acceptOffers}
-                      onChange={e => setPushModal(prev => prev ? { ...prev, acceptOffers: e.target.checked } : null)}
-                      style={{ accentColor: 'var(--accent-color)', width: '14px', height: '14px' }}
-                    />
-                    Accept Best Offers
-                  </label>
-                  {pushModal.acceptOffers && (
-                    <>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                        <div>
-                          <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>Auto-accept at ($)</label>
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            inputMode="decimal"
-                            className="input-base"
-                            value={pushModal.autoAcceptPrice}
-                            onChange={e => setPushModal(prev => prev ? { ...prev, autoAcceptPrice: e.target.value } : null)}
-                            placeholder="(off)"
-                            style={{ fontSize: '0.85rem', padding: '6px 10px' }}
-                          />
-                        </div>
-                        <div>
-                          <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>Auto-decline below ($)</label>
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            inputMode="decimal"
-                            className="input-base"
-                            value={pushModal.minOfferPrice}
-                            onChange={e => setPushModal(prev => prev ? { ...prev, minOfferPrice: e.target.value } : null)}
-                            placeholder="(off)"
-                            style={{ fontSize: '0.85rem', padding: '6px 10px' }}
-                          />
-                        </div>
-                      </div>
-                      <p style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', margin: '4px 0 0 0' }}>
-                        Leave blank to review every offer manually. eBay only auto-accepts/declines when a value is set.
-                      </p>
-                    </>
-                  )}
-                </div>
-                {/* Item Specifics quick-fix */}
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                    <label style={{ fontSize: '0.85rem', fontWeight: 500 }}>
-                      Item Specifics
-                      <span style={{ fontSize: '0.75rem', fontWeight: 400, color: 'var(--text-secondary)', marginLeft: '6px' }}>
-                        ({Object.keys(pushModal.listing.itemSpecifics || {}).length} set)
-                      </span>
-                    </label>
-                    <button
-                      className="btn-icon"
-                      style={{ fontSize: '0.72rem', padding: '2px 8px' }}
-                      onClick={() => setPushExtraSpecifics(prev => [...prev, { name: '', value: '' }])}
-                    >+ Add field</button>
-                  </div>
-                  {!Object.keys(pushModal.listing.itemSpecifics || {}).some(k => k.toLowerCase() === 'type') &&
-                   !pushExtraSpecifics.some(s => s.name.toLowerCase() === 'type') && (
-                    <div style={{ fontSize: '0.78rem', color: '#f59e0b', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
-                      <AlertTriangle size={12} /> "Type" is required for most eBay categories — fill it in below
-                    </div>
-                  )}
-                  {pushExtraSpecifics.map((s, i) => (
-                    <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '6px', marginBottom: '6px' }}>
-                      <input
-                        className="input-base"
-                        value={s.name}
-                        onChange={e => setPushExtraSpecifics(prev => prev.map((r, idx) => idx === i ? { ...r, name: e.target.value } : r))}
-                        placeholder="Name (e.g. Type)"
-                        style={{ fontSize: '0.8rem', padding: '6px 10px' }}
-                      />
-                      <input
-                        className="input-base"
-                        value={s.value}
-                        onChange={e => setPushExtraSpecifics(prev => prev.map((r, idx) => idx === i ? { ...r, value: e.target.value } : r))}
-                        placeholder="Value (e.g. T-Shirt)"
-                        style={{ fontSize: '0.8rem', padding: '6px 10px' }}
-                      />
-                      <button className="btn-icon" style={{ color: '#ef4444', padding: '4px 8px' }} onClick={() => setPushExtraSpecifics(prev => prev.filter((_, idx) => idx !== i))}>✕</button>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '0.5rem' }}>
-                  <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setPushModal(null)}>Cancel</button>
-                  <button className="btn-primary" style={{ flex: 2 }} onClick={confirmPushToEbay}>Push to eBay</button>
-                </div>
-              </div>
-            )}
-          </div>
-          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-        </div>, document.body
+      {pushModal && (
+        <PushToEbayModal
+          state={pushModal}
+          onChange={(patch) => setPushModal((prev) => prev ? { ...prev, ...patch } : null)}
+          extraSpecifics={pushExtraSpecifics}
+          onExtraSpecificsChange={setPushExtraSpecifics}
+          onClose={() => setPushModal(null)}
+          onConfirm={confirmPushToEbay}
+        />
       )}
 
       {/* Lightbox — portalled to avoid transform ancestor issues */}
@@ -949,192 +663,63 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
         />
       )}
 
-      {/* Search + Sort controls */}
-      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
-        <div style={{ position: 'relative', flex: 1, minWidth: '200px' }}>
-          <Search size={15} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)', pointerEvents: 'none' }} />
-          <input type="text" className="input-base" placeholder="Search title, SKU, category..." value={search} onChange={e => setSearch(e.target.value)} style={{ paddingLeft: '32px' }} />
-        </div>
-        <div style={{ position: 'relative' }}>
-          <select className="input-base" value={sortBy} onChange={e => setSortBy(e.target.value as SortOption)} style={{ paddingRight: '2rem', appearance: 'none', cursor: 'pointer', minWidth: '180px' }}>
-            <option value="date-desc">Date: Newest First</option>
-            <option value="date-asc">Date: Oldest First</option>
-            <option value="price-desc">Price: High → Low</option>
-            <option value="price-asc">Price: Low → High</option>
-            <option value="title-asc">Title: A → Z</option>
-            <option value="health-asc">Health Score: Lowest First</option>
-          </select>
-          <ChevronDown size={13} style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-secondary)' }} />
-        </div>
-      </div>
-
-      {/* Toolbar */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', gap: '0.75rem', flexWrap: 'wrap' }}>
-        <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-          {visibleListings.length}{search ? ` of ${listings.length}` : ''} listing{visibleListings.length !== 1 ? 's' : ''}
-          {search && <span style={{ opacity: 0.6 }}> matching "{search}"</span>}
-        </span>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          {selectedIds.size === 0 ? (
-            <button onClick={selectAll} style={{ fontSize: '0.8rem', padding: '5px 10px', background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border-color)', color: 'var(--text-secondary)', borderRadius: '6px', cursor: 'pointer' }}>
-              Select All
-            </button>
-          ) : (
-            <>
-              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{selectedIds.size} selected</span>
-              <button onClick={handleBulkPush} disabled={bulkPushingIds.size > 0} className="btn-primary" style={{ fontSize: '0.8rem', padding: '5px 12px', opacity: !isEbayConnected ? 0.5 : 1 }}>
-                Push {selectedIds.size} to eBay
-              </button>
-              <button onClick={handleBulkDelete} style={{ fontSize: '0.8rem', padding: '5px 10px', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', color: '#ef4444', borderRadius: '6px', cursor: 'pointer' }}>
-                Delete Selected
-              </button>
-              <button onClick={clearSelection} className="btn-icon" style={{ padding: '5px' }} title="Clear selection">
-                <X size={16} />
-              </button>
-            </>
-          )}
-          <button onClick={() => setViewMode('grid')} title="Grid view"
-            style={{ padding: '6px 10px', background: viewMode === 'grid' ? 'var(--glass-bg)' : 'transparent', border: '1px solid', borderColor: viewMode === 'grid' ? 'var(--glass-border)' : 'transparent', color: 'var(--text-primary)', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
-            <LayoutGrid size={18} />
-          </button>
-          <button onClick={() => setViewMode('list')} title="List view"
-            style={{ padding: '6px 10px', background: viewMode === 'list' ? 'var(--glass-bg)' : 'transparent', border: '1px solid', borderColor: viewMode === 'list' ? 'var(--glass-border)' : 'transparent', color: 'var(--text-primary)', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
-            <List size={18} />
-          </button>
-        </div>
-      </div>
+      <StagedFilters
+        search={search}
+        onSearchChange={setSearch}
+        sortBy={sortBy}
+        onSortChange={setSortBy}
+      />
+      <StagedBulkToolbar
+        visibleCount={visibleListings.length}
+        totalCount={listings.length}
+        search={search}
+        selectedCount={selectedIds.size}
+        onSelectAll={selectAll}
+        onClearSelection={clearSelection}
+        onBulkPush={handleBulkPush}
+        onBulkDelete={handleBulkDelete}
+        bulkPushing={bulkPushingIds.size > 0}
+        isEbayConnected={isEbayConnected}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+      />
 
       {/* Grid view */}
       {viewMode === 'grid' && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '1.5rem' }}>
-          {paginatedListings.map(listing => {
-            const isSelected = selectedIds.has(listing.id);
-            return (
-              <div key={listing.id} className="glass-card" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', outline: isSelected ? '2px solid var(--accent-color)' : 'none', outlineOffset: '2px' }}>
-                {/* Images */}
-                <div style={{ display: 'flex', height: '140px', background: 'rgba(0,0,0,0.5)', position: 'relative' }}>
-                  {/* Checkbox */}
-                  <div onClick={() => toggleSelect(listing.id)} style={{ position: 'absolute', top: '8px', left: '8px', zIndex: 3, cursor: 'pointer', width: '22px', height: '22px', borderRadius: '5px', background: isSelected ? 'var(--accent-color)' : 'rgba(0,0,0,0.6)', border: `2px solid ${isSelected ? 'var(--accent-color)' : 'rgba(255,255,255,0.4)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s' }}>
-                    {isSelected && <Check size={13} color="white" />}
-                  </div>
-                  {/* Edit images button — overlay on image area */}
-                  <button
-                    onClick={() => setImageEditId(listing.id)}
-                    title="Edit / Add Images"
-                    style={{ position: 'absolute', bottom: '8px', right: '8px', zIndex: 3, background: 'rgba(0,0,0,0.65)', border: '1px solid rgba(255,255,255,0.2)', color: 'white', borderRadius: '6px', padding: '4px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.72rem', backdropFilter: 'blur(4px)' }}
-                  >
-                    <ImagePlus size={13} /> Edit
-                  </button>
-                  {listing.images && listing.images.length > 0 ? (
-                    <>
-                      <div style={{ flex: 2, height: '100%', position: 'relative', cursor: 'pointer' }} onClick={() => { setLightboxImages(listing.images); setLightboxIndex(0); }}>
-                        <img src={listing.images[0]} alt="Main" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                        <ImageSearchButton src={listing.images[0]} />
-                      </div>
-                      {listing.images.length > 1 && (
-                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px', marginLeft: '2px' }}>
-                          {listing.images.slice(1, 3).map((img, i) => (
-                            <div key={i} style={{ flex: 1, height: '50%', position: 'relative', cursor: 'pointer' }} onClick={() => { setLightboxImages(listing.images); setLightboxIndex(i + 1); }}>
-                              <img src={img} alt={`Thumb ${i}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                              <ImageSearchButton src={img} size="sm" />
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>No images</div>
-                  )}
-                </div>
-
-                <div style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', flex: 1 }}>
-                  <h3 style={{ fontSize: '1.1rem', marginBottom: '0.5rem', lineHeight: 1.3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                    {listing.title}
-                  </h3>
-                  <div style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}><Calendar size={13} /> {new Date(listing.createdAt).toLocaleDateString()}</span>
-                    {listing.updatedAt && listing.updatedAt !== listing.createdAt && (
-                      <span style={{ opacity: 0.7 }}>· updated {timeAgo(listing.updatedAt)}</span>
-                    )}
-                  </div>
-                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '1rem', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                    {listing.condition}
-                  </p>
-                  <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: '0.8rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px' }}>${listing.priceRecommendation}</span>
-                    <span style={{ fontSize: '0.8rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px' }}>{listing.category}</span>
-                    {listing.sku && <span style={{ fontSize: '0.8rem', background: 'rgba(99,102,241,0.25)', padding: '2px 8px', borderRadius: '4px', color: '#a5b4fc' }}>SKU: {listing.sku}</span>}
-                  </div>
-                  {listing.sellerNotes && (
-                    <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', padding: '6px 8px', marginBottom: '0.5rem', fontStyle: 'italic' }}>
-                      📝 {listing.sellerNotes}
-                    </p>
-                  )}
-                  <div style={{ marginTop: 'auto', display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', alignItems: 'center', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)', flexWrap: 'wrap' }}>
-                    <span style={{ marginRight: 'auto' }} />
-                    <ActionButtons listing={listing} />
-                  </div>
-                </div>
-
-                <CompsPanel listing={listing} />
-              </div>
-            );
-          })}
+          {paginatedListings.map((listing) => (
+            <StagedListingCard
+              key={listing.id}
+              listing={listing}
+              isSelected={selectedIds.has(listing.id)}
+              onToggleSelect={toggleSelect}
+              onEditImages={(id) => setImageEditId(id)}
+              onOpenLightbox={(imgs, idx) => { setLightboxImages(imgs); setLightboxIndex(idx); }}
+              actions={<ActionButtons listing={listing} />}
+              compsPanel={renderCompsPanel(listing)}
+            />
+          ))}
         </div>
       )}
 
       {/* List view */}
       {viewMode === 'list' && (
         <div className="glass-panel" style={{ padding: 0, overflow: 'hidden' }}>
-          {paginatedListings.map((listing, idx) => {
-            const isSelected = selectedIds.has(listing.id);
-            return (
-              <div key={listing.id}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.75rem 1.25rem', background: isSelected ? 'rgba(99,102,241,0.06)' : 'none', borderBottom: '1px solid var(--border-color)' }}>
-                  {/* Checkbox */}
-                  <div onClick={() => toggleSelect(listing.id)} style={{ width: '18px', height: '18px', flexShrink: 0, borderRadius: '4px', background: isSelected ? 'var(--accent-color)' : 'transparent', border: `2px solid ${isSelected ? 'var(--accent-color)' : 'var(--border-color)'}`, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    {isSelected && <Check size={11} color="white" />}
-                  </div>
-
-                  {/* Thumbnail */}
-                  <div style={{ width: '56px', height: '56px', flexShrink: 0, borderRadius: '6px', overflow: 'hidden', background: 'rgba(0,0,0,0.4)', position: 'relative', cursor: listing.images?.[0] ? 'pointer' : 'default' }}
-                    onClick={() => listing.images?.[0] && (setLightboxImages(listing.images), setLightboxIndex(0))}>
-                    {listing.images?.[0] ? (
-                      <><img src={listing.images[0]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /><ImageSearchButton src={listing.images[0]} size="sm" /></>
-                    ) : (
-                      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', fontSize: '0.7rem' }}>—</div>
-                    )}
-                  </div>
-
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ margin: 0, fontWeight: 500, fontSize: '0.95rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{listing.title}</p>
-                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '2px' }}>
-                      {listing.sellerNotes && <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontStyle: 'italic', flex: 1 }}>📝 {listing.sellerNotes}</p>}
-                      {listing.updatedAt && listing.updatedAt !== listing.createdAt && <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', flexShrink: 0, opacity: 0.7 }}>updated {timeAgo(listing.updatedAt)}</span>}
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
-                    <span style={{ fontSize: '0.78rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px', whiteSpace: 'nowrap' }}>${listing.priceRecommendation}</span>
-                    {listing.sku && <span style={{ fontSize: '0.78rem', background: 'rgba(99,102,241,0.25)', padding: '2px 8px', borderRadius: '4px', color: '#a5b4fc', whiteSpace: 'nowrap' }}>{listing.sku}</span>}
-                  </div>
-
-                  <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', flexShrink: 0, minWidth: '80px', textAlign: 'right' }}>
-                    {new Date(listing.createdAt).toLocaleDateString()}
-                  </span>
-
-                  <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0, alignItems: 'center' }}>
-                    <ActionButtons listing={listing} />
-                  </div>
+          {paginatedListings.map((listing, idx) => (
+            <StagedListingListRow
+              key={listing.id}
+              listing={listing}
+              isSelected={selectedIds.has(listing.id)}
+              onToggleSelect={toggleSelect}
+              onOpenLightbox={(imgs, i) => { setLightboxImages(imgs); setLightboxIndex(i); }}
+              actions={<ActionButtons listing={listing} />}
+              compsPanel={compsId === listing.id ? (
+                <div style={{ padding: '0 1.25rem', borderBottom: idx < paginatedListings.length - 1 ? '1px solid var(--border-color)' : 'none' }}>
+                  {renderCompsPanel(listing)}
                 </div>
-                {compsId === listing.id && (
-                  <div style={{ padding: '0 1.25rem', borderBottom: idx < paginatedListings.length - 1 ? '1px solid var(--border-color)' : 'none' }}>
-                    <CompsPanel listing={listing} />
-                  </div>
-                )}
-              </div>
-            );
-          })}
+              ) : null}
+            />
+          ))}
         </div>
       )}
 

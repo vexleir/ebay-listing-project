@@ -28,3 +28,7 @@ dist-ssr
 .env.*
 server/.env
 server/.env.*
+
+# Runtime secrets / token stores
+server/ebay_tokens.json
+server/*tokens*.json
