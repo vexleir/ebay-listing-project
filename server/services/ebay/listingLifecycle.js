@@ -18,6 +18,7 @@ const { buildItemSpecificsXml } = require('./xml');
 const { getConditionId, pickFallbackConditionId } = require('./conditions');
 const { getValidConditionIdsForCategory } = require('./categories');
 const { tradingApiCall, TRADING_API_URL } = require('./client');
+const { translateEbayError } = require('./errors');
 
 // Parse a free-form price string ("$24.99", "24.99 USD", "24") into the
 // fixed-2-decimal string eBay expects. Returns '50.00' as a safety default
@@ -449,7 +450,11 @@ async function pushListingToEbay(
 }
 
 // Translate any error from pushListingToEbay (or related lifecycle calls)
-// into an HTTP response on `res`.
+// into an HTTP response on `res`. The body keeps the legacy `error` string
+// so the existing frontend keeps working; the new `errorDetails` field
+// surfaces the translated `{ code, message, fix }` from services/ebay/errors.js
+// so the UI can show seller-friendly copy + a recommended fix when the
+// frontend opts in.
 function sendEbayPushError(res, error) {
   let msg = error.message;
   if (error?.response?.data) {
@@ -463,7 +468,21 @@ function sendEbayPushError(res, error) {
   }
   console.error('Node Error:', msg);
   const status = error.status || 500;
+  // Try translating the message (or the underlying eBay text, if the Error
+  // message starts with our "eBay API Error: " prefix).
+  const rawCandidate = msg && msg.startsWith('eBay API Error: ')
+    ? msg.substring('eBay API Error: '.length)
+    : msg;
+  const translated = translateEbayError(rawCandidate);
   const payload = { error: status === 500 ? `Push failed: ${msg}` : msg };
+  if (translated) {
+    payload.errorDetails = {
+      code: translated.code,
+      message: translated.message,
+      fix: translated.fix,
+      rawMessage: translated.rawMessage,
+    };
+  }
   if (error.warnings) payload.warnings = error.warnings;
   res.status(status).json(payload);
 }

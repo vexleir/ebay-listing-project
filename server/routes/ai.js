@@ -11,6 +11,8 @@ const {
   enforceAiDailyQuota,
   recordTokenUsage,
 } = require('../middleware/quota');
+const { withAiTelemetry } = require('../services/ai/telemetry');
+const { LISTING_FINAL_VERSION } = require('../services/ai/prompts');
 
 const { aiRateLimit } = createDefaultRateLimiters();
 
@@ -23,7 +25,10 @@ router.post('/generate', aiRateLimit, async (req, res) => {
       return res.status(500).json({ error: 'Server missing GEMINI_API_KEY.' });
     }
     if (!(await enforceAiDailyQuota(req, res, AI_GENERATE_QUOTA_RESERVE_TOKENS))) return;
-    const result = await generateListing(imageParts, instructions, process.env.GEMINI_API_KEY);
+    const result = await withAiTelemetry(
+      { companyId: req.companyId, useCase: 'listing.generate', promptName: 'listing.final', promptVersion: LISTING_FINAL_VERSION },
+      () => generateListing(imageParts, instructions, process.env.GEMINI_API_KEY),
+    );
     await recordTokenUsage(req.companyId, result.tokenUsage);
     res.json(result);
   } catch (error) {
@@ -37,7 +42,10 @@ router.post('/generate-from-urls', aiRateLimit, async (req, res) => {
     const { imageUrls, instructions } = req.body;
     if (!process.env.GEMINI_API_KEY) return res.status(500).json({ error: 'Server missing GEMINI_API_KEY' });
     if (!(await enforceAiDailyQuota(req, res, AI_GENERATE_QUOTA_RESERVE_TOKENS))) return;
-    const result = await generateListingFromUrls(imageUrls || [], instructions || '', process.env.GEMINI_API_KEY);
+    const result = await withAiTelemetry(
+      { companyId: req.companyId, useCase: 'listing.generateFromUrls', promptName: 'listing.final', promptVersion: LISTING_FINAL_VERSION },
+      () => generateListingFromUrls(imageUrls || [], instructions || '', process.env.GEMINI_API_KEY),
+    );
     await recordTokenUsage(req.companyId, result.tokenUsage);
     res.json(result);
   } catch (e) {

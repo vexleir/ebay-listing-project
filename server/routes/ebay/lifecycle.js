@@ -16,11 +16,22 @@ const { getValidAccessToken } = require('../../ebayAuth');
 const { updateListing, getSettings } = require('../../listings');
 const { createDefaultRateLimiters } = require('../../middleware/rateLimit');
 const { tradingApiCall } = require('../../services/ebay/client');
+const { translateEbayError } = require('../../services/ebay/errors');
 const {
   buildItemSpecificsXml,
   pushListingToEbay,
   sendEbayPushError,
 } = require('../../services/ebay/listingLifecycle');
+
+// Helper: respond with the legacy { error } string AND the new errorDetails
+// shape from the translator when a rule matches. Frontend can opt into
+// reading errorDetails to show a user-friendly message + fix.
+function respondWithEbayError(res, status, rawMessage) {
+  const body = { error: rawMessage };
+  const t = translateEbayError(rawMessage);
+  if (t) body.errorDetails = { code: t.code, message: t.message, fix: t.fix, rawMessage: t.rawMessage };
+  return res.status(status).json(body);
+}
 
 const { ebayWriteRateLimit } = createDefaultRateLimiters();
 
@@ -119,7 +130,7 @@ router.post('/revise', ebayWriteRateLimit, async (req, res) => {
         });
         if (resp2.data.includes('<Ack>Failure</Ack>')) {
           const err2 = resp2.data.match(/<LongMessage>(.*?)<\/LongMessage>/)?.[1] || 'Unknown error';
-          return res.status(400).json({ error: err2 });
+          return respondWithEbayError(res, 400, err2);
         }
         return res.json({ success: true, warning: 'Condition was not updated — the chosen condition is not valid for this listing’s eBay category. The existing condition on the listing was kept.' });
       }
@@ -134,12 +145,12 @@ router.post('/revise', ebayWriteRateLimit, async (req, res) => {
         });
         if (resp2.data.includes('<Ack>Failure</Ack>')) {
           const err2 = resp2.data.match(/<LongMessage>(.*?)<\/LongMessage>/)?.[1] || 'Unknown error';
-          return res.status(400).json({ error: err2 });
+          return respondWithEbayError(res, 400, err2);
         }
         return res.json({ success: true, warning: 'Price was not updated because this item is currently part of a sale.' });
       }
 
-      return res.status(400).json({ error: err });
+      return respondWithEbayError(res, 400, err);
     }
     res.json({ success: true });
   } catch (e) {
@@ -161,7 +172,7 @@ router.post('/end-listing', ebayWriteRateLimit, async (req, res) => {
     const resp = await tradingApiCall({ callName: 'EndFixedPriceItem', xmlBody: xml, token });
     if (resp.data.includes('<Ack>Failure</Ack>')) {
       const err = resp.data.match(/<LongMessage>(.*?)<\/LongMessage>/)?.[1] || 'Unknown error';
-      return res.status(400).json({ error: err });
+      return respondWithEbayError(res, 400, err);
     }
     res.json({ success: true });
   } catch (e) {

@@ -16,10 +16,27 @@ const crypto = require('crypto');
 const express = require('express');
 const { getValidAccessToken } = require('../../ebayAuth');
 const { getDb } = require('../../db');
+const { saveSettings } = require('../../listings');
 const { createDefaultRateLimiters } = require('../../middleware/rateLimit');
 const { tradingApiCall } = require('../../services/ebay/client');
 
 const { ebayReadRateLimit } = createDefaultRateLimiters();
+
+// Allowed sold-sync lookback values. The frontend setting offers these three
+// options; anything else falls back to the default. eBay caps the Trading
+// API at 90 days on the SoldList duration, so don't widen this without
+// switching to the Order Management API.
+const SOLD_SYNC_ALLOWED_LOOKBACK = new Set([30, 60, 90]);
+const SOLD_SYNC_DEFAULT_LOOKBACK = 30;
+const SOLD_SYNC_ENTRIES_PER_PAGE = 50;
+// Safety cap so a misconfigured response can't push us into pagination forever.
+const SOLD_SYNC_MAX_PAGES = 60;
+
+function resolveLookbackDays(raw) {
+  const n = parseInt(raw, 10);
+  if (SOLD_SYNC_ALLOWED_LOOKBACK.has(n)) return n;
+  return SOLD_SYNC_DEFAULT_LOOKBACK;
+}
 
 const router = express.Router();
 
@@ -55,39 +72,90 @@ router.get('/listing-stats', ebayReadRateLimit, async (req, res) => {
   }
 });
 
+// GET /api/ebay/sold-items?lookbackDays=30|60|90
+// Paginates through every page of GetMyeBaySelling.SoldList for the chosen
+// lookback window and returns the merged item list plus sync metadata.
+// Persists lastSoldSyncAt + lastSoldSyncLookbackDays + summary counts to
+// settings so the UI can render "last synced X minutes ago over Y days".
 router.get('/sold-items', ebayReadRateLimit, async (req, res) => {
   try {
+    const lookbackDays = resolveLookbackDays(req.query.lookbackDays);
     const token = await getValidAccessToken(req.companyId);
-    const xml = `<?xml version="1.0" encoding="utf-8"?>
+
+    const items = [];
+    const seenItemIds = new Set();
+    let pagesFetched = 0;
+    let totalEntries = 0;
+
+    for (let pageNumber = 1; pageNumber <= SOLD_SYNC_MAX_PAGES; pageNumber++) {
+      const xml = `<?xml version="1.0" encoding="utf-8"?>
 <GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <SoldList>
     <Include>true</Include>
-    <DurationInDays>30</DurationInDays>
-    <Pagination><EntriesPerPage>50</EntriesPerPage><PageNumber>1</PageNumber></Pagination>
+    <DurationInDays>${lookbackDays}</DurationInDays>
+    <Pagination><EntriesPerPage>${SOLD_SYNC_ENTRIES_PER_PAGE}</EntriesPerPage><PageNumber>${pageNumber}</PageNumber></Pagination>
   </SoldList>
   <HideVariations>true</HideVariations>
 </GetMyeBaySellingRequest>`;
-    const resp = await tradingApiCall({ callName: 'GetMyeBaySelling', xmlBody: xml, token });
-    const body = resp.data;
-    const itemRegex = /<Item>([\s\S]*?)<\/Item>/g;
-    const items = [];
-    let m;
-    while ((m = itemRegex.exec(body)) !== null) {
-      const block = m[1];
-      const get = (tag) => {
-        const r = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`);
-        const x = r.exec(block);
-        return x ? x[1].trim() : '';
-      };
-      items.push({
-        itemId: get('ItemID'),
-        title: get('Title'),
-        soldPrice: get('CurrentPrice') || get('SalePrice') || '',
-        soldDate: get('LastModifiedTime') || '',
-        quantitySold: get('QuantitySold') || '1',
-      });
+      const resp = await tradingApiCall({ callName: 'GetMyeBaySelling', xmlBody: xml, token });
+      const body = resp.data;
+      pagesFetched += 1;
+
+      // Capture total once; eBay returns this in <PaginationResult>.
+      const totalMatch = /<TotalNumberOfEntries>(\d+)<\/TotalNumberOfEntries>/.exec(body);
+      if (totalMatch) totalEntries = parseInt(totalMatch[1], 10);
+      const totalPagesMatch = /<TotalNumberOfPages>(\d+)<\/TotalNumberOfPages>/.exec(body);
+      const totalPages = totalPagesMatch ? parseInt(totalPagesMatch[1], 10) : 1;
+
+      const itemRegex = /<Item>([\s\S]*?)<\/Item>/g;
+      let pageItems = 0;
+      let m;
+      while ((m = itemRegex.exec(body)) !== null) {
+        const block = m[1];
+        const get = (tag) => {
+          const r = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`);
+          const x = r.exec(block);
+          return x ? x[1].trim() : '';
+        };
+        const itemId = get('ItemID');
+        if (!itemId || seenItemIds.has(itemId)) continue;
+        seenItemIds.add(itemId);
+        pageItems += 1;
+        items.push({
+          itemId,
+          title: get('Title'),
+          soldPrice: get('CurrentPrice') || get('SalePrice') || '',
+          soldDate: get('LastModifiedTime') || '',
+          quantitySold: get('QuantitySold') || '1',
+        });
+      }
+
+      // Stop when we've drained eBay's pagination or the current page came
+      // back empty (defensive — should match totalPages exactly).
+      if (pageNumber >= totalPages || pageItems === 0) break;
     }
-    res.json({ items });
+
+    // Persist sync metadata. Failure here is non-fatal — the seller still
+    // gets their data, but the "last synced" badge won't refresh.
+    const syncedAt = new Date().toISOString();
+    try {
+      await saveSettings(req.companyId, {
+        lastSoldSyncAt: syncedAt,
+        lastSoldSyncLookbackDays: lookbackDays,
+        lastSoldSyncItemCount: items.length,
+        lastSoldSyncPagesFetched: pagesFetched,
+      });
+    } catch (e) {
+      console.warn('[sold-items] failed to persist sync metadata:', e.message);
+    }
+
+    res.json({
+      items,
+      lookbackDays,
+      pagesFetched,
+      totalEntries,
+      syncedAt,
+    });
   } catch (e) {
     console.error('[sold-items] error:', e.message);
     res.status(500).json({ error: e.message });
@@ -375,3 +443,5 @@ router.post('/refresh-images/:id', ebayReadRateLimit, async (req, res) => {
 });
 
 module.exports = router;
+// Exported for tests only.
+module.exports.__test__ = { resolveLookbackDays, SOLD_SYNC_ALLOWED_LOOKBACK, SOLD_SYNC_DEFAULT_LOOKBACK };

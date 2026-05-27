@@ -11,6 +11,8 @@ const {
   enforceAiDailyQuota,
   recordTokenUsage,
 } = require('../middleware/quota');
+const { withAiTelemetry } = require('../services/ai/telemetry');
+const { OPTIMIZER_VERSION } = require('../services/ai/prompts');
 
 const { aiRateLimit, compsRateLimit } = createDefaultRateLimiters();
 
@@ -47,7 +49,10 @@ router.post('/ai-optimize', aiRateLimit, async (req, res) => {
   if (!process.env.GEMINI_API_KEY) return res.status(500).json({ error: 'Server missing GEMINI_API_KEY' });
   try {
     if (!(await enforceAiDailyQuota(req, res, AI_OPTIMIZE_QUOTA_RESERVE_TOKENS))) return;
-    const result = await aiOptimizeListing(listingData, process.env.GEMINI_API_KEY);
+    const result = await withAiTelemetry(
+      { companyId: req.companyId, useCase: 'optimizer.optimize', promptName: 'optimizer.optimize', promptVersion: OPTIMIZER_VERSION },
+      () => aiOptimizeListing(listingData, process.env.GEMINI_API_KEY),
+    );
     await recordTokenUsage(req.companyId, result.tokenUsage);
     res.json(result);
   } catch (e) {

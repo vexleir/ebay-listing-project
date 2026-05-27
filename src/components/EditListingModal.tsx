@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { X, Save, Send, Plus, Trash2 } from 'lucide-react';
 import type { StagedListing } from '../types';
 import { useToast } from '../context/ToastContext';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 
 interface EditListingModalProps {
   listing: StagedListing;
@@ -54,6 +55,10 @@ export default function EditListingModal({ listing, appPassword, onClose, onSave
   );
   const [saving, setSaving] = useState(false);
   const [pushing, setPushing] = useState(false);
+
+  // UX-002 — Escape dismisses the modal, but only when nothing is in flight
+  // (matches the Cancel button's disabled gating on line 217ish).
+  useEscapeKey(onClose, !saving && !pushing);
 
   const jsonHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${appPassword}` };
 

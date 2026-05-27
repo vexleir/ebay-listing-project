@@ -11,6 +11,17 @@ async function loadGenAI() {
 // Disable Gemini 2.5 "thinking" — we just need structured listing output.
 const GENERATION_CONFIG = { thinkingConfig: { thinkingBudget: 0 } };
 
+// AI-001 prompt registry + AI-002 telemetry — see services/ai/prompts.js
+// and services/ai/telemetry.js for rationale.
+const {
+  listingAnalysisPrompt,
+  listingTitleEnrichPrompt,
+  listingFinalPrompt,
+  LISTING_ANALYSIS_VERSION,
+  LISTING_TITLE_ENRICH_VERSION,
+  LISTING_FINAL_VERSION,
+} = require('./services/ai/prompts');
+
 async function generateListing(imageParts, instructions, apiKey) {
   const GoogleGenAI = await loadGenAI();
   const ai = new GoogleGenAI({ apiKey });
@@ -32,23 +43,8 @@ async function generateListing(imageParts, instructions, apiKey) {
       }
     };
 
-    // 1. Analyze product and get base title & details
-    const analysisPrompt = `
-      You are an expert eBay seller and SEO master. Please analyze these images of a product.
-      Additional instructions from the user: "${instructions}"
-
-      Identify the product, model, brand, and key features.
-      Then, generate a Cassini SEO optimized eBay title. 
-      - It MUST have the most important keywords towards the beginning.
-      - It MUST be exactly 80 characters or slightly less (never more than 80).
-      - Try to use as close to 80 characters as possible to maximize search keywords.
-      
-      Respond with ONLY a JSON object in this format:
-      {
-        "identifiedProductDetails": "brief summary of what the product is",
-        "title": "the optimized title"
-      }
-    `;
+    // 1. Analyze product and get base title & details (prompt registry)
+    const analysisPrompt = listingAnalysisPrompt({ instructions });
 
     let totalPromptTokens = 0;
     let totalCompletionTokens = 0;
@@ -71,13 +67,9 @@ async function generateListing(imageParts, instructions, apiKey) {
 
     let title = analysis.title;
 
-    // 2. Validate and enrich title if it's too short
+    // 2. Validate and enrich title if it's too short (prompt registry)
     if (title.length < 70) {
-      const enrichPrompt = `
-        The current eBay title is: "${title}" (Length: ${title.length}/80).
-        Based on the product: "${analysis.identifiedProductDetails}", see if you can add 1 or 2 more relevant SEO keywords to make the title closer to 80 characters without exceeding 80 characters.
-        Return ONLY the new title as plain text, nothing else. If you can't add any good keywords, just return the exact same title.
-      `;
+      const enrichPrompt = listingTitleEnrichPrompt({ title, identifiedProductDetails: analysis.identifiedProductDetails });
       const enrichResult = await generate('enrich', enrichPrompt);
       const usage2 = enrichResult.usageMetadata;
       if (usage2) { totalPromptTokens += usage2.promptTokenCount || 0; totalCompletionTokens += usage2.candidatesTokenCount || 0; }
@@ -91,27 +83,12 @@ async function generateListing(imageParts, instructions, apiKey) {
       title = title.substring(0, 80).trim();
     }
 
-    // 3. Generate Description, Condition, Item Specifics, Category, Pricing, and Shipping
-    const descConditionPrompt = `
-      You are an expert eBay seller and copywriter. I am listing the following product:
-      Product details: "${analysis.identifiedProductDetails}"
-      Title: "${title}"
-      User instructions: "${instructions}"
-
-      Based on these details and the images provided, output a JSON object containing the following exact fields:
-      
-      1. "condition": A concise condition report based purely on visual evidence and instructions.
-      2. "description": An HTML description optimized to maximize purchase likelihood. Include a clear Call To Action. The styling must be inline CSS with a color scheme matching the product. Look premium and trustworthy. Do NOT wrap this field value in markdown. CTA RULES: the call to action must be styled text only (e.g. a bold, colored sentence or a short emphasized line) — NEVER render it as a button, pill, or any element styled to look clickable. eBay strips links and interactive elements from listings, so a button-shaped CTA looks broken. Do not use anchor tags, button tags, or button-like CSS (border-radius blocks with solid background fills, padded "click here" boxes, etc.).
-      3. "itemSpecifics": A JSON object containing key/value pairs of relevant eBay Item Specifics (e.g. "Brand": "Nike", "MPN": "Does Not Apply"). IMPORTANT RULES: (a) ALWAYS include a "Type" field describing what kind of item this is (e.g. "T-Shirt", "Action Figure", "Trading Card", "Necklace"). (b) ALWAYS include "Age Group" using one of: adult, infant, kids, newborn, toddler, unisex — choose the most accurate value based on the product (default "adult" for general products). (c) ALWAYS include "Gender" using one of: male, female, unisex — choose the most accurate value (default "unisex" if not gender-specific). (d) Include "MPN" if a model or part number is visible or identifiable; otherwise use "Does Not Apply". (e) NEVER include "Condition", "ConditionID", "Price", "Currency", or "Listing Type" — eBay handles these separately. (f) Fill in "Does Not Apply" if a value is truly unknown, not "Unable to determine".
-      4. "category": The most accurate suggested eBay category path (e.g. "Collectibles > Historical Memorabilia").
-      5. "priceRecommendation": A single recommended sell price as a plain decimal number string only (e.g. "49.99"). No currency symbols, no ranges, no text — just the number.
-      6. "priceJustification": A brief explanation of why that price was chosen (comparable sold listings, condition, rarity, etc.). This is for the seller's reference only.
-      7. "shippingEstimate": A detailed shipping estimate including estimated weight, dimensions, recommended service, packaging, and cost.
-      8. "tags": An array of 6-10 concise, lowercase product tags relevant to this item (e.g. ["vintage", "action-figure", "1990s", "anime", "collectible"]). Used for SEO and category targeting.
-      9. "seoKeywords": A comma-separated string of 5-8 high-value SEO keywords relevant to the product (e.g. "vintage dragonball z figure, collectible anime toy, 90s action figure").
-
-      Respond ONLY with the raw JSON object matching the keys: condition, description, itemSpecifics, category, priceRecommendation, priceJustification, shippingEstimate, tags, seoKeywords. Do not include markdown code block wrappers.
-    `;
+    // 3. Generate Description, Condition, Item Specifics, Category, Pricing, Shipping (prompt registry)
+    const descConditionPrompt = listingFinalPrompt({
+      identifiedProductDetails: analysis.identifiedProductDetails,
+      title,
+      instructions,
+    });
 
     const finalResult = await generate('final', [descConditionPrompt, ...imageParts]);
     const usage3 = finalResult.usageMetadata;
@@ -149,7 +126,20 @@ async function generateListing(imageParts, instructions, apiKey) {
       shippingEstimate: finalShipping,
       tags: Array.isArray(parsedFinal.tags) ? parsedFinal.tags : [],
       seoKeywords: parsedFinal.seoKeywords || "",
-      tokenUsage: { promptTokens: totalPromptTokens, completionTokens: totalCompletionTokens, totalTokens: totalPromptTokens + totalCompletionTokens, model: modelName }
+      tokenUsage: {
+        promptTokens: totalPromptTokens,
+        completionTokens: totalCompletionTokens,
+        totalTokens: totalPromptTokens + totalCompletionTokens,
+        model: modelName,
+        // Three-pass call uses three prompts; record the final pass version as the
+        // canonical one (it's the one Phase 4 experiments will compare against).
+        promptVersion: LISTING_FINAL_VERSION,
+        promptStages: {
+          analysis: LISTING_ANALYSIS_VERSION,
+          titleEnrich: LISTING_TITLE_ENRICH_VERSION,
+          final: LISTING_FINAL_VERSION,
+        },
+      }
     };
   };
 

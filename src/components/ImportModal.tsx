@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, RefreshCw, Download, Check, AlertTriangle, Package } from 'lucide-react';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 
 interface ScanItem {
   itemId: string;
@@ -45,6 +46,9 @@ function formatPrice(price: string | undefined): string {
 export default function ImportModal({ appPassword, isEbayConnected, onClose, onImportComplete }: ImportModalProps) {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [scanning, setScanning] = useState(false);
+  // UX-002 — Escape closes the modal, but not during step 3 (mid-import)
+  // since the backdrop click is already disabled then.
+  useEscapeKey(onClose, step !== 3);
   const [scanError, setScanError] = useState('');
   const [results, setResults] = useState<ScanResults | null>(null);
   const [activeTab, setActiveTab] = useState<'active' | 'sold' | 'ended'>('active');

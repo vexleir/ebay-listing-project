@@ -149,6 +149,68 @@ export default function Analytics({ staged, listed, appPassword }: AnalyticsProp
   });
   const maxMonthlyRevenue = Math.max(...monthlyData.map(m => m.revenue), 1);
 
+  // DATA-003 — 12-week trend lines. Buckets sold items into ISO-week windows
+  // ending Sunday. Each row carries revenue, sold count, avg sale price, and
+  // (when cost basis is present on enough items) average net profit.
+  const weeklyData = (() => {
+    const weeks: { label: string; weekEnd: number; revenue: number; count: number; avgPrice: number; avgNetProfit: number | null; netProfitSamples: number }[] = [];
+    const today = new Date();
+    // Snap to most recent Sunday so week buckets align to the calendar.
+    const todayDow = today.getDay(); // 0 = Sun
+    const lastSunday = new Date(today);
+    lastSunday.setHours(23, 59, 59, 999);
+    lastSunday.setDate(today.getDate() - todayDow);
+    for (let i = 11; i >= 0; i--) {
+      const end = new Date(lastSunday);
+      end.setDate(lastSunday.getDate() - i * 7);
+      const start = new Date(end);
+      start.setDate(end.getDate() - 6);
+      start.setHours(0, 0, 0, 0);
+      const items = soldItems.filter(l => l.soldAt! >= start.getTime() && l.soldAt! <= end.getTime());
+      const revenue = items.reduce((s, l) => s + parsePrice(l.soldPrice), 0);
+      const withCost = items.filter(l => l.costBasis && parsePrice(l.costBasis) > 0);
+      const netProfits = withCost.map(l => calculateNetProfit(l.soldPrice, l.costBasis, l.category || '', l.shippingLabelCost, promotedPct).netProfit);
+      const avgNetProfit = netProfits.length > 0 ? netProfits.reduce((s, n) => s + n, 0) / netProfits.length : null;
+      weeks.push({
+        // Short label like "May 26" so 12 fit horizontally without crowding.
+        label: end.toLocaleString('default', { month: 'short', day: 'numeric' }),
+        weekEnd: end.getTime(),
+        revenue,
+        count: items.length,
+        avgPrice: items.length > 0 ? revenue / items.length : 0,
+        avgNetProfit,
+        netProfitSamples: netProfits.length,
+      });
+    }
+    return weeks;
+  })();
+  const maxWeeklyRevenue = Math.max(...weeklyData.map(w => w.revenue), 1);
+  const maxWeeklyCount = Math.max(...weeklyData.map(w => w.count), 1);
+
+  // DATA-002 — P&L by tag. Aggregates sold items by tag and computes
+  // revenue / count / avg sale price / avg net profit per tag. Only tags
+  // that appear on at least one sold item are surfaced.
+  const tagPnL = (() => {
+    const acc = new Map<string, { tag: string; revenue: number; count: number; netProfit: number; netProfitSamples: number }>();
+    for (const l of soldItems) {
+      const tags = Array.isArray(l.tags) ? l.tags : [];
+      if (tags.length === 0) continue;
+      const sale = parsePrice(l.soldPrice);
+      const hasCost = !!(l.costBasis && parsePrice(l.costBasis) > 0);
+      const np = hasCost
+        ? calculateNetProfit(l.soldPrice, l.costBasis, l.category || '', l.shippingLabelCost, promotedPct).netProfit
+        : null;
+      for (const tag of tags) {
+        const row = acc.get(tag) || { tag, revenue: 0, count: 0, netProfit: 0, netProfitSamples: 0 };
+        row.revenue += sale;
+        row.count += 1;
+        if (np !== null) { row.netProfit += np; row.netProfitSamples += 1; }
+        acc.set(tag, row);
+      }
+    }
+    return Array.from(acc.values()).sort((a, b) => b.revenue - a.revenue).slice(0, 10);
+  })();
+
   // Gemini cost estimate (approx Gemini 1.5 Flash rates)
   const estimatedCost = tokenStats
     ? (tokenStats.promptTokens / 1_000_000) * 0.075 + (tokenStats.completionTokens / 1_000_000) * 0.30
@@ -375,6 +437,95 @@ export default function Analytics({ staged, listed, appPassword }: AnalyticsProp
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* DATA-003 — 12-week trends */}
+        {soldItems.length > 0 && (
+          <div className="glass-panel" style={{ padding: '1.5rem', gridColumn: 'span 2' }}>
+            <h3 style={{ marginBottom: '1.25rem', fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '6px' }}><TrendingUp size={16} /> 12-Week Trend</h3>
+            {/* Revenue + sold count bars */}
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: '6px', height: '110px' }}>
+              {weeklyData.map(w => (
+                <div key={w.weekEnd} title={`Week ending ${w.label}\nRevenue $${w.revenue.toFixed(2)} · ${w.count} sold · avg sale $${w.avgPrice.toFixed(2)}${w.avgNetProfit !== null ? `\navg net $${w.avgNetProfit.toFixed(2)} (${w.netProfitSamples} with cost basis)` : ''}`}
+                  style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', height: '100%', justifyContent: 'flex-end' }}>
+                  {w.revenue > 0 && <span style={{ fontSize: '0.62rem', color: 'var(--success)', textAlign: 'center', whiteSpace: 'nowrap' }}>${w.revenue >= 1000 ? (w.revenue / 1000).toFixed(1) + 'k' : w.revenue.toFixed(0)}</span>}
+                  <div style={{ width: '100%', height: `${Math.max((w.revenue / maxWeeklyRevenue) * 64, w.revenue > 0 ? 4 : 2)}px`, background: w.revenue > 0 ? 'var(--success)' : 'rgba(255,255,255,0.06)', borderRadius: '2px 2px 0 0', minHeight: '2px' }} />
+                </div>
+              ))}
+            </div>
+            {/* Week labels (rotated for fit) */}
+            <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+              {weeklyData.map(w => (
+                <div key={w.weekEnd} style={{ flex: 1, fontSize: '0.6rem', color: 'var(--text-secondary)', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.label}</div>
+              ))}
+            </div>
+            {/* Sparkline of avg sale price */}
+            <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                <span>Avg sale price (per week)</span>
+                <span>Avg net profit (when cost basis recorded)</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: '6px', height: '36px' }}>
+                {weeklyData.map(w => {
+                  const maxAvgPrice = Math.max(...weeklyData.map(x => x.avgPrice), 1);
+                  return (
+                    <div key={w.weekEnd} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%' }}>
+                      <div style={{ width: '100%', height: `${Math.max((w.avgPrice / maxAvgPrice) * 30, w.avgPrice > 0 ? 3 : 2)}px`, background: w.avgPrice > 0 ? 'var(--accent-color)' : 'rgba(255,255,255,0.06)', borderRadius: '2px 2px 0 0' }} />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            {/* Sold count strip */}
+            <div style={{ marginTop: '0.75rem', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+              <span style={{ width: '80px' }}>Sold count</span>
+              <div style={{ display: 'flex', flex: 1, gap: '6px' }}>
+                {weeklyData.map(w => (
+                  <div key={w.weekEnd} style={{ flex: 1, textAlign: 'center', padding: '4px 0', background: w.count > 0 ? `rgba(99,102,241,${Math.max(0.1, w.count / maxWeeklyCount * 0.6)})` : 'rgba(255,255,255,0.03)', borderRadius: '3px', color: w.count > 0 ? '#a5b4fc' : 'var(--text-secondary)', fontWeight: w.count > 0 ? 600 : 400 }}>
+                    {w.count || '·'}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* DATA-002 — P&L by tag (top 10) */}
+        {tagPnL.length > 0 && (
+          <div className="glass-panel" style={{ padding: '1.5rem', gridColumn: 'span 2' }}>
+            <h3 style={{ marginBottom: '1rem', fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '6px' }}><Tag size={16} /> P&amp;L by Tag (top 10)</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr 1fr 1fr', gap: '0 1rem', alignItems: 'center', fontSize: '0.72rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em', paddingBottom: '6px', borderBottom: '1px solid var(--border-color)' }}>
+              <span>Tag</span>
+              <span style={{ textAlign: 'right' }}>Sold</span>
+              <span style={{ textAlign: 'right' }}>Revenue</span>
+              <span style={{ textAlign: 'right' }}>Avg sale</span>
+              <span style={{ textAlign: 'right' }}>Avg net</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {tagPnL.map(row => {
+                const avgSale = row.count > 0 ? row.revenue / row.count : 0;
+                const avgNet = row.netProfitSamples > 0 ? row.netProfit / row.netProfitSamples : null;
+                const avgNetColor = avgNet === null ? 'var(--text-secondary)' : avgNet >= 0 ? 'var(--success)' : '#ef4444';
+                return (
+                  <div key={row.tag} style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr 1fr 1fr', gap: '0 1rem', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border-color)', fontSize: '0.85rem' }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}><span style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)', color: '#a5b4fc', borderRadius: '5px', padding: '2px 8px', fontSize: '0.78rem' }}>{row.tag}</span></span>
+                    <span style={{ textAlign: 'right' }}>{row.count}</span>
+                    <span style={{ textAlign: 'right', color: 'var(--success)', fontWeight: 600 }}>${row.revenue.toFixed(2)}</span>
+                    <span style={{ textAlign: 'right' }}>${avgSale.toFixed(2)}</span>
+                    <span style={{ textAlign: 'right', color: avgNetColor }}>
+                      {avgNet === null ? '—' : `${avgNet >= 0 ? '+' : ''}$${avgNet.toFixed(2)}`}
+                      {avgNet !== null && row.netProfitSamples < row.count && (
+                        <span style={{ opacity: 0.6, fontSize: '0.72rem', marginLeft: '4px' }}>({row.netProfitSamples}/{row.count})</span>
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <p style={{ marginTop: '0.75rem', fontSize: '0.72rem', color: 'var(--text-secondary)', opacity: 0.7 }}>
+              Avg net is only computed for sold items with a cost basis recorded — the (n/N) annotation shows how many of each tag's sales qualified.
+            </p>
           </div>
         )}
 

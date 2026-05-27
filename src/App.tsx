@@ -16,6 +16,7 @@ import EbayImportTab from './components/EbayImportTab';
 import HelpPage from './components/HelpPage';
 import Feedback from './components/Feedback';
 import LoginScreen from './components/LoginScreen';
+import ConfirmDialog from './components/ConfirmDialog';
 import { generateListing } from './services/ai';
 import type { StagedListing } from './types';
 import { useToast } from './context/ToastContext';
@@ -149,11 +150,26 @@ function App() {
     }
   };
 
+  // UX-001 — Disconnect is destructive (it deletes stored OAuth tokens, so
+  // the seller has to redo the eBay consent flow). Gate it behind a confirm
+  // dialog instead of firing immediately on click.
+  const [disconnectConfirmOpen, setDisconnectConfirmOpen] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+
+  const openDisconnectConfirm = () => setDisconnectConfirmOpen(true);
+  const cancelDisconnect = () => { if (!disconnecting) setDisconnectConfirmOpen(false); };
+
   const handleEbayDisconnect = async () => {
-    await fetch('/api/ebay/tokens', { method: 'DELETE', headers: bearerHeaders(appPassword) });
-    setIsEbayConnected(false);
-    setTokenExpiresAt(null);
-    toast('eBay disconnected. Click "Connect to eBay" to reconnect.', 'info');
+    setDisconnecting(true);
+    try {
+      await fetch('/api/ebay/tokens', { method: 'DELETE', headers: bearerHeaders(appPassword) });
+      setIsEbayConnected(false);
+      setTokenExpiresAt(null);
+      toast('eBay disconnected. Click "Connect to eBay" to reconnect.', 'info');
+    } finally {
+      setDisconnecting(false);
+      setDisconnectConfirmOpen(false);
+    }
   };
 
   // Handle ?ebay=connected / ?ebay=error after OAuth redirect
@@ -596,7 +612,12 @@ function App() {
                 <button className="btn-icon" onClick={handleEbayConnect} style={{ fontSize: '0.68rem', padding: '1px 6px', opacity: 0.6 }}>
                   Reconnect
                 </button>
-                <button className="btn-icon" onClick={handleEbayDisconnect} style={{ fontSize: '0.68rem', padding: '1px 6px', opacity: 0.6, color: '#ef4444' }}>
+                <button
+                  className="btn-icon"
+                  onClick={openDisconnectConfirm}
+                  aria-label="Disconnect eBay (asks for confirmation)"
+                  style={{ fontSize: '0.68rem', padding: '1px 6px', opacity: 0.6, color: '#ef4444' }}
+                >
                   Disconnect
                 </button>
               </div>
@@ -684,6 +705,24 @@ function App() {
         )}
       </main>
       </div>
+
+      {/* UX-001 — Disconnect-from-eBay confirmation. Mounted at the top of
+          the render tree so the backdrop overlays everything below. */}
+      <ConfirmDialog
+        open={disconnectConfirmOpen}
+        title="Disconnect from eBay?"
+        message={
+          'This deletes your stored eBay OAuth tokens. You will need to re-authorize ' +
+          'in the eBay consent flow before you can push, revise, or sync listings again. ' +
+          'No listings are deleted.'
+        }
+        confirmLabel="Disconnect"
+        cancelLabel="Keep connected"
+        destructive
+        busy={disconnecting}
+        onConfirm={handleEbayDisconnect}
+        onCancel={cancelDisconnect}
+      />
     </div>
   );
 }
