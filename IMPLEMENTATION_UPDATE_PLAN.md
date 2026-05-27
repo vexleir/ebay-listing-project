@@ -8,7 +8,7 @@
 ## 0. Implementation Tracker
 
 **Last updated:** 2026-05-27  
-**Current implementation phase:** FE-001 complete. `StagedListings.tsx` reduced 1175 → 760 lines (35%). Next: FE-002 (`ListedProducts.tsx`) reusing the same staged/ subcomponents pattern.
+**Current implementation phase:** FE-002 complete. `StagedListings.tsx` is 709 lines and `ListedProducts.tsx` is 543 lines after extraction. Next: FE-003 (`ListingOptimizer.tsx`) using the same component-splitting pattern.
 
 Use this section as the team coordination source while implementation is active. Move completed work here immediately after merge-ready implementation so other developers do not duplicate the same task.
 
@@ -68,6 +68,7 @@ Use this section as the team coordination source while implementation is active.
 | FE-001e | Done | Claude | 2026-05-27 | Extracted the search/sort toolbar and the bulk-action+view-mode toolbar into `src/components/staged/StagedFilters.tsx` and `src/components/staged/StagedBulkToolbar.tsx`. Both are stateless — parent owns the values + setters. New components carry `aria-label` / `aria-pressed` for keyboard + screen-reader users (UX-002 continuation). 4 tests in `StagedFilters.test.tsx` + 9 tests in `StagedBulkToolbar.test.tsx` covering search/sort change events, search-count copy, select-all → bulk actions toggle, disconnected-eBay Push gating, bulkPushing disabled state, view-mode toggle wiring. `StagedListings.tsx` is now ~50 lines smaller and free of `LayoutGrid`/`List`/`Search`/`ChevronDown` imports. |
 | FE-001d | Done | Claude | 2026-05-27 | Extracted the per-listing render functions and the dependencies they pulled in: `staged/CompsPanel.tsx` (active-eBay-prices subtree, `aria-label` on close), `staged/StagedListingActions.tsx` (full action button row with `healthBadge` accepted as a ReactNode prop so parent can keep the bespoke trigger styling), `staged/StagedListingCard.tsx` (grid card — checkbox is `role=checkbox` + Space/Enter keyboard, image overlays, sellerNotes pill, slots for `actions` + `compsPanel`), `staged/StagedListingListRow.tsx` (list row — same composition + thumbnail-only lightbox). All four are stateless; the parent supplies callbacks. **StagedListings.tsx is now 941 lines** (down from 1175 at the start of FE-001a). The local `HealthBadge` + `ActionButtons` adapter remain because they bridge closure state (`expandedHealthId`, `pushingId`, `compsId`, etc.) into the extracted components. Added 6 + 8 + 11 + 8 = **33 new tests**. |
 | FE-001f | Done | Claude | 2026-05-27 | Extracted the Push-to-eBay confirmation modal to `staged/PushToEbayModal.tsx` (290 lines). Owned state still lives in StagedListings (`pushModal`, `pushExtraSpecifics`); the modal patches it via a single `onChange(patch)` handler so the parent doesn't have to thread setters per field. Modal carries `role=dialog` + `aria-modal` + `aria-label`, every input has an `aria-label`, and `useEscapeKey` dismisses on Escape (UX-002 continuation). `PushModalState` type lives in the modal file and is re-aliased in the parent. 14 tests in `PushToEbayModal.test.tsx` covering: dialog render, loading-state form hiding, default 9-condition list vs category-restricted list + helper copy, condition select onChange patch, shipping policy gating, schedule toggle, Best Offer threshold hiding, missing-Type warning (and the two ways to dismiss it), add-field button, Escape dismiss, backdrop vs panel click. **StagedListings.tsx now 760 lines** (down from 941 → 1175 cumulative reduction is 35%). **FE-001 complete.** |
+| FE-002 | Done | Codex | 2026-05-27 | Audited the FE-001 handoff first: frontend build passed and Vitest passed once the Windows sandbox `spawn EPERM` was rerun with approval. Moved generic listing helpers/components (`computeHealthScore`, `autoConditionId`, `timeAgo`, `HealthBadge`, `HealthIssuesPopover`, `CompsPanel`) to `src/components/listings/shared/` with compatibility re-exports left under `staged/`. Extracted `ListedProducts.tsx` into `src/components/listed/`: status/tag filters, toolbar, bulk toolbar, grid card, list row, profit badge, mark-sold modal, end-listing confirm, delist/relist confirm, optimize modal, and listed helper functions. `ListedProducts.tsx` is now 543 lines. It consumes `useListFilterSort` and shared health helpers; added `src/components/listed/helpers.test.ts`. Frontend build is clean; Vitest is 103 passing across 13 files. |
 
 ## 1. Executive Direction
 
@@ -1234,12 +1235,12 @@ These should be resolved during Sprint 0/Sprint 1 planning.
 
 ## 13. Recommended Immediate Next Steps
 
-**Phase 0 ✓, Phase 1 backend ✓, Phase 2 ✓, Phase 1 frontend in progress — FE-001 complete.** Server tests: 188 passing. Frontend tests: 100 passing across 12 files (Vitest + happy-dom + testing-library). `StagedListings.tsx` is **760 lines**, down from 1175 at the start (35% reduction; nine subcomponents extracted to `staged/`).
+**Phase 0 ✓, Phase 1 backend ✓, Phase 2 ✓, Phase 1 frontend in progress — FE-001 and FE-002 complete.** Server tests: 188 passing. Frontend tests: 103 passing across 13 files (Vitest + happy-dom + testing-library). `StagedListings.tsx` is **709 lines** and `ListedProducts.tsx` is **543 lines** after extraction.
 
 **Remaining Phase 1 frontend** — pick up in this order:
 
-- **FE-002** — repeat the FE-001 pattern on `ListedProducts.tsx` (1171 LOC). Many `staged/` components apply directly: `useListFilterSort`, `HealthBadge`, `HealthIssuesPopover`, and the StagedFilters/StagedBulkToolbar pattern. **Plan: move the truly shared subcomponents** (HealthBadge, HealthIssuesPopover, CompsPanel) to `src/components/listings/shared/` so neither tab "owns" them; leave the StagedListing-specific Card/Row/Actions/Modal in `staged/`. ListedProducts gets its own `ListedListingCard.tsx`, `ListedListingListRow.tsx`, `ListedFilters.tsx`, `MarkSoldModal.tsx`, `DelistRelistModal.tsx`.
-- **FE-003** — same for `ListingOptimizer.tsx`. Smaller scope; can wait until INTEL-004 demands it.
+- **FE-003** — repeat the same extraction pattern for `ListingOptimizer.tsx` (filters/queue/result modal/impact panel seams first). Smaller scope; can wait until INTEL-004 demands it.
+- **FE-004 follow-through** — `useListFilterSort` is now consumed by both Staged and Listed. Decide whether to extend it to Sold and Optimizer during their next touch.
 - **UI-001 follow-through** — adopt `.list-row` / `.modal-backdrop` / `.modal-card` / `.tabs-strip` / `.filter-bar` / `.empty-state` / `.metric-cell` / `.badge` / `.btn-danger` as each subcomponent ships. Do it per-PR, not bundled with structural extraction.
 
 **Next phases:**
@@ -1250,15 +1251,13 @@ These should be resolved during Sprint 0/Sprint 1 planning.
 - Schedule the 60-minute eBay API discovery session (OFFER-001, FULFILL-001).
 - Schedule the 45-minute Listing Intelligence data-modeling session (INTEL-001).
 
-**Phase 1 frontend remains.** It was scoped separately for a reason: the three target React files (StagedListings.tsx 1175, ListedProducts.tsx 1171, ListingOptimizer.tsx 1099 — together ~3.5k LOC) each need careful prop/state extraction into ~8-10 subcomponents. That work touches stateful UI logic (push modals, lightboxes, bulk-action toolbars, re-analyze flows, optimize modals), and a careless split can drop callbacks, lose memoization, or break TypeScript types. The plan deliberately separates the backend and frontend halves so they can be done by different developers in parallel without merge conflicts — that separation should now pay off.
+**Phase 1 frontend remains, but the two largest listing tabs have been split.** `StagedListings.tsx` and `ListedProducts.tsx` now compose smaller subcomponents; `ListingOptimizer.tsx` is the remaining large Phase 1 target. The remaining frontend work still touches stateful UI logic (queue filters, result modals, impact panels), so keep the extraction incremental and verify after each seam moves.
 
 ### Recommended sequencing for the next session(s):
 
-1. **FE-001 (StagedListings)** — Extract in this order: pure helpers (`computeHealthScore`, formatters) → display subcomponents (`StagedListingCard`, `StagedListingListRow`, `HealthBadge`) → filter/sort UI (`StagedFilters`) → bulk toolbar (`StagedBulkToolbar`) → modals (`PushToEbayModal`, `CompsPanel`). Target: top-level file under 400 lines. Re-export from the old path to keep imports stable across the codebase.
-2. **FE-004** — At the same time, extract the search/sort/perPage/currentPage state into `useListFilterSort<T>` (or similar) and have `StagedListings` consume it. Then have `ListedProducts` adopt it during FE-002.
-3. **FE-002 (ListedProducts)** — Same pattern. The optimize modal and delist-relist modal are the trickiest pieces; extract them last.
-4. **FE-003 (ListingOptimizer)** — Filters → queue → result modal → impact panel.
-5. **UI-001 follow-through** — As each subcomponent is extracted, replace inline style objects with the classes added in this turn (`.list-row`, `.modal-backdrop`, `.modal-card`, `.tabs-strip`, `.filter-bar`, `.empty-state`, `.metric-cell`, `.badge`, `.btn-danger`). Don't bundle this with the structural extraction — do it as a follow-on PR per component so each diff stays reviewable.
+1. **FE-003 (ListingOptimizer)** — Filters → queue → result modal → impact panel.
+2. **FE-004 follow-through** — Extend `useListFilterSort<T>` only where it removes real duplicated state; Staged and Listed already consume it.
+3. **UI-001 follow-through** — As each subcomponent is touched, replace inline style objects with the classes added in this turn (`.list-row`, `.modal-backdrop`, `.modal-card`, `.tabs-strip`, `.filter-bar`, `.empty-state`, `.metric-cell`, `.badge`, `.btn-danger`). Don't bundle this with unrelated structural extraction.
 
 ### Out of Phase 1 (already planned):
 
