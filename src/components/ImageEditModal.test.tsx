@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import ImageEditModal from './ImageEditModal';
 import type { StagedListing } from '../types';
 import { ToastProvider } from '../context/ToastContext';
@@ -113,11 +113,12 @@ describe('ImageEditModal', () => {
     expect(screen.getAllByText('MAIN')).toHaveLength(1);
   });
 
-  it('exposes per-thumbnail Crop / Rotate / Straighten / Scissors buttons with aria-labels', () => {
+  it('exposes per-thumbnail Crop / Straighten / Rotate / Enhance / Scissors buttons with aria-labels', () => {
     renderModal({ listing: listing({ images: ['https://i.ebayimg.com/a.jpg'] }) });
     expect(screen.getByRole('button', { name: 'Crop image' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Rotate image 90 degrees clockwise' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Straighten image' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Rotate image 90 degrees clockwise' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Enhance image' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Remove background' })).toBeInTheDocument();
   });
 

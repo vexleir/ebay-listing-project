@@ -15,7 +15,7 @@ import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ImagePlus, X, GripVertical, UploadCloud,
-  Crop as CropIcon, RotateCw, Scaling, Scissors,
+  Crop as CropIcon, RotateCw, Scaling, Scissors, Sliders,
 } from 'lucide-react';
 import type { StagedListing } from '../types';
 import { useToast } from '../context/ToastContext';
@@ -23,6 +23,7 @@ import { rotateImageFile } from '../utils/imageRotate';
 import { urlToFile } from '../utils/urlToFile';
 import ImageCropModal from './ImageCropModal';
 import ImageStraightenModal from './ImageStraightenModal';
+import ImageEnhanceModal from './ImageEnhanceModal';
 
 export interface ImageEditModalProps {
   listing: StagedListing;
@@ -66,6 +67,7 @@ export default function ImageEditModal({ listing, appPassword, onSave, onClose }
   const [busyId, setBusyId] = useState<string | null>(null);
   const [cropFor, setCropFor] = useState<{ id: string; file: File } | null>(null);
   const [straightenFor, setStraightenFor] = useState<{ id: string; file: File } | null>(null);
+  const [enhanceFor, setEnhanceFor] = useState<{ id: string; file: File } | null>(null);
 
   // Revoke any blob: URLs we created when the modal unmounts.
   useEffect(() => () => {
@@ -139,6 +141,18 @@ export default function ImageEditModal({ listing, appPassword, onSave, onClose }
       setStraightenFor({ id: item.id, file });
     } catch (e: any) {
       toast('Could not load image for straighten: ' + (e?.message || 'unknown error'), 'error');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleEnhanceClick = async (item: ItemSlot) => {
+    setBusyId(item.id);
+    try {
+      const file = await ensureFile(item);
+      setEnhanceFor({ id: item.id, file });
+    } catch (e: any) {
+      toast('Could not load image for enhance: ' + (e?.message || 'unknown error'), 'error');
     } finally {
       setBusyId(null);
     }
@@ -276,9 +290,11 @@ export default function ImageEditModal({ listing, appPassword, onSave, onClose }
                     <button onClick={() => removeItem(it.id)} aria-label={`Remove image ${idx + 1}`} style={{ position: 'absolute', top: '4px', right: '4px', background: 'rgba(0,0,0,0.7)', border: 'none', color: 'white', borderRadius: '50%', width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}>
                       <X size={11} />
                     </button>
-                    {/* Per-thumbnail edit row */}
+                    {/* Per-thumbnail edit row — 5 buttons (Crop / Straighten /
+                        Rotate / Enhance / Scissors). Shrunk to 18px with 2px
+                        gaps so all five fit in the 110px thumbnail. */}
                     <div
-                      style={{ position: 'absolute', bottom: '4px', right: '4px', display: 'flex', gap: '3px', opacity: isBusy ? 0.5 : 1 }}
+                      style={{ position: 'absolute', bottom: '4px', right: '4px', display: 'flex', gap: '2px', opacity: isBusy ? 0.5 : 1 }}
                       onClick={(e) => e.stopPropagation()}
                     >
                       <button
@@ -286,29 +302,36 @@ export default function ImageEditModal({ listing, appPassword, onSave, onClose }
                         aria-label="Crop image"
                         disabled={isBusy}
                         onClick={() => handleCropClick(it)}
-                        style={{ background: 'rgba(99,102,241,0.85)', border: 'none', color: 'white', borderRadius: '50%', width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
-                      ><CropIcon size={11} /></button>
+                        style={{ background: 'rgba(99,102,241,0.85)', border: 'none', color: 'white', borderRadius: '50%', width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
+                      ><CropIcon size={10} /></button>
                       <button
                         title="Straighten image"
                         aria-label="Straighten image"
                         disabled={isBusy}
                         onClick={() => handleStraightenClick(it)}
-                        style={{ background: 'rgba(99,102,241,0.85)', border: 'none', color: 'white', borderRadius: '50%', width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
-                      ><Scaling size={11} /></button>
+                        style={{ background: 'rgba(99,102,241,0.85)', border: 'none', color: 'white', borderRadius: '50%', width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
+                      ><Scaling size={10} /></button>
                       <button
                         title="Rotate 90° clockwise"
                         aria-label="Rotate image 90 degrees clockwise"
                         disabled={isBusy}
                         onClick={() => handleRotate(it)}
-                        style={{ background: 'rgba(99,102,241,0.85)', border: 'none', color: 'white', borderRadius: '50%', width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
-                      ><RotateCw size={11} /></button>
+                        style={{ background: 'rgba(99,102,241,0.85)', border: 'none', color: 'white', borderRadius: '50%', width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
+                      ><RotateCw size={10} /></button>
+                      <button
+                        title="Enhance (brightness / contrast / saturation)"
+                        aria-label="Enhance image"
+                        disabled={isBusy}
+                        onClick={() => handleEnhanceClick(it)}
+                        style={{ background: 'rgba(99,102,241,0.85)', border: 'none', color: 'white', borderRadius: '50%', width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
+                      ><Sliders size={10} /></button>
                       <button
                         title="Remove background"
                         aria-label="Remove background"
                         disabled={isBusy}
                         onClick={() => handleRemoveBg(it)}
-                        style={{ background: 'rgba(99,102,241,0.85)', border: 'none', color: 'white', borderRadius: '50%', width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
-                      ><Scissors size={11} /></button>
+                        style={{ background: 'rgba(99,102,241,0.85)', border: 'none', color: 'white', borderRadius: '50%', width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
+                      ><Scissors size={10} /></button>
                     </div>
                   </div>
                 );
@@ -354,6 +377,13 @@ export default function ImageEditModal({ listing, appPassword, onSave, onClose }
           file={straightenFor.file}
           onSave={(next) => { replaceWithFile(straightenFor.id, next); setStraightenFor(null); }}
           onCancel={() => setStraightenFor(null)}
+        />
+      )}
+      {enhanceFor && (
+        <ImageEnhanceModal
+          file={enhanceFor.file}
+          onSave={(next) => { replaceWithFile(enhanceFor.id, next); setEnhanceFor(null); }}
+          onCancel={() => setEnhanceFor(null)}
         />
       )}
     </div>,
