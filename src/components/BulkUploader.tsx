@@ -1,8 +1,9 @@
 import { useRef, useState, useEffect, useMemo } from 'react';
-import { UploadCloud, X, Sparkles, CheckCircle2, Circle, Plus, Layers, Trash2, RotateCw, AlertTriangle, Check, Ban } from 'lucide-react';
+import { UploadCloud, X, Sparkles, CheckCircle2, Circle, Plus, Layers, Trash2, RotateCw, AlertTriangle, Check, Ban, Copy } from 'lucide-react';
 import { generateListing } from '../services/ai';
 import type { StagedListing } from '../types';
 import { useToast } from '../context/ToastContext';
+import { computeAverageHash, findDuplicateGroups } from '../utils/imageHash';
 
 type GroupStatus = 'pending' | 'generating' | 'success' | 'failed';
 
@@ -71,6 +72,55 @@ export default function BulkUploader({ onStage, appPassword }: BulkUploaderProps
       }
     }
   }, [allImages]);
+
+  // IMG-002 (lite) — perceptual hash per uploaded image, computed lazily
+  // off the main thread (well, off the render anyway). The hash map is a
+  // ref so the async fills don't re-trigger renders mid-compute; we bump a
+  // version counter at the end of each batch to materialize the
+  // duplicate groups into state for the banner.
+  const hashesRef = useRef<Map<File, string>>(new Map());
+  const [hashVersion, setHashVersion] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    const pending = allImages.filter((f) => !hashesRef.current.has(f));
+    if (pending.length === 0) return;
+    (async () => {
+      let anyAdded = false;
+      for (const file of pending) {
+        try {
+          const hash = await computeAverageHash(file);
+          if (cancelled) return;
+          hashesRef.current.set(file, hash);
+          anyAdded = true;
+        } catch {
+          // Couldn't hash this file (canvas/CORS/etc) — skip silently. The
+          // banner just won't flag it; the upload itself still works.
+        }
+      }
+      if (!cancelled && anyAdded) setHashVersion((v) => v + 1);
+    })();
+    return () => { cancelled = true; };
+  }, [allImages]);
+
+  // Clean hashes for files no longer in the upload pool.
+  useEffect(() => {
+    const current = new Set(allImages);
+    for (const file of Array.from(hashesRef.current.keys())) {
+      if (!current.has(file)) hashesRef.current.delete(file);
+    }
+  }, [allImages]);
+
+  const duplicateGroups = useMemo(() => {
+    // Use the index in allImages as the stable id since File names can collide.
+    const entries: { id: string; hash: string }[] = [];
+    allImages.forEach((file, idx) => {
+      const hash = hashesRef.current.get(file);
+      if (hash) entries.push({ id: String(idx), hash });
+    });
+    return findDuplicateGroups(entries);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allImages, hashVersion]);
 
   const groupedFileSet = useMemo(() => {
     const s = new Set<File>();
@@ -311,6 +361,28 @@ export default function BulkUploader({ onStage, appPassword }: BulkUploaderProps
           <input type="file" multiple accept="image/*" ref={fileInputRef} onChange={handleFileChange} style={{ display: 'none' }} />
         </div>
       </div>
+
+      {/* IMG-002 (lite) — duplicate-photo banner. Shows up when ≥1 group
+          of likely-duplicate uploads is detected via perceptual hash. */}
+      {duplicateGroups.length > 0 && (
+        <div
+          role="status"
+          className="glass-panel"
+          style={{ padding: '12px 16px', background: 'rgba(245,158,11,0.10)', borderColor: 'rgba(245,158,11,0.35)', display: 'flex', alignItems: 'flex-start', gap: '10px' }}
+        >
+          <Copy size={16} style={{ color: 'var(--warning)', marginTop: '2px', flexShrink: 0 }} aria-hidden="true" />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontWeight: 600, color: 'var(--warning)' }}>
+              {duplicateGroups.length === 1
+                ? `Found ${duplicateGroups[0].length} likely-duplicate images in this upload.`
+                : `Found ${duplicateGroups.length} likely-duplicate groups (${duplicateGroups.reduce((sum, g) => sum + g.length, 0)} photos total).`}
+            </div>
+            <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+              These look like the same photo. Remove the extras before grouping so each listing has unique images.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Ungrouped pool */}
       {ungrouped.length > 0 && (

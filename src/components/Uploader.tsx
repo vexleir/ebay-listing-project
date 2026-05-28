@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { UploadCloud, X, Image as ImageIcon, Sparkles, CheckCircle2, Circle, GripVertical, Barcode, Scissors } from 'lucide-react';
+import { UploadCloud, X, Image as ImageIcon, Sparkles, CheckCircle2, Circle, GripVertical, Barcode, Scissors, RotateCw } from 'lucide-react';
+import { rotateImageFile } from '../utils/imageRotate';
 
 interface UploaderProps {
   images: File[];
@@ -82,6 +83,34 @@ export default function Uploader({
   };
 
   const [removingBgIdx, setRemovingBgIdx] = useState<number | null>(null);
+  const [rotatingIdx, setRotatingIdx] = useState<number | null>(null);
+
+  // IMG-001 (lite) — rotate the thumbnail 90° clockwise. Swaps the entry
+  // in `images` so the rest of the flow (drag-reorder, selection, push)
+  // keeps working with the rotated File seamlessly.
+  const rotateImage = async (index: number) => {
+    setRotatingIdx(index);
+    try {
+      const original = images[index];
+      const rotated = await rotateImageFile(original, 90);
+      setImages((prev) => {
+        const arr = [...prev];
+        arr[index] = rotated;
+        return arr;
+      });
+      setSelectedFiles((prev) => {
+        if (!prev.has(original)) return prev;
+        const next = new Set(prev);
+        next.delete(original);
+        next.add(rotated);
+        return next;
+      });
+    } catch (e: any) {
+      alert('Rotate failed: ' + (e?.message || 'unknown error'));
+    } finally {
+      setRotatingIdx(null);
+    }
+  };
 
   const removeBackground = async (index: number) => {
     setRemovingBgIdx(index);
@@ -285,11 +314,21 @@ export default function Uploader({
                   </button>
                   <button
                     title="Remove background"
+                    aria-label="Remove background"
                     onClick={(e) => { e.stopPropagation(); removeBackground(index); }}
                     disabled={removingBgIdx === index}
                     style={{ position: 'absolute', bottom: '8px', right: '8px', background: 'rgba(99,102,241,0.85)', border: 'none', color: 'white', borderRadius: '50%', width: '24px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
                   >
                     {removingBgIdx === index ? <span style={{ fontSize: '9px' }}>...</span> : <Scissors size={12} />}
+                  </button>
+                  <button
+                    title="Rotate 90° clockwise"
+                    aria-label="Rotate image 90 degrees clockwise"
+                    onClick={(e) => { e.stopPropagation(); rotateImage(index); }}
+                    disabled={rotatingIdx === index}
+                    style={{ position: 'absolute', bottom: '8px', right: '38px', background: 'rgba(99,102,241,0.85)', border: 'none', color: 'white', borderRadius: '50%', width: '24px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
+                  >
+                    {rotatingIdx === index ? <span style={{ fontSize: '9px' }}>...</span> : <RotateCw size={12} />}
                   </button>
                 </div>
               );
