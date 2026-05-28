@@ -6,7 +6,8 @@
 // fire-and-forget — the parent decides whether to await an async response
 // or close immediately.
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
+import { useFocusTrap } from '../hooks/useFocusTrap';
 
 export interface ConfirmDialogProps {
   open: boolean;
@@ -41,6 +42,9 @@ export default function ConfirmDialog({
     return () => window.removeEventListener('keydown', onKey);
   }, [open, busy, onCancel, onConfirm]);
 
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef, open);
+
   if (!open) return null;
 
   return (
@@ -54,7 +58,7 @@ export default function ConfirmDialog({
         if (e.target === e.currentTarget && !busy) onCancel();
       }}
     >
-      <div className="modal-card" style={{ maxWidth: 460 }}>
+      <div ref={dialogRef} className="modal-card" style={{ maxWidth: 460 }}>
         <h3 id="confirm-dialog-title" style={{ marginBottom: 'var(--space-3)' }}>{title}</h3>
         <p style={{ color: 'var(--text-secondary)', marginBottom: 'var(--space-6)' }}>{message}</p>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-3)' }}>

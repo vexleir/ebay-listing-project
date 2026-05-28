@@ -1,7 +1,8 @@
-import { type Dispatch, type SetStateAction } from 'react';
+import { useRef, type Dispatch, type SetStateAction } from 'react';
 import { createPortal } from 'react-dom';
 import { RefreshCw, RotateCcw, Wand2, X } from 'lucide-react';
 import type { StagedListing } from '../../types';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 import HealthBadge from '../listings/shared/HealthBadge';
 
 export interface OptimizeDimensions {
@@ -63,9 +64,18 @@ export default function OptimizeListingModal({
   onAllowOffersChange,
   onSave,
 }: OptimizeListingModalProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef);
   return createPortal(
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', overflowY: 'auto' }}>
-      <div className="glass-panel" style={{ width: '100%', maxWidth: '700px', padding: '2rem', maxHeight: '90vh', overflowY: 'auto' }}>
+      <div
+        ref={dialogRef}
+        className="glass-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label="AI optimize listing"
+        style={{ width: '100%', maxWidth: '700px', padding: '2rem', maxHeight: '90vh', overflowY: 'auto' }}
+      >
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '1.25rem' }}>
           <Wand2 size={20} style={{ color: '#a78bfa' }} />
           <h3 style={{ margin: 0, flex: 1 }}>AI Optimize Listing</h3>

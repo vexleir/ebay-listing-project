@@ -1,8 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Save, X, Eye, Code, Type, LayoutTemplate, Tag, Wand2, GripVertical } from 'lucide-react';
 import type { StagedListing } from '../types';
 import { useToast } from '../context/ToastContext';
 import { calculateNetProfit } from '../utils/fees';
+import { findConflictingListings } from '../utils/duplicateSku';
+import DuplicateSkuWarning from './DuplicateSkuWarning';
 
 interface ResultsEditorProps {
   data: {
@@ -14,12 +16,21 @@ interface ResultsEditorProps {
   };
   images: File[];
   existingImageUrls?: string[];
+  // INV-002 (lite) — pass the union of staged + listed so the editor can
+  // warn before staging a SKU that another active listing already holds.
+  // Defaults to [] so the existing call sites that don't yet pass it stay
+  // silent rather than crash.
+  allListings?: StagedListing[];
+  // The id of the listing being edited (when the editor is reused for the
+  // "edit a staged listing inline" flow). Excludes the listing from
+  // duplicate-SKU detection so the user doesn't see a self-collision.
+  currentListingId?: string;
   onStage: (listing: Omit<StagedListing, 'id' | 'createdAt'>) => void;
   onCancel: () => void;
   appPassword?: string;
 }
 
-export default function ResultsEditor({ data, images, existingImageUrls, onStage, onCancel, appPassword = '' }: ResultsEditorProps) {
+export default function ResultsEditor({ data, images, existingImageUrls, allListings = [], currentListingId, onStage, onCancel, appPassword = '' }: ResultsEditorProps) {
   const { toast } = useToast();
   const [title, setTitle] = useState(data.title);
   const [description, setDescription] = useState(data.description);
@@ -87,6 +98,15 @@ export default function ResultsEditor({ data, images, existingImageUrls, onStage
   }, [images]);
 
   const titleLengthColor = title.length > 80 ? '#ef4444' : title.length >= 70 ? '#10b981' : '#f59e0b';
+
+  // INV-002 — recompute conflicts only when the SKU or the inventory pool
+  // changes. The new-listing flow has no `currentListingId` yet; the
+  // edit-staged-inline flow passes one so the listing doesn't see itself
+  // as a self-collision.
+  const skuConflicts = useMemo(
+    () => findConflictingListings(sku, allListings, currentListingId),
+    [sku, allListings, currentListingId],
+  );
 
   return (
     <div className="glass-panel responsive-panel-padding" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -210,6 +230,7 @@ export default function ResultsEditor({ data, images, existingImageUrls, onStage
           <div>
             <label style={{ display: 'flex', marginBottom: '8px', color: 'var(--text-secondary)' }}>SKU / Custom Label <span style={{ fontSize: '0.75rem', opacity: 0.6, marginLeft: '4px' }}>(sent to eBay)</span></label>
             <input type="text" className="input-base" value={sku} onChange={e => setSku(e.target.value)} placeholder="e.g. ITEM-001" />
+            <DuplicateSkuWarning conflicts={skuConflicts} />
           </div>
           <div>
             <label style={{ display: 'flex', marginBottom: '8px', color: 'var(--text-secondary)' }}>Quantity <span style={{ fontSize: '0.75rem', opacity: 0.6, marginLeft: '4px' }}>(how many available)</span></label>

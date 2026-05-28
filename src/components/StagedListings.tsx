@@ -29,6 +29,10 @@ import {
 
 interface StagedListingsProps {
   listings: StagedListing[];
+  // INV-002 — combined staged+listed pool used by ResultsEditor for
+  // duplicate-SKU detection when editing a staged listing inline.
+  // Optional; defaults to the same `listings` array if not provided.
+  allListings?: StagedListing[];
   onUpdate: (listing: StagedListing) => void;
   onDelete: (id: string) => void;
   onBulkDelete: (ids: string[]) => void;
@@ -210,7 +214,7 @@ function ImageEditModal({ listing, appPassword, onSave, onClose }: {
 // so the parent's local `pushModal` typing matches what the modal expects.
 type PushModal = PushModalState;
 
-export default function StagedListingsView({ listings, onUpdate, onDelete, onBulkDelete, onMoveToListed, isEbayConnected, appPassword = '' }: StagedListingsProps) {
+export default function StagedListingsView({ listings, allListings, onUpdate, onDelete, onBulkDelete, onMoveToListed, isEbayConnected, appPassword = '' }: StagedListingsProps) {
   const { toast } = useToast();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -499,6 +503,8 @@ export default function StagedListingsView({ listings, onUpdate, onDelete, onBul
           data={{ title: l.title, description: l.description, condition: l.condition, category: l.category, priceRecommendation: l.priceRecommendation, shippingEstimate: l.shippingEstimate, itemSpecifics: l.itemSpecifics, sku: l.sku, sellerNotes: l.sellerNotes, costBasis: l.costBasis, shippingLabelCost: l.shippingLabelCost, tags: l.tags, quantity: l.quantity }}
           images={[]}
           existingImageUrls={l.images || []}
+          allListings={allListings ?? listings}
+          currentListingId={l.id}
           appPassword={appPassword}
           onStage={(updatedData) => { onUpdate({ ...l, ...updatedData, updatedAt: Date.now() }); setEditingId(null); toast('Listing saved.', 'success'); }}
           onCancel={() => setEditingId(null)}

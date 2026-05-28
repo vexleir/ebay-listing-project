@@ -3,10 +3,12 @@
 // state through a single `onChange(patch)` callback so the parent doesn't
 // have to thread setters per field.
 
+import { useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X, RefreshCw, AlertTriangle } from 'lucide-react';
 import type { StagedListing, EbayPolicy } from '../../types';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { EBAY_CONDITIONS, toArizonaLocalISO } from './helpers';
 
 export interface PushModalState {
@@ -47,6 +49,8 @@ export default function PushToEbayModal({
   // still in flight (matches the existing no-action-during-load behavior —
   // backdrop click already works during loading, so Escape can too).
   useEscapeKey(onClose);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef);
 
   const conditionOptions = state.validConditions.length > 0 ? state.validConditions : EBAY_CONDITIONS;
   const typeSpecificMissing =
@@ -60,6 +64,7 @@ export default function PushToEbayModal({
       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}
     >
       <div
+        ref={dialogRef}
         className="glass-panel"
         onClick={(e) => e.stopPropagation()}
         role="dialog"

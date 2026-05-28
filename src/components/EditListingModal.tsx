@@ -1,13 +1,20 @@
-import { useState } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Save, Send, Plus, Trash2 } from 'lucide-react';
 import type { StagedListing } from '../types';
 import { useToast } from '../context/ToastContext';
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { useFocusTrap } from '../hooks/useFocusTrap';
+import { findConflictingListings } from '../utils/duplicateSku';
+import DuplicateSkuWarning from './DuplicateSkuWarning';
 
 interface EditListingModalProps {
   listing: StagedListing;
   appPassword: string;
+  // INV-002 (lite) — staged + listed pool for duplicate-SKU detection.
+  // Optional + defaults to []; the modal degrades to silent when callers
+  // don't pass it in.
+  allListings?: StagedListing[];
   onClose: () => void;
   onSaved: (updated: StagedListing) => void;
 }
@@ -41,7 +48,7 @@ function conditionTextToId(text: string): string {
   return '3000';
 }
 
-export default function EditListingModal({ listing, appPassword, onClose, onSaved }: EditListingModalProps) {
+export default function EditListingModal({ listing, appPassword, allListings = [], onClose, onSaved }: EditListingModalProps) {
   const { toast } = useToast();
   const [title, setTitle] = useState(listing.title || '');
   const [price, setPrice] = useState(listing.priceRecommendation || '');
@@ -56,9 +63,18 @@ export default function EditListingModal({ listing, appPassword, onClose, onSave
   const [saving, setSaving] = useState(false);
   const [pushing, setPushing] = useState(false);
 
+  // INV-002 — exclude the listing being edited so renaming your own SKU
+  // to the same value doesn't trigger a self-collision warning.
+  const skuConflicts = useMemo(
+    () => findConflictingListings(sku, allListings, listing.id),
+    [sku, allListings, listing.id],
+  );
+
   // UX-002 — Escape dismisses the modal, but only when nothing is in flight
   // (matches the Cancel button's disabled gating on line 217ish).
   useEscapeKey(onClose, !saving && !pushing);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef);
 
   const jsonHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${appPassword}` };
 
@@ -137,7 +153,15 @@ export default function EditListingModal({ listing, appPassword, onClose, onSave
 
   return createPortal(
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
-      <div className="glass-panel" onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '680px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div
+        ref={dialogRef}
+        className="glass-panel"
+        onClick={e => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Edit listing"
+        style={{ width: '100%', maxWidth: '680px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+      >
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border-color)', flexShrink: 0 }}>
           <div>
@@ -205,6 +229,7 @@ export default function EditListingModal({ listing, appPassword, onClose, onSave
             <div>
               <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>SKU</label>
               <input className="input-base" value={sku} onChange={e => setSku(e.target.value)} />
+              <DuplicateSkuWarning conflicts={skuConflicts} />
             </div>
             <div>
               <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>Quantity</label>

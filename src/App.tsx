@@ -506,6 +506,10 @@ function App() {
     }
   };
 
+  // INV-002 (lite) — combined active pool for duplicate-SKU detection.
+  // The utility filters out sold rows internally, so we just concat.
+  const allListings = [...stagedListings, ...listedProducts];
+
   const tokenDaysLeft = tokenExpiresAt ? Math.ceil((tokenExpiresAt - Date.now()) / (1000 * 60 * 60 * 24)) : null;
   const tokenExpiryColor = tokenDaysLeft !== null
     ? (tokenDaysLeft <= 2 ? '#ef4444' : tokenDaysLeft <= 7 ? '#f59e0b' : 'var(--success)')
@@ -691,7 +695,7 @@ function App() {
             </div>
             {generatedData && (
               <div className="animate-fade-in">
-                <ResultsEditor data={generatedData} images={images} onStage={handleStageListing} onCancel={() => setGeneratedData(null)} appPassword={appPassword} />
+                <ResultsEditor data={generatedData} images={images} allListings={allListings} onStage={handleStageListing} onCancel={() => setGeneratedData(null)} appPassword={appPassword} />
               </div>
             )}
           </div>
@@ -701,11 +705,11 @@ function App() {
           </div>
         ) : activeTab === 'staged' ? (
           <div className="animate-fade-in">
-            <StagedListings listings={stagedListings} onUpdate={handleUpdateStagedListing} onDelete={handleDeleteStagedListing} onBulkDelete={handleBulkDelete} onMoveToListed={handleMoveToListed} isEbayConnected={isEbayConnected} appPassword={appPassword} />
+            <StagedListings listings={stagedListings} allListings={allListings} onUpdate={handleUpdateStagedListing} onDelete={handleDeleteStagedListing} onBulkDelete={handleBulkDelete} onMoveToListed={handleMoveToListed} isEbayConnected={isEbayConnected} appPassword={appPassword} />
           </div>
         ) : activeTab === 'listed' ? (
           <div className="animate-fade-in">
-            <ListedProducts listings={listedProducts} onDelete={handleDeleteListedListing} onArchive={handleArchiveListedListing} onSyncSold={handleSyncSold} onRelist={handleRelistListing} onDelistRelist={handleDelistAndRelist} onMoveToStaged={handleMoveToStaged} onMarkSold={handleMarkSold} onUpdateListing={handleUpdateListing} isEbayConnected={isEbayConnected} appPassword={appPassword} />
+            <ListedProducts listings={listedProducts} allListings={allListings} onDelete={handleDeleteListedListing} onArchive={handleArchiveListedListing} onSyncSold={handleSyncSold} onRelist={handleRelistListing} onDelistRelist={handleDelistAndRelist} onMoveToStaged={handleMoveToStaged} onMarkSold={handleMarkSold} onUpdateListing={handleUpdateListing} isEbayConnected={isEbayConnected} appPassword={appPassword} />
           </div>
         ) : activeTab === 'sold' ? (
           <div className="animate-fade-in">

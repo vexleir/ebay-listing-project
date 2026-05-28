@@ -1,6 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { X, ChevronLeft, ChevronRight } from 'lucide-react';
 import ImageSearchButton from './ImageSearchButton';
+import { useFocusTrap } from '../hooks/useFocusTrap';
 
 interface LightboxProps {
   images: string[];
@@ -22,26 +23,38 @@ export default function Lightbox({ images, index, onClose, onNavigate }: Lightbo
     return () => window.removeEventListener('keydown', handler);
   }, [index, len, onClose, onNavigate]);
 
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef);
+
   if (!images[index]) return null;
 
-  const btn = (style: React.CSSProperties, onClick: () => void, children: React.ReactNode) => (
-    <button onClick={onClick} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', color: 'white', borderRadius: '50%', width: '44px', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', backdropFilter: 'blur(6px)', ...style }}>
-      {children}
-    </button>
-  );
-
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', zIndex: 9998, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Image ${index + 1} of ${len}`}
+      onClick={onClose}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', zIndex: 9998, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+    >
       {/* Close */}
-      <div style={{ position: 'absolute', top: '1rem', right: '1rem', zIndex: 1 }}>
-        {btn({}, onClose, <X size={20} />)}
-      </div>
+      <button
+        onClick={(e) => { e.stopPropagation(); onClose(); }}
+        aria-label="Close image viewer"
+        style={{ position: 'absolute', top: '1rem', right: '1rem', zIndex: 1, background: 'rgba(255,255,255,0.12)', border: 'none', color: 'white', borderRadius: '50%', width: '44px', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', backdropFilter: 'blur(6px)' }}
+      >
+        <X size={20} />
+      </button>
 
       {/* Prev */}
       {len > 1 && (
-        <div style={{ position: 'absolute', left: '1rem', zIndex: 1 }} onClick={e => { e.stopPropagation(); onNavigate((index - 1 + len) % len); }}>
-          {btn({}, () => {}, <ChevronLeft size={26} />)}
-        </div>
+        <button
+          onClick={(e) => { e.stopPropagation(); onNavigate((index - 1 + len) % len); }}
+          aria-label="Previous image"
+          style={{ position: 'absolute', left: '1rem', zIndex: 1, background: 'rgba(255,255,255,0.12)', border: 'none', color: 'white', borderRadius: '50%', width: '44px', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', backdropFilter: 'blur(6px)' }}
+        >
+          <ChevronLeft size={26} />
+        </button>
       )}
 
       {/* Image + search button */}
@@ -54,9 +67,13 @@ export default function Lightbox({ images, index, onClose, onNavigate }: Lightbo
 
       {/* Next */}
       {len > 1 && (
-        <div style={{ position: 'absolute', right: '1rem', zIndex: 1 }} onClick={e => { e.stopPropagation(); onNavigate((index + 1) % len); }}>
-          {btn({}, () => {}, <ChevronRight size={26} />)}
-        </div>
+        <button
+          onClick={(e) => { e.stopPropagation(); onNavigate((index + 1) % len); }}
+          aria-label="Next image"
+          style={{ position: 'absolute', right: '1rem', zIndex: 1, background: 'rgba(255,255,255,0.12)', border: 'none', color: 'white', borderRadius: '50%', width: '44px', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', backdropFilter: 'blur(6px)' }}
+        >
+          <ChevronRight size={26} />
+        </button>
       )}
 
       {/* Counter */}

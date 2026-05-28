@@ -33,6 +33,9 @@ function getErrorMessage(error: unknown): string {
 
 interface ListedProductsProps {
   listings: StagedListing[];
+  // INV-002 — staged+listed pool, used by EditListingModal for
+  // duplicate-SKU detection. Defaults to `listings` when not supplied.
+  allListings?: StagedListing[];
   onDelete: (id: string) => void;
   onArchive: (id: string) => void;
   onSyncSold?: () => void;
@@ -47,6 +50,7 @@ interface ListedProductsProps {
 
 export default function ListedProductsView({
   listings,
+  allListings,
   onDelete,
   onArchive,
   onSyncSold,
@@ -384,6 +388,7 @@ export default function ListedProductsView({
       {editListing && (
         <EditListingModal
           listing={editListing}
+          allListings={allListings ?? listings}
           appPassword={appPassword}
           onClose={() => setEditListing(null)}
           onSaved={updated => { setEditListing(null); onUpdateListing?.(updated); }}

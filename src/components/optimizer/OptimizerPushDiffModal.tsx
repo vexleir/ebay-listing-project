@@ -2,9 +2,11 @@
 // edit phase. Pure: parent owns the listing + the proposed edits; this
 // component just renders the diff and proxies confirm/close.
 
+import { useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowRight, CheckCircle, Loader } from 'lucide-react';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 import type { FetchedListing, SpecificRow } from './types';
 
 export interface OptimizerPushDiffModalProps {
@@ -56,6 +58,8 @@ export default function OptimizerPushDiffModal({
   listing, editTitle, editPrice, editDescription, editSpecifics, onConfirm, onClose, pushing,
 }: OptimizerPushDiffModalProps) {
   useEscapeKey(onClose, !pushing);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef);
   const changes = computePushDiff(listing, editTitle, editPrice, editDescription, editSpecifics);
 
   return createPortal(
@@ -64,6 +68,7 @@ export default function OptimizerPushDiffModal({
       onClick={pushing ? undefined : onClose}
     >
       <div
+        ref={dialogRef}
         className="glass-panel"
         role="dialog"
         aria-modal="true"
