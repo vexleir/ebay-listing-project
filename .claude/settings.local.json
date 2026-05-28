@@ -12,7 +12,11 @@
       "Bash(npm run *)",
       "Bash(npm install *)",
       "Bash(node -c server/feedback.js)",
-      "Bash(node -c server/index.js)"
+      "Bash(node -c server/index.js)",
+      "Bash(npx tsc *)",
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(npm test *)",
+      "Bash(npx vitest *)"
     ]
   }
 }

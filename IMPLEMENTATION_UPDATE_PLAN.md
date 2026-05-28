@@ -8,7 +8,7 @@
 ## 0. Implementation Tracker
 
 **Last updated:** 2026-05-27  
-**Current implementation phase:** FE-002 complete. `StagedListings.tsx` is 709 lines and `ListedProducts.tsx` is 543 lines after extraction. Next: FE-003 (`ListingOptimizer.tsx`) using the same component-splitting pattern.
+**Current implementation phase:** FE-003 complete. `ListingOptimizer.tsx` is now 381 lines (down from 1099 — a 65% reduction). All three large Phase 1 frontend screens have been split. Next pickups: UI-001 follow-through (adopt shared classes per-PR as touched), then Phase 3 seller workflow upgrades.
 
 Use this section as the team coordination source while implementation is active. Move completed work here immediately after merge-ready implementation so other developers do not duplicate the same task.
 
@@ -69,6 +69,7 @@ Use this section as the team coordination source while implementation is active.
 | FE-001d | Done | Claude | 2026-05-27 | Extracted the per-listing render functions and the dependencies they pulled in: `staged/CompsPanel.tsx` (active-eBay-prices subtree, `aria-label` on close), `staged/StagedListingActions.tsx` (full action button row with `healthBadge` accepted as a ReactNode prop so parent can keep the bespoke trigger styling), `staged/StagedListingCard.tsx` (grid card — checkbox is `role=checkbox` + Space/Enter keyboard, image overlays, sellerNotes pill, slots for `actions` + `compsPanel`), `staged/StagedListingListRow.tsx` (list row — same composition + thumbnail-only lightbox). All four are stateless; the parent supplies callbacks. **StagedListings.tsx is now 941 lines** (down from 1175 at the start of FE-001a). The local `HealthBadge` + `ActionButtons` adapter remain because they bridge closure state (`expandedHealthId`, `pushingId`, `compsId`, etc.) into the extracted components. Added 6 + 8 + 11 + 8 = **33 new tests**. |
 | FE-001f | Done | Claude | 2026-05-27 | Extracted the Push-to-eBay confirmation modal to `staged/PushToEbayModal.tsx` (290 lines). Owned state still lives in StagedListings (`pushModal`, `pushExtraSpecifics`); the modal patches it via a single `onChange(patch)` handler so the parent doesn't have to thread setters per field. Modal carries `role=dialog` + `aria-modal` + `aria-label`, every input has an `aria-label`, and `useEscapeKey` dismisses on Escape (UX-002 continuation). `PushModalState` type lives in the modal file and is re-aliased in the parent. 14 tests in `PushToEbayModal.test.tsx` covering: dialog render, loading-state form hiding, default 9-condition list vs category-restricted list + helper copy, condition select onChange patch, shipping policy gating, schedule toggle, Best Offer threshold hiding, missing-Type warning (and the two ways to dismiss it), add-field button, Escape dismiss, backdrop vs panel click. **StagedListings.tsx now 760 lines** (down from 941 → 1175 cumulative reduction is 35%). **FE-001 complete.** |
 | FE-002 | Done | Codex | 2026-05-27 | Audited the FE-001 handoff first: frontend build passed and Vitest passed once the Windows sandbox `spawn EPERM` was rerun with approval. Moved generic listing helpers/components (`computeHealthScore`, `autoConditionId`, `timeAgo`, `HealthBadge`, `HealthIssuesPopover`, `CompsPanel`) to `src/components/listings/shared/` with compatibility re-exports left under `staged/`. Extracted `ListedProducts.tsx` into `src/components/listed/`: status/tag filters, toolbar, bulk toolbar, grid card, list row, profit badge, mark-sold modal, end-listing confirm, delist/relist confirm, optimize modal, and listed helper functions. `ListedProducts.tsx` is now 543 lines. It consumes `useListFilterSort` and shared health helpers; added `src/components/listed/helpers.test.ts`. Frontend build is clean; Vitest is 103 passing across 13 files. |
+| FE-003 | Done | Claude | 2026-05-27 | Split `ListingOptimizer.tsx` (1099 → **381 lines**, a 65% reduction) into `src/components/optimizer/`: `helpers.ts` (`extractItemId`, `gradeColor`, `scoreBarColor`, `formatOptimizerDate`, `compMedian`), `types.ts` (`FetchedListing`, `SoldComp`, `AISuggestions`, `SpecificRow`), `ScoreCard.tsx` (per-category card with keyboard-accessible expand toggle), `AiSuggestionBox.tsx` (the Accept/Reject AI-suggestion strip with `aria-label`/`aria-expanded` polish), `OptimizerPushDiffModal.tsx` (Confirm-changes modal — uses `useEscapeKey`, backdrop-click dismiss when not pushing, `role=dialog` + `aria-modal`), `OverallScore.tsx` (circular grade badge with `compact` mode for the edit-phase sidebar), `ScoreGrid.tsx` (3-column ScoreCard grid), `OptimizerInputCard.tsx` (the initial paste-URL view with `aria-label` on the URL input), `OptimizerListingHeader.tsx` (analyze-phase header — title/category/price/SKU + ext-link + stats strip), `SoldCompsPanel.tsx` (right-column comps with median card and capped row count), `SeoAnalysisPanel.tsx` (titleSeo + AI seoIssues/keywords merged into one panel), `OptimizerEditForm.tsx` (the full edit-phase right column — title/price/description/specifics with the recommended-price chip and tab-controlled HTML/Preview toggle, stateless). The parent now owns the phase state machine, the AI accept/reject state, and the live re-score memo. Also exported `computePushDiff` from `OptimizerPushDiffModal.tsx` so the diff rules can be tested without going through the DOM. Added **67 new Vitest tests** (helpers: 16, ScoreCard: 7, AiSuggestionBox: 7, OptimizerPushDiffModal: 14 incl. 7 `computePushDiff` rules, OptimizerInputCard: 9, OverallScore: 4, SoldCompsPanel: 5, SeoAnalysisPanel: 5). Frontend tests now **170 passing across 21 files**; server tests unchanged at 188 passing; `npm run build` clean. **Phase 1 frontend split is complete** — all three target screens (Staged 760, Listed 543, Optimizer 381) are below the 400-line budget envisioned by the plan. |
 
 ## 1. Executive Direction
 
@@ -1235,12 +1236,13 @@ These should be resolved during Sprint 0/Sprint 1 planning.
 
 ## 13. Recommended Immediate Next Steps
 
-**Phase 0 ✓, Phase 1 backend ✓, Phase 2 ✓, Phase 1 frontend in progress — FE-001 and FE-002 complete.** Server tests: 188 passing. Frontend tests: 103 passing across 13 files (Vitest + happy-dom + testing-library). `StagedListings.tsx` is **709 lines** and `ListedProducts.tsx` is **543 lines** after extraction.
+**Phase 0 ✓, Phase 1 backend ✓, Phase 2 ✓, Phase 1 frontend ✓ — FE-001, FE-002, and FE-003 complete.** Server tests: 188 passing. Frontend tests: **170 passing across 21 files** (Vitest + happy-dom + testing-library). All three large screens are now below the 400-line plan budget: `StagedListings.tsx` **760**, `ListedProducts.tsx` **543**, `ListingOptimizer.tsx` **381**.
 
-**Remaining Phase 1 frontend** — pick up in this order:
+**Remaining Phase 1 frontend** — none. All three target screens have been split.
 
-- **FE-003** — repeat the same extraction pattern for `ListingOptimizer.tsx` (filters/queue/result modal/impact panel seams first). Smaller scope; can wait until INTEL-004 demands it.
-- **FE-004 follow-through** — `useListFilterSort` is now consumed by both Staged and Listed. Decide whether to extend it to Sold and Optimizer during their next touch.
+**Phase 1 frontend follow-through (optional, per-PR as components are touched):**
+
+- **FE-004 follow-through** — `useListFilterSort` is consumed by both Staged and Listed. Consider extending to Sold and Optimizer when their next feature work demands list/filter/sort logic; the Optimizer is single-listing today and would not benefit.
 - **UI-001 follow-through** — adopt `.list-row` / `.modal-backdrop` / `.modal-card` / `.tabs-strip` / `.filter-bar` / `.empty-state` / `.metric-cell` / `.badge` / `.btn-danger` as each subcomponent ships. Do it per-PR, not bundled with structural extraction.
 
 **Next phases:**
@@ -1251,19 +1253,14 @@ These should be resolved during Sprint 0/Sprint 1 planning.
 - Schedule the 60-minute eBay API discovery session (OFFER-001, FULFILL-001).
 - Schedule the 45-minute Listing Intelligence data-modeling session (INTEL-001).
 
-**Phase 1 frontend remains, but the two largest listing tabs have been split.** `StagedListings.tsx` and `ListedProducts.tsx` now compose smaller subcomponents; `ListingOptimizer.tsx` is the remaining large Phase 1 target. The remaining frontend work still touches stateful UI logic (queue filters, result modals, impact panels), so keep the extraction incremental and verify after each seam moves.
+**Phase 1 frontend is complete.** All three target screens have been split into focused subcomponents under `src/components/staged/`, `src/components/listed/`, and `src/components/optimizer/`. Future feature work can touch the subcomponents directly without scanning the large parent screens; the parents are now thin orchestrators that own state and delegate rendering.
 
 ### Recommended sequencing for the next session(s):
 
-1. **FE-003 (ListingOptimizer)** — Filters → queue → result modal → impact panel.
-2. **FE-004 follow-through** — Extend `useListFilterSort<T>` only where it removes real duplicated state; Staged and Listed already consume it.
-3. **UI-001 follow-through** — As each subcomponent is touched, replace inline style objects with the classes added in this turn (`.list-row`, `.modal-backdrop`, `.modal-card`, `.tabs-strip`, `.filter-bar`, `.empty-state`, `.metric-cell`, `.badge`, `.btn-danger`). Don't bundle this with unrelated structural extraction.
-
-### Out of Phase 1 (already planned):
-
-6. Phase 2 reliability/UX (sold-sync pagination, eBay error translator, accessibility, exports) — see Section 4.
-7. Schedule the 60-minute eBay API discovery session (OFFER-001, FULFILL-001).
-8. Schedule the 45-minute Listing Intelligence data-modeling session (INTEL-001).
+1. **Phase 3 kickoff (MOB-001 responsive shell)** — start a per-screen mobile audit pass. The newly extracted subcomponents are now small enough that mobile-specific styles can be added without re-touching the parent screens.
+2. **UI-001 follow-through** — As each subcomponent is touched (mobile pass or otherwise), replace inline style objects with the shared classes (`.list-row`, `.modal-backdrop`, `.modal-card`, `.tabs-strip`, `.filter-bar`, `.empty-state`, `.metric-cell`, `.badge`, `.btn-danger`). Don't bundle this with unrelated structural extraction.
+3. Schedule the 60-minute eBay API discovery session (OFFER-001, FULFILL-001).
+4. Schedule the 45-minute Listing Intelligence data-modeling session (INTEL-001).
 
 ## 14. Definition of Done
 
