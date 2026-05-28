@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { UploadCloud, X, Image as ImageIcon, Sparkles, CheckCircle2, Circle, GripVertical, Barcode, Scissors, RotateCw } from 'lucide-react';
+import { UploadCloud, X, Image as ImageIcon, Sparkles, CheckCircle2, Circle, GripVertical, Barcode, Scissors, RotateCw, Crop } from 'lucide-react';
 import { rotateImageFile } from '../utils/imageRotate';
+import ImageCropModal from './ImageCropModal';
 
 interface UploaderProps {
   images: File[];
@@ -84,6 +85,26 @@ export default function Uploader({
 
   const [removingBgIdx, setRemovingBgIdx] = useState<number | null>(null);
   const [rotatingIdx, setRotatingIdx] = useState<number | null>(null);
+  // IMG-001 — index of the image currently being cropped (null = modal closed).
+  const [cropIdx, setCropIdx] = useState<number | null>(null);
+
+  const onCropSave = (next: File) => {
+    if (cropIdx === null) return;
+    const original = images[cropIdx];
+    setImages((prev) => {
+      const arr = [...prev];
+      arr[cropIdx] = next;
+      return arr;
+    });
+    setSelectedFiles((prev) => {
+      if (!prev.has(original)) return prev;
+      const out = new Set(prev);
+      out.delete(original);
+      out.add(next);
+      return out;
+    });
+    setCropIdx(null);
+  };
 
   // IMG-001 (lite) — rotate the thumbnail 90° clockwise. Swaps the entry
   // in `images` so the rest of the flow (drag-reorder, selection, push)
@@ -330,6 +351,14 @@ export default function Uploader({
                   >
                     {rotatingIdx === index ? <span style={{ fontSize: '9px' }}>...</span> : <RotateCw size={12} />}
                   </button>
+                  <button
+                    title="Crop image"
+                    aria-label="Crop image"
+                    onClick={(e) => { e.stopPropagation(); setCropIdx(index); }}
+                    style={{ position: 'absolute', bottom: '8px', right: '68px', background: 'rgba(99,102,241,0.85)', border: 'none', color: 'white', borderRadius: '50%', width: '24px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
+                  >
+                    <Crop size={12} />
+                  </button>
                 </div>
               );
             })}
@@ -404,6 +433,14 @@ export default function Uploader({
           to { transform: rotate(360deg); }
         }
       `}</style>
+
+      {cropIdx !== null && images[cropIdx] && (
+        <ImageCropModal
+          file={images[cropIdx]}
+          onSave={onCropSave}
+          onCancel={() => setCropIdx(null)}
+        />
+      )}
     </div>
   );
 }
