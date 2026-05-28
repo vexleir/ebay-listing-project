@@ -88,7 +88,7 @@ export default function OptimizerPushDiffModal({
             ))}
           </div>
         )}
-        <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+        <div className="modal-sticky-actions" style={{ justifyContent: 'flex-end' }}>
           <button className="btn-icon" onClick={onClose} disabled={pushing}>Cancel</button>
           <button
             className="btn-primary"

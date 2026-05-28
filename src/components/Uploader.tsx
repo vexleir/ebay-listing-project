@@ -153,7 +153,7 @@ export default function Uploader({
   };
 
   return (
-    <div className="glass-panel" style={{ padding: '2rem' }}>
+    <div className="glass-panel responsive-panel-padding">
       <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
         <ImageIcon size={24} className="text-gradient" /> Product Images
       </h2>
@@ -301,7 +301,7 @@ export default function Uploader({
       {/* Barcode Lookup */}
       <div style={{ marginBottom: '1.5rem' }}>
         <h3 style={{ marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '6px' }}><Barcode size={18} /> Barcode Lookup <span style={{ fontSize: '0.8rem', fontWeight: 400, color: 'var(--text-secondary)', marginLeft: '4px' }}>optional</span></h3>
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div className="inline-row-wrap">
           <input
             type="text"
             className="input-base"
@@ -309,9 +309,8 @@ export default function Uploader({
             value={barcodeInput}
             onChange={e => setBarcodeInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && lookupBarcode()}
-            style={{ flex: 1 }}
           />
-          <button onClick={lookupBarcode} disabled={barcodeLoading || !barcodeInput.trim()} className="btn-secondary" style={{ flexShrink: 0, padding: '10px 16px' }}>
+          <button onClick={lookupBarcode} disabled={barcodeLoading || !barcodeInput.trim()} className="btn-secondary" style={{ padding: '10px 16px' }}>
             {barcodeLoading ? 'Looking up...' : 'Lookup'}
           </button>
         </div>

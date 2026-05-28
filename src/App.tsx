@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, Shield, DollarSign, Zap, Download, ChevronLeft, ChevronRight, Layers, HelpCircle, MessageSquare } from 'lucide-react';
+import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, Shield, DollarSign, Zap, Download, ChevronLeft, ChevronRight, Layers, HelpCircle, MessageSquare, Menu, X } from 'lucide-react';
 import './index.css';
+import { useIsMobile } from './hooks/useMediaQuery';
 
 import Uploader from './components/Uploader';
 import BulkUploader from './components/BulkUploader';
@@ -61,8 +62,16 @@ function App() {
   const [listedProducts, setListedProducts] = useState<StagedListing[]>([]);
   const [isLoadingListings, setIsLoadingListings] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => localStorage.getItem('sidebar_collapsed') === '1');
+  // MOB-001a — separate "is the mobile drawer open" from the desktop collapse
+  // state. Desktop ignores `mobileSidebarOpen`; mobile ignores `sidebarCollapsed`.
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const isMobile = useIsMobile();
 
   useEffect(() => { localStorage.setItem('sidebar_collapsed', sidebarCollapsed ? '1' : '0'); }, [sidebarCollapsed]);
+
+  // Auto-close the mobile drawer when the viewport grows past the breakpoint,
+  // and on every tab change so the user isn't left with a covering sidebar.
+  useEffect(() => { if (!isMobile && mobileSidebarOpen) setMobileSidebarOpen(false); }, [isMobile, mobileSidebarOpen]);
 
   // Draft autosave
   useEffect(() => { sessionStorage.setItem(DRAFT_INSTRUCTIONS_KEY, instructions); }, [instructions]);
@@ -502,15 +511,20 @@ function App() {
     ? (tokenDaysLeft <= 2 ? '#ef4444' : tokenDaysLeft <= 7 ? '#f59e0b' : 'var(--success)')
     : 'var(--success)';
 
+  // On mobile, the drawer always renders in its full-width form regardless of
+  // the desktop collapse preference — collapsing a 260px drawer would defeat
+  // the purpose of opening it.
+  const sidebarCollapsedEffective = !isMobile && sidebarCollapsed;
+
   const sidebarBtnStyle = (tab: string): React.CSSProperties => ({
     background: activeTab === tab ? 'var(--glass-bg)' : 'transparent',
     border: '1px solid',
     borderColor: activeTab === tab ? 'var(--glass-border)' : 'transparent',
     color: 'var(--text-primary)',
-    padding: sidebarCollapsed ? '10px 0' : '10px 12px',
+    padding: sidebarCollapsedEffective ? '10px 0' : '10px 12px',
     borderRadius: '8px', cursor: 'pointer',
     display: 'flex', alignItems: 'center',
-    justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
+    justifyContent: sidebarCollapsedEffective ? 'center' : 'flex-start',
     gap: '10px', fontWeight: 500, fontSize: '0.9rem',
     transition: 'all 0.2s ease',
     width: '100%',
@@ -518,87 +532,115 @@ function App() {
     overflow: 'hidden',
   });
 
-  const sidebarWidth = sidebarCollapsed ? 64 : 220;
+  const sidebarWidth = sidebarCollapsedEffective ? 64 : 220;
+
+  // Tab nav helper that also auto-closes the mobile drawer.
+  const switchTab = (tab: typeof activeTab) => {
+    setActiveTab(tab);
+    if (isMobile) setMobileSidebarOpen(false);
+  };
 
   if (isVerifying) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><p>Authenticating...</p></div>;
   if (!isAuthenticated) return <LoginScreen onLogin={handleLogin} />;
 
-  const sidebarLabel = (text: string) => sidebarCollapsed ? null : <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{text}</span>;
+  const sidebarLabel = (text: string) => sidebarCollapsedEffective ? null : <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{text}</span>;
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex' }}>
-      {/* Sidebar */}
-      <aside style={{
-        width: sidebarWidth,
-        flexShrink: 0,
-        minHeight: '100vh',
-        padding: '1rem 0.5rem',
-        background: 'var(--glass-bg)',
-        backdropFilter: 'blur(10px)',
-        borderRight: '1px solid var(--border-color)',
-        display: 'flex', flexDirection: 'column',
-        position: 'sticky', top: 0, alignSelf: 'flex-start',
-        height: '100vh',
-        transition: 'width 0.2s ease',
-        overflowY: 'auto',
-      }}>
+      {/* Mobile backdrop — only renders/visible at <768px; tap to close drawer. */}
+      <div
+        className={`app-sidebar-backdrop${mobileSidebarOpen ? ' is-visible' : ''}`}
+        onClick={() => setMobileSidebarOpen(false)}
+        aria-hidden="true"
+      />
+
+      {/* Sidebar — same DOM on desktop and mobile; the class drives the
+          mobile-drawer behavior via index.css. The inline `--sidebar-width`
+          variable lets the desktop collapse animation use the same class. */}
+      <aside
+        className={`app-sidebar${mobileSidebarOpen ? ' is-open' : ''}`}
+        style={{ ['--sidebar-width' as any]: `${sidebarWidth}px` } as React.CSSProperties}
+        aria-label="Primary navigation"
+      >
         {/* Brand */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: sidebarCollapsed ? '0.5rem 0' : '0.5rem 0.6rem', justifyContent: sidebarCollapsed ? 'center' : 'flex-start', marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: sidebarCollapsedEffective ? '0.5rem 0' : '0.5rem 0.6rem', justifyContent: sidebarCollapsedEffective ? 'center' : 'flex-start', marginBottom: '1rem' }}>
           <div style={{ width: '36px', height: '36px', borderRadius: '9px', background: 'linear-gradient(135deg, #a855f7, #6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '1rem', flexShrink: 0 }}>eB</div>
-          {!sidebarCollapsed && <h1 style={{ margin: 0, fontSize: '1.15rem', whiteSpace: 'nowrap', overflow: 'hidden' }}>Listing<span className="text-gradient">Stager</span></h1>}
+          {!sidebarCollapsedEffective && <h1 style={{ margin: 0, fontSize: '1.15rem', whiteSpace: 'nowrap', overflow: 'hidden' }}>Listing<span className="text-gradient">Stager</span></h1>}
+          {/* Close-drawer button — mobile only. */}
+          {isMobile && (
+            <button
+              onClick={() => setMobileSidebarOpen(false)}
+              aria-label="Close navigation"
+              style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px', borderRadius: '6px' }}
+            >
+              <X size={18} />
+            </button>
+          )}
         </div>
 
         {/* Nav buttons */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
-          <button title="New Listing" style={sidebarBtnStyle('new')} onClick={() => setActiveTab('new')}><PlusCircle size={18} />{sidebarLabel('New Listing')}</button>
-          <button title="Bulk Create" style={sidebarBtnStyle('bulk')} onClick={() => setActiveTab('bulk')}><Layers size={18} />{sidebarLabel('Bulk Create')}</button>
-          <button title="Staged" style={sidebarBtnStyle('staged')} onClick={() => setActiveTab('staged')}><List size={18} />{sidebarLabel(`Staged (${stagedListings.length})`)}</button>
-          <button title="Listed" style={sidebarBtnStyle('listed')} onClick={() => setActiveTab('listed')}><Check size={18} />{sidebarLabel(`Listed (${listedProducts.filter(l => !l.soldAt).length})`)}</button>
-          <button title="eBay Import" style={{ ...sidebarBtnStyle('ebay-import'), borderStyle: activeTab === 'ebay-import' ? 'solid' : 'dashed', opacity: activeTab === 'ebay-import' ? 1 : 0.75 }} onClick={() => setActiveTab('ebay-import')}><Download size={18} />{sidebarLabel('eBay Import')}</button>
-          <button title="Sold" style={sidebarBtnStyle('sold')} onClick={() => setActiveTab('sold')}><DollarSign size={18} />{sidebarLabel(`Sold (${listedProducts.filter(l => !!l.soldAt).length})`)}</button>
-          <button title="Analytics" style={sidebarBtnStyle('analytics')} onClick={() => setActiveTab('analytics')}><BarChart2 size={18} />{sidebarLabel('Analytics')}</button>
-          <button title="Optimizer" style={sidebarBtnStyle('optimizer')} onClick={() => setActiveTab('optimizer')}><Zap size={18} />{sidebarLabel('Optimizer')}</button>
+          <button title="New Listing" style={sidebarBtnStyle('new')} onClick={() => switchTab('new')}><PlusCircle size={18} />{sidebarLabel('New Listing')}</button>
+          <button title="Bulk Create" style={sidebarBtnStyle('bulk')} onClick={() => switchTab('bulk')}><Layers size={18} />{sidebarLabel('Bulk Create')}</button>
+          <button title="Staged" style={sidebarBtnStyle('staged')} onClick={() => switchTab('staged')}><List size={18} />{sidebarLabel(`Staged (${stagedListings.length})`)}</button>
+          <button title="Listed" style={sidebarBtnStyle('listed')} onClick={() => switchTab('listed')}><Check size={18} />{sidebarLabel(`Listed (${listedProducts.filter(l => !l.soldAt).length})`)}</button>
+          <button title="eBay Import" style={{ ...sidebarBtnStyle('ebay-import'), borderStyle: activeTab === 'ebay-import' ? 'solid' : 'dashed', opacity: activeTab === 'ebay-import' ? 1 : 0.75 }} onClick={() => switchTab('ebay-import')}><Download size={18} />{sidebarLabel('eBay Import')}</button>
+          <button title="Sold" style={sidebarBtnStyle('sold')} onClick={() => switchTab('sold')}><DollarSign size={18} />{sidebarLabel(`Sold (${listedProducts.filter(l => !!l.soldAt).length})`)}</button>
+          <button title="Analytics" style={sidebarBtnStyle('analytics')} onClick={() => switchTab('analytics')}><BarChart2 size={18} />{sidebarLabel('Analytics')}</button>
+          <button title="Optimizer" style={sidebarBtnStyle('optimizer')} onClick={() => switchTab('optimizer')}><Zap size={18} />{sidebarLabel('Optimizer')}</button>
           {currentUser?.role === 'superadmin' && (
-            <button title="Admin" style={sidebarBtnStyle('admin')} onClick={() => setActiveTab('admin')}><Shield size={18} />{sidebarLabel('Admin')}</button>
+            <button title="Admin" style={sidebarBtnStyle('admin')} onClick={() => switchTab('admin')}><Shield size={18} />{sidebarLabel('Admin')}</button>
           )}
-          <button title="Settings" style={sidebarBtnStyle('settings')} onClick={() => setActiveTab('settings')}><Settings size={18} />{sidebarLabel('Settings')}</button>
+          <button title="Settings" style={sidebarBtnStyle('settings')} onClick={() => switchTab('settings')}><Settings size={18} />{sidebarLabel('Settings')}</button>
         </div>
 
         {/* Feedback + Help — pinned just above collapse toggle */}
-        <button title="Feedback" style={{ ...sidebarBtnStyle('feedback'), marginTop: '0.5rem' }} onClick={() => setActiveTab('feedback')}>
+        <button title="Feedback" style={{ ...sidebarBtnStyle('feedback'), marginTop: '0.5rem' }} onClick={() => switchTab('feedback')}>
           <MessageSquare size={18} />{sidebarLabel('Feedback')}
         </button>
-        <button title="Help" style={sidebarBtnStyle('help')} onClick={() => setActiveTab('help')}>
+        <button title="Help" style={sidebarBtnStyle('help')} onClick={() => switchTab('help')}>
           <HelpCircle size={18} />{sidebarLabel('Help')}
         </button>
 
-        {/* Collapse toggle */}
-        <button
-          onClick={() => setSidebarCollapsed(c => !c)}
-          title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          style={{
-            marginTop: '0.5rem',
-            background: 'transparent', border: '1px solid var(--border-color)',
-            color: 'var(--text-secondary)',
-            padding: '8px', borderRadius: '8px', cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            gap: '8px', fontSize: '0.8rem',
-          }}
-        >
-          {sidebarCollapsed ? <ChevronRight size={16} /> : <><ChevronLeft size={16} />{sidebarLabel('Collapse')}</>}
-        </button>
+        {/* Collapse toggle — hidden on mobile (drawer is full-width). */}
+        {!isMobile && (
+          <button
+            onClick={() => setSidebarCollapsed(c => !c)}
+            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            style={{
+              marginTop: '0.5rem',
+              background: 'transparent', border: '1px solid var(--border-color)',
+              color: 'var(--text-secondary)',
+              padding: '8px', borderRadius: '8px', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              gap: '8px', fontSize: '0.8rem',
+            }}
+          >
+            {sidebarCollapsed ? <ChevronRight size={16} /> : <><ChevronLeft size={16} />{sidebarLabel('Collapse')}</>}
+          </button>
+        )}
       </aside>
 
       {/* Main column (topbar + content) */}
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         {/* Topbar */}
         <header style={{
-          display: 'flex', justifyContent: 'flex-end', alignItems: 'center',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           padding: '0.75rem 1.5rem', gap: '1rem',
           background: 'var(--glass-bg)', backdropFilter: 'blur(10px)',
           borderBottom: '1px solid var(--border-color)',
           flexWrap: 'wrap',
         }}>
+          {/* Hamburger — mobile-only; opens the sidebar drawer. */}
+          <button
+            className="app-hamburger"
+            onClick={() => setMobileSidebarOpen(true)}
+            aria-label="Open navigation"
+            aria-expanded={mobileSidebarOpen}
+          >
+            <Menu size={20} />
+          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginLeft: 'auto', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           {isEbayConnected ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
               <span style={{ color: tokenExpiryColor, fontSize: '0.9rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
@@ -633,14 +675,18 @@ function App() {
               Logout
             </button>
           </div>
+          </div>
         </header>
 
-      <main style={{ padding: '1.5rem 1.5rem 2rem', flex: 1, maxWidth: '1400px', margin: '0 auto', width: '100%' }}>
+      <main className="app-main">
         {isLoadingListings ? (
           <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>Loading listings...</div>
         ) : activeTab === 'new' ? (
-          <div className="animate-fade-in" style={{ display: 'grid', gap: '2rem', gridTemplateColumns: generatedData ? 'minmax(400px, 1fr) minmax(600px, 1.8fr)' : 'max-content', justifyContent: 'center' }}>
-            <div style={{ width: generatedData ? '100%' : '600px', maxWidth: '100%', margin: generatedData ? '0' : '0 auto' }}>
+          // MOB-001a — `.new-listing-grid` handles the desktop two-column
+          // layout, the single-column fallback, and the <1024px collapse.
+          // Width is no longer hardcoded to 600px on the uploader column.
+          <div className={`animate-fade-in new-listing-grid${generatedData ? ' has-results' : ''}`}>
+            <div style={{ width: '100%', maxWidth: '600px', margin: generatedData ? '0' : '0 auto' }}>
               <Uploader images={images} setImages={setImages} instructions={instructions} setInstructions={setInstructions} onGenerate={handleGenerate} isGenerating={isGenerating} disabled={false} appPassword={appPassword} />
             </div>
             {generatedData && (

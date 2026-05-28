@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Trash2, RotateCcw, Search, ChevronDown, LayoutGrid, List, DollarSign, TrendingUp, Package, Check, X, Download } from 'lucide-react';
 import type { StagedListing } from '../types';
 import { useToast } from '../context/ToastContext';
 import { calculateNetProfit } from '../utils/fees';
 import { buildSoldExportCsv, buildSoldExportFilename } from '../utils/soldExport';
 import { downloadCsv } from '../utils/csv';
+import { useListFilterSort } from '../hooks/useListFilterSort';
 
 interface SoldListingsProps {
   listings: StagedListing[];
@@ -27,35 +28,46 @@ function formatDate(ts: number | undefined): string {
 
 export default function SoldListings({ listings, onDelete, onUnmarkSold, onRelist }: SoldListingsProps) {
   const { toast } = useToast();
-  const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortOption>('sold-desc');
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [lightboxImages, setLightboxImages] = useState<string[] | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [perPage, setPerPage] = useState<number>(20);
-  const [currentPage, setCurrentPage] = useState(1);
 
-  const filtered = listings
-    .filter(l => {
-      const q = search.toLowerCase();
-      return !q || l.title.toLowerCase().includes(q) || (l.sku || '').toLowerCase().includes(q);
-    })
-    .sort((a, b) => {
-      switch (sort) {
-        case 'sold-desc':    return (b.soldAt || 0) - (a.soldAt || 0);
-        case 'sold-asc':     return (a.soldAt || 0) - (b.soldAt || 0);
-        case 'revenue-desc': return parsePrice(b.soldPrice) - parsePrice(a.soldPrice);
-        case 'revenue-asc':  return parsePrice(a.soldPrice) - parsePrice(b.soldPrice);
-        case 'title-asc':    return a.title.localeCompare(b.title);
-        default: return 0;
-      }
-    });
+  // FE-004 follow-through — search / pagination state moves to the shared hook.
+  const filterFn = useCallback((l: StagedListing, q: string) =>
+    !q || l.title.toLowerCase().includes(q) || (l.sku || '').toLowerCase().includes(q)
+  , []);
+  const sortFn = useMemo(() => {
+    switch (sort) {
+      case 'sold-desc':    return (a: StagedListing, b: StagedListing) => (b.soldAt || 0) - (a.soldAt || 0);
+      case 'sold-asc':     return (a: StagedListing, b: StagedListing) => (a.soldAt || 0) - (b.soldAt || 0);
+      case 'revenue-desc': return (a: StagedListing, b: StagedListing) => parsePrice(b.soldPrice) - parsePrice(a.soldPrice);
+      case 'revenue-asc':  return (a: StagedListing, b: StagedListing) => parsePrice(a.soldPrice) - parsePrice(b.soldPrice);
+      case 'title-asc':    return (a: StagedListing, b: StagedListing) => a.title.localeCompare(b.title);
+    }
+  }, [sort]);
 
-  useEffect(() => { setCurrentPage(1); }, [search, sort]);
+  const {
+    query: search,
+    setQuery: setSearch,
+    perPage,
+    setPerPage,
+    currentPage,
+    setCurrentPage,
+    visible: filtered,
+    paginated,
+    totalPages,
+  } = useListFilterSort<StagedListing>({
+    items: listings,
+    filter: filterFn,
+    sort: sortFn,
+    perPage: 20,
+  });
 
-  const totalPages = perPage === 0 ? 1 : Math.ceil(filtered.length / perPage);
-  const paginated = perPage === 0 ? filtered : filtered.slice((currentPage - 1) * perPage, currentPage * perPage);
+  // The hook resets to page 1 on query change but doesn't know about the
+  // local `sort` state — reset manually so sorting from page 3 lands on page 1.
+  useEffect(() => { setCurrentPage(1); }, [sort, setCurrentPage]);
 
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const selectAllFiltered = () => setSelectedIds(new Set(filtered.map(l => l.id)));
@@ -200,7 +212,7 @@ export default function SoldListings({ listings, onDelete, onUnmarkSold, onRelis
       )}
 
       {/* Summary stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
+      <div className="summary-tiles-row" style={{ marginBottom: '1.5rem' }}>
         <div className="glass-panel" style={{ padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', gap: '12px' }}>
           <Package size={22} style={{ color: 'var(--success)', flexShrink: 0 }} />
           <div>

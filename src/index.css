@@ -380,3 +380,200 @@ h1, h2, h3, h4, h5, h6 {
   transform: translateY(-1px);
 }
 .btn-danger:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* ─── MOB-001a responsive shell ──────────────────────────────────────────
+   Breakpoint: 767px is the line. The app sidebar collapses into a slide-in
+   drawer on phones; the hamburger and backdrop only render at that size.
+   Use `.mobile-hidden` and `.desktop-hidden` for one-off element gating. */
+
+.mobile-hidden { display: initial; }
+.desktop-hidden { display: none; }
+
+@media (max-width: 767px) {
+  .mobile-hidden { display: none !important; }
+  .desktop-hidden { display: initial; }
+}
+
+/* App sidebar — desktop is a sticky column. Mobile turns it into a drawer
+   that is translated off-screen by default and slid in via `.is-open`.
+   The App component still owns the open/closed state. */
+.app-sidebar {
+  width: var(--sidebar-width, 220px);
+  flex-shrink: 0;
+  min-height: 100vh;
+  padding: 1rem 0.5rem;
+  background: var(--glass-bg);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: 100vh;
+  transition: width 0.2s ease;
+  overflow-y: auto;
+}
+
+@media (max-width: 767px) {
+  .app-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 260px;
+    height: 100vh;
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+    z-index: var(--z-modal);
+    box-shadow: var(--glass-shadow);
+  }
+  .app-sidebar.is-open {
+    transform: translateX(0);
+  }
+}
+
+/* Mobile backdrop dimmer behind the open drawer. Tapping it closes. */
+.app-sidebar-backdrop {
+  display: none;
+}
+@media (max-width: 767px) {
+  .app-sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: var(--z-modal-backdrop);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+  }
+  .app-sidebar-backdrop.is-visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/* Hamburger button — visible only on mobile, used to open the drawer.
+   Sits in the topbar to the left of the eBay status / user info. */
+.app-hamburger {
+  display: none;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+}
+.app-hamburger:hover { background: rgba(255, 255, 255, 0.05); }
+
+@media (max-width: 767px) {
+  .app-hamburger { display: inline-flex; }
+}
+
+/* Responsive padding for the main content area — phone screens get tighter
+   horizontal padding so the New-Listing flow / list cards aren't crowded. */
+.app-main {
+  padding: 1.5rem 1.5rem 2rem;
+  flex: 1;
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
+}
+@media (max-width: 767px) {
+  .app-main { padding: var(--space-4) var(--space-3) var(--space-6); }
+}
+
+/* New-Listing grid — desktop shows uploader + generated-result side by
+   side; phones must collapse to a single column. Use these classes
+   instead of the previous inline `minmax(400px, 1fr) minmax(600px, 1.8fr)`
+   which broke at <767px. */
+.new-listing-grid {
+  display: grid;
+  gap: 2rem;
+  grid-template-columns: minmax(0, 600px);
+  justify-content: center;
+}
+.new-listing-grid.has-results {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.8fr);
+  justify-content: stretch;
+}
+@media (max-width: 1023px) {
+  .new-listing-grid.has-results { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Responsive panel padding — opt-in class for full-screen feature panels
+   (Uploader, ResultsEditor, etc.). 2rem is fine on desktop; phones need
+   to claw that back to keep content edge-to-edge readable. */
+.responsive-panel-padding {
+  padding: 2rem;
+}
+@media (max-width: 767px) {
+  .responsive-panel-padding { padding: var(--space-4); }
+}
+
+/* Stack-on-mobile action row — converts a horizontal Discard/Save row
+   into a stacked vertical layout below 768px with the primary action on
+   top so it remains visible above the fold on small phones. */
+.action-row-stack {
+  display: flex;
+  gap: 1rem;
+}
+@media (max-width: 767px) {
+  .action-row-stack {
+    flex-direction: column-reverse;
+    gap: var(--space-3);
+  }
+  .action-row-stack > button { width: 100%; }
+}
+
+/* Inline-row helper — flex row on desktop, wraps cleanly on phones. Use
+   on the barcode-lookup input + button strip so the button drops below
+   the input rather than crushing it. */
+.inline-row-wrap {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.inline-row-wrap > :first-child { flex: 1 1 220px; min-width: 0; }
+.inline-row-wrap > :not(:first-child) { flex: 0 0 auto; }
+
+/* Summary-tiles row — three-up tile layout on desktop, two-up on tablets,
+   single-column on phones. Use instead of `gridTemplateColumns: 'repeat(3, 1fr)'`
+   which crushes the tiles unreadably below 480px. */
+.summary-tiles-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+@media (max-width: 767px) {
+  .summary-tiles-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 479px) {
+  .summary-tiles-row { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Sticky modal action row — keeps the Confirm/Save row visible at the
+   bottom of a modal whose body scrolls inside the same panel.
+   Requirements for the parent: must be the scroll container
+   (`overflow-y: auto` and a `max-height`) and must NOT have horizontal
+   padding on the bar itself (the bar absorbs the gutter via its own
+   negative-margin pattern below). The semi-opaque background mirrors
+   the panel so scrolled content doesn't bleed through. */
+.modal-sticky-actions {
+  position: sticky;
+  bottom: 0;
+  background: var(--bg-secondary);
+  /* Use a 1px ghost shadow above to separate from scrolled content. */
+  box-shadow: 0 -1px 0 var(--border-color);
+  padding: var(--space-3) 0;
+  margin-top: var(--space-3);
+  display: flex;
+  gap: 0.75rem;
+  z-index: 1;
+}
+@media (max-width: 767px) {
+  .modal-sticky-actions { padding: var(--space-3) 0 var(--space-4); }
+}

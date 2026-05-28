@@ -89,7 +89,7 @@ export default function ResultsEditor({ data, images, existingImageUrls, onStage
   const titleLengthColor = title.length > 80 ? '#ef4444' : title.length >= 70 ? '#10b981' : '#f59e0b';
 
   return (
-    <div className="glass-panel" style={{ padding: '2rem', display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className="glass-panel responsive-panel-padding" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
         <SparkleIcon /> Generated Listing
       </h2>
@@ -352,7 +352,7 @@ export default function ResultsEditor({ data, images, existingImageUrls, onStage
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
+      <div className="action-row-stack" style={{ marginTop: '2rem' }}>
         <button className="btn-secondary" style={{ flex: 1 }} onClick={onCancel}><X size={18} /> Discard</button>
         <button className="btn-primary" style={{ flex: 2 }} disabled={title.length > 80}
           onClick={() => {

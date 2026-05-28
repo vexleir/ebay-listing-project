@@ -276,7 +276,7 @@ export default function PushToEbayModal({
               ))}
             </div>
 
-            <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '0.5rem' }}>
+            <div className="modal-sticky-actions">
               <button className="btn-secondary" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
               <button className="btn-primary" style={{ flex: 2 }} onClick={onConfirm}>Push to eBay</button>
             </div>

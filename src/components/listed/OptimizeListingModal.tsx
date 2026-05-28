@@ -244,7 +244,7 @@ export default function OptimizeListingModal({
               </label>
             )}
 
-            <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <div className="modal-sticky-actions" style={{ flexWrap: 'wrap' }}>
               <button className="btn-secondary" style={{ flex: '1 1 140px' }} disabled={saving} onClick={() => onSave(false)}>
                 {saving ? 'Saving...' : 'Save Only'}
               </button>

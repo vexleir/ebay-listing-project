@@ -287,7 +287,7 @@ export default function BulkUploader({ onStage, appPassword }: BulkUploaderProps
       </div>
 
       {/* Upload dropzone */}
-      <div className="glass-panel" style={{ padding: '2rem' }}>
+      <div className="glass-panel responsive-panel-padding">
         <div
           onClick={() => fileInputRef.current?.click()}
           onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
@@ -439,7 +439,7 @@ export default function BulkUploader({ onStage, appPassword }: BulkUploaderProps
       )}
 
       {groups.length === 0 && ungrouped.length === 0 && (
-        <div className="glass-panel" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
+        <div className="glass-panel responsive-panel-padding" style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>
           Upload images to get started. Group them by product, then generate listings in bulk.
         </div>
       )}

@@ -13,7 +13,7 @@ export interface ScoreGridProps {
 
 export default function ScoreGrid({ score, expandedKey, onToggle }: ScoreGridProps) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem' }}>
+    <div className="summary-tiles-row" style={{ gap: '0.75rem' }}>
       {(Object.entries(score.categories) as [string, ScoreCategory][]).map(([key, cat]) => (
         <ScoreCard
           key={key}
