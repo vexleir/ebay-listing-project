@@ -19,9 +19,12 @@ const { tradingApiCall } = require('../../services/ebay/client');
 const { translateEbayError } = require('../../services/ebay/errors');
 const {
   buildItemSpecificsXml,
+  buildPictureDetailsXml,
   pushListingToEbay,
   sendEbayPushError,
+  uploadImagesToEps,
 } = require('../../services/ebay/listingLifecycle');
+const { resolveReviseImageUrls } = require('../../services/ebay/reviseImages');
 
 // Helper: respond with the legacy { error } string AND the new errorDetails
 // shape from the translator when a rule matches. Frontend can opt into
@@ -43,7 +46,14 @@ const router = express.Router();
 const pushDeps = { getSettings, getValidAccessToken };
 
 router.post('/revise', ebayWriteRateLimit, async (req, res) => {
-  const { itemId, newPrice, newTitle, description, conditionId, itemSpecifics, quantity } = req.body;
+  const {
+    itemId, newPrice, newTitle, description, conditionId, itemSpecifics, quantity,
+    // IMG-003 — optional image array. When present, eBay treats <PictureDetails>
+    // as a full replacement of the live photo set; when omitted, the live
+    // photos are left untouched. `listingId` is also optional and only used
+    // to refresh the local DB image cache after a successful image revise.
+    images, listingId,
+  } = req.body;
   if (!itemId) return res.status(400).json({ error: 'itemId required' });
   try {
     const token = await getValidAccessToken(req.companyId);
@@ -53,6 +63,17 @@ router.post('/revise', ebayWriteRateLimit, async (req, res) => {
     const condXml = conditionId ? `<ConditionID>${conditionId}</ConditionID>` : '';
     const qtyNum = quantity != null ? Math.max(1, parseInt(quantity, 10) || 1) : null;
     const qtyXml = qtyNum != null ? `<Quantity>${qtyNum}</Quantity>` : '';
+
+    // IMG-003 — resolve image URLs before building the revise XML. EPS URLs
+    // pass through, everything else uploads. We do this BEFORE the
+    // ReviseFixedPriceItem call so an EPS upload failure aborts cleanly with
+    // a 400 instead of half-applying the revise.
+    let resolvedImageUrls = null;
+    let pictureDetailsXml = '';
+    if (Array.isArray(images) && images.length > 0) {
+      resolvedImageUrls = await resolveReviseImageUrls(images, token, { uploadImagesToEps });
+      pictureDetailsXml = buildPictureDetailsXml(resolvedImageUrls);
+    }
 
     // ReviseFixedPriceItem treats <ItemSpecifics> as a full replacement, so
     // pushing the (possibly partial) local specifics would wipe any aspect
@@ -110,6 +131,7 @@ router.post('/revise', ebayWriteRateLimit, async (req, res) => {
     ${descXml}
     ${withCondition ? condXml : ''}
     ${specificsXml}
+    ${pictureDetailsXml}
   </Item>
 </ReviseFixedPriceItemRequest>`;
 
@@ -152,7 +174,19 @@ router.post('/revise', ebayWriteRateLimit, async (req, res) => {
 
       return respondWithEbayError(res, 400, err);
     }
-    res.json({ success: true });
+
+    // IMG-003 — image revise succeeded → mirror the new URL list into the
+    // local DB so the next modal-open doesn't have to refresh from eBay.
+    // Best-effort; failure here only loses the cache and is logged.
+    if (resolvedImageUrls && listingId) {
+      try {
+        await updateListing(req.companyId, listingId, { images: resolvedImageUrls, updatedAt: Date.now() });
+      } catch (e) {
+        console.warn(`[revise] image revise succeeded but local cache update failed for ${listingId}: ${e.message}`);
+      }
+    }
+
+    res.json({ success: true, ...(resolvedImageUrls ? { imageUrls: resolvedImageUrls } : {}) });
   } catch (e) {
     console.error('[revise] error:', e.message);
     res.status(500).json({ error: e.message });

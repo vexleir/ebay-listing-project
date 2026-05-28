@@ -1,7 +1,8 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { UploadCloud, X, Image as ImageIcon, Sparkles, CheckCircle2, Circle, GripVertical, Barcode, Scissors, RotateCw, Crop } from 'lucide-react';
+import { UploadCloud, X, Image as ImageIcon, Sparkles, CheckCircle2, Circle, GripVertical, Barcode, Scissors, RotateCw, Crop, Scaling } from 'lucide-react';
 import { rotateImageFile } from '../utils/imageRotate';
 import ImageCropModal from './ImageCropModal';
+import ImageStraightenModal from './ImageStraightenModal';
 
 interface UploaderProps {
   images: File[];
@@ -85,15 +86,20 @@ export default function Uploader({
 
   const [removingBgIdx, setRemovingBgIdx] = useState<number | null>(null);
   const [rotatingIdx, setRotatingIdx] = useState<number | null>(null);
-  // IMG-001 — index of the image currently being cropped (null = modal closed).
+  // IMG-001 — index of the image currently being cropped / straightened
+  // (null = modal closed).
   const [cropIdx, setCropIdx] = useState<number | null>(null);
+  const [straightenIdx, setStraightenIdx] = useState<number | null>(null);
 
-  const onCropSave = (next: File) => {
-    if (cropIdx === null) return;
-    const original = images[cropIdx];
+  // Shared replace-at-index helper. The crop and straighten modals both
+  // hand back a new File for the same index, and both need to keep the
+  // analyze-after-select pipeline happy by swapping the entry in
+  // `selectedFiles` as well.
+  const replaceFile = (index: number, next: File) => {
+    const original = images[index];
     setImages((prev) => {
       const arr = [...prev];
-      arr[cropIdx] = next;
+      arr[index] = next;
       return arr;
     });
     setSelectedFiles((prev) => {
@@ -103,7 +109,18 @@ export default function Uploader({
       out.add(next);
       return out;
     });
+  };
+
+  const onCropSave = (next: File) => {
+    if (cropIdx === null) return;
+    replaceFile(cropIdx, next);
     setCropIdx(null);
+  };
+
+  const onStraightenSave = (next: File) => {
+    if (straightenIdx === null) return;
+    replaceFile(straightenIdx, next);
+    setStraightenIdx(null);
   };
 
   // IMG-001 (lite) — rotate the thumbnail 90° clockwise. Swaps the entry
@@ -324,7 +341,7 @@ export default function Uploader({
                   <div style={{ position: 'absolute', top: '8px', left: '8px', color: isSelected ? 'var(--accent-color)' : 'white', background: isSelected ? 'white' : 'rgba(0,0,0,0.5)', borderRadius: '50%', display: 'flex', pointerEvents: 'none' }}>
                     {isSelected ? <CheckCircle2 size={24} /> : <Circle size={24} />}
                   </div>
-                  <div style={{ position: 'absolute', bottom: '6px', left: '50%', transform: 'translateX(-50%)', color: 'rgba(255,255,255,0.6)', pointerEvents: 'none' }}>
+                  <div style={{ position: 'absolute', top: '8px', left: '50%', transform: 'translateX(-50%)', color: 'rgba(255,255,255,0.6)', pointerEvents: 'none' }}>
                     <GripVertical size={14} />
                   </div>
                   <button
@@ -333,32 +350,48 @@ export default function Uploader({
                   >
                     <X size={14} />
                   </button>
-                  <button
-                    title="Remove background"
-                    aria-label="Remove background"
-                    onClick={(e) => { e.stopPropagation(); removeBackground(index); }}
-                    disabled={removingBgIdx === index}
-                    style={{ position: 'absolute', bottom: '8px', right: '8px', background: 'rgba(99,102,241,0.85)', border: 'none', color: 'white', borderRadius: '50%', width: '24px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
+                  {/* Image edit actions — sit in a row along the bottom edge.
+                      Buttons are 20x20 with 4px gaps so all four fit in the
+                      120px thumbnail without crowding the GripVertical handle. */}
+                  <div
+                    style={{ position: 'absolute', bottom: '6px', right: '6px', display: 'flex', gap: '4px' }}
+                    onClick={(e) => e.stopPropagation()}
                   >
-                    {removingBgIdx === index ? <span style={{ fontSize: '9px' }}>...</span> : <Scissors size={12} />}
-                  </button>
-                  <button
-                    title="Rotate 90° clockwise"
-                    aria-label="Rotate image 90 degrees clockwise"
-                    onClick={(e) => { e.stopPropagation(); rotateImage(index); }}
-                    disabled={rotatingIdx === index}
-                    style={{ position: 'absolute', bottom: '8px', right: '38px', background: 'rgba(99,102,241,0.85)', border: 'none', color: 'white', borderRadius: '50%', width: '24px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
-                  >
-                    {rotatingIdx === index ? <span style={{ fontSize: '9px' }}>...</span> : <RotateCw size={12} />}
-                  </button>
-                  <button
-                    title="Crop image"
-                    aria-label="Crop image"
-                    onClick={(e) => { e.stopPropagation(); setCropIdx(index); }}
-                    style={{ position: 'absolute', bottom: '8px', right: '68px', background: 'rgba(99,102,241,0.85)', border: 'none', color: 'white', borderRadius: '50%', width: '24px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
-                  >
-                    <Crop size={12} />
-                  </button>
+                    <button
+                      title="Crop image"
+                      aria-label="Crop image"
+                      onClick={(e) => { e.stopPropagation(); setCropIdx(index); }}
+                      style={{ background: 'rgba(99,102,241,0.85)', border: 'none', color: 'white', borderRadius: '50%', width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
+                    >
+                      <Crop size={11} />
+                    </button>
+                    <button
+                      title="Straighten image"
+                      aria-label="Straighten image"
+                      onClick={(e) => { e.stopPropagation(); setStraightenIdx(index); }}
+                      style={{ background: 'rgba(99,102,241,0.85)', border: 'none', color: 'white', borderRadius: '50%', width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
+                    >
+                      <Scaling size={11} />
+                    </button>
+                    <button
+                      title="Rotate 90° clockwise"
+                      aria-label="Rotate image 90 degrees clockwise"
+                      onClick={(e) => { e.stopPropagation(); rotateImage(index); }}
+                      disabled={rotatingIdx === index}
+                      style={{ background: 'rgba(99,102,241,0.85)', border: 'none', color: 'white', borderRadius: '50%', width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
+                    >
+                      {rotatingIdx === index ? <span style={{ fontSize: '8px' }}>…</span> : <RotateCw size={11} />}
+                    </button>
+                    <button
+                      title="Remove background"
+                      aria-label="Remove background"
+                      onClick={(e) => { e.stopPropagation(); removeBackground(index); }}
+                      disabled={removingBgIdx === index}
+                      style={{ background: 'rgba(99,102,241,0.85)', border: 'none', color: 'white', borderRadius: '50%', width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
+                    >
+                      {removingBgIdx === index ? <span style={{ fontSize: '8px' }}>…</span> : <Scissors size={11} />}
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -439,6 +472,14 @@ export default function Uploader({
           file={images[cropIdx]}
           onSave={onCropSave}
           onCancel={() => setCropIdx(null)}
+        />
+      )}
+
+      {straightenIdx !== null && images[straightenIdx] && (
+        <ImageStraightenModal
+          file={images[straightenIdx]}
+          onSave={onStraightenSave}
+          onCancel={() => setStraightenIdx(null)}
         />
       )}
     </div>

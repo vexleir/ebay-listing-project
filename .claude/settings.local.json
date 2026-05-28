@@ -17,7 +17,9 @@
       "Bash(echo \"EXIT=$?\")",
       "Bash(npm test *)",
       "Bash(npx vitest *)",
-      "Bash(node --test server/tests/quota.test.js)"
+      "Bash(node --test server/tests/quota.test.js)",
+      "Bash(node --test server/tests/revise-images.test.js)",
+      "Bash(grep -n -E \"\\(document.body\\\\s*\\\\\\)|^}\\\\s*$|^// PushModal|^function ImageEditModal|export default function StagedListings\\)\" src/components/StagedListings.tsx)"
     ]
   }
 }

@@ -1,12 +1,13 @@
 import { useState, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Save, Send, Plus, Trash2 } from 'lucide-react';
+import { X, Save, Send, Plus, Trash2, ImagePlus } from 'lucide-react';
 import type { StagedListing } from '../types';
 import { useToast } from '../context/ToastContext';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useFocusTrap } from '../hooks/useFocusTrap';
 import { findConflictingListings } from '../utils/duplicateSku';
 import DuplicateSkuWarning from './DuplicateSkuWarning';
+import ImageEditModal from './ImageEditModal';
 
 interface EditListingModalProps {
   listing: StagedListing;
@@ -63,6 +64,19 @@ export default function EditListingModal({ listing, appPassword, allListings = [
   const [saving, setSaving] = useState(false);
   const [pushing, setPushing] = useState(false);
 
+  // IMG-003 — local image state. Seeded from the listing record and dirtied
+  // when the sub-modal returns a different URL list (deep-equal compare so
+  // pure reorders also count as "modified" — eBay's <PictureDetails> is a
+  // full replacement so order matters for the main image).
+  const [images, setImages] = useState<string[]>(listing.images || []);
+  const [showImageModal, setShowImageModal] = useState(false);
+  const imagesDirty = useMemo(() => {
+    const original = listing.images || [];
+    if (original.length !== images.length) return true;
+    for (let i = 0; i < original.length; i++) if (original[i] !== images[i]) return true;
+    return false;
+  }, [listing.images, images]);
+
   // INV-002 — exclude the listing being edited so renaming your own SKU
   // to the same value doesn't trigger a self-collision warning.
   const skuConflicts = useMemo(
@@ -89,6 +103,10 @@ export default function EditListingModal({ listing, appPassword, allListings = [
     itemSpecifics: Object.fromEntries(
       specifics.filter(s => s.name.trim() && s.value.trim()).map(s => [s.name.trim(), s.value.trim()])
     ),
+    // IMG-003 — persist the latest image list with the save. Save-to-app
+    // only updates the local DB; the eBay push happens in handleSaveAndPush
+    // below and is what actually changes the live <PictureDetails>.
+    ...(imagesDirty ? { images } : {}),
     updatedAt: Date.now(),
   });
 
@@ -128,11 +146,19 @@ export default function EditListingModal({ listing, appPassword, allListings = [
           conditionId: condition,
           itemSpecifics: specifics.filter(s => s.name.trim() && s.value.trim()),
           quantity: updates.quantity,
+          // IMG-003 — only send images when the seller actually changed them
+          // so unrelated revise calls (price/title/condition edits) leave
+          // the live photo set untouched.
+          ...(imagesDirty ? { images, listingId: listing.id } : {}),
         })
       });
       const data = await resp.json();
       if (!resp.ok || data.error) throw new Error(data.error || 'eBay push failed');
-      onSaved({ ...listing, ...updates });
+      // If the server resolved cloudinary/data: URIs into EPS URLs, mirror
+      // those back into the local record so the next modal-open shows the
+      // canonical eBay-hosted versions.
+      const resolvedImages = Array.isArray(data.imageUrls) ? data.imageUrls : images;
+      onSaved({ ...listing, ...updates, images: resolvedImages });
       if (data.warning) {
         toast('Saved and pushed to eBay. Note: ' + data.warning, 'info');
       } else {
@@ -174,6 +200,54 @@ export default function EditListingModal({ listing, appPassword, allListings = [
         </div>
 
         <div style={{ overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem', flex: 1 }}>
+          {/* IMG-003 — Images row. Thumbnail strip + Edit-images button.
+              The "Modified" pill tells the seller their next Save & Push will
+              replace the live photo set on eBay. */}
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', gap: '8px', flexWrap: 'wrap' }}>
+              <label style={{ fontSize: '0.85rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                Images <span style={{ color: 'var(--text-secondary)', fontWeight: 400 }}>({images.length})</span>
+                {imagesDirty && (
+                  <span className="badge badge--warning" title="Images modified — next push to eBay will replace the live photo set">
+                    Modified
+                  </span>
+                )}
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowImageModal(true)}
+                disabled={saving || pushing}
+                className="btn-secondary"
+                style={{ fontSize: '0.82rem', padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+              >
+                <ImagePlus size={14} /> Edit images…
+              </button>
+            </div>
+            {images.length > 0 ? (
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {images.slice(0, 8).map((src, i) => (
+                  <div
+                    key={i}
+                    style={{ position: 'relative', width: '64px', height: '64px', borderRadius: '6px', overflow: 'hidden', border: i === 0 ? '2px solid var(--accent-color)' : '1px solid var(--border-color)' }}
+                    title={i === 0 ? 'Main image' : `Image ${i + 1}`}
+                  >
+                    <img src={src} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                  </div>
+                ))}
+                {images.length > 8 && (
+                  <div style={{ width: '64px', height: '64px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                    +{images.length - 8}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.82rem' }}>No images. Click <strong>Edit images…</strong> to add some.</p>
+            )}
+            <p style={{ margin: '6px 0 0', fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+              eBay treats <code>PictureDetails</code> as a full replacement — modifying the list here will replace the live photo set when you Save &amp; Push.
+            </p>
+          </div>
+
           <div>
             <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>
               Title <span style={{ color: 'var(--text-secondary)', fontWeight: 400 }}>({title.length}/80)</span>
@@ -254,6 +328,18 @@ export default function EditListingModal({ listing, appPassword, allListings = [
           )}
         </div>
       </div>
+
+      {/* IMG-003 — sub-modal for image add/remove/reorder. The sub-modal
+          handles its own Cloudinary upload via /api/images/upload; we
+          receive the resulting URL list and stamp it onto local state. */}
+      {showImageModal && (
+        <ImageEditModal
+          listing={{ ...listing, images }}
+          appPassword={appPassword}
+          onSave={(next) => { setImages(next); setShowImageModal(false); }}
+          onClose={() => setShowImageModal(false)}
+        />
+      )}
     </div>,
     document.body
   );
