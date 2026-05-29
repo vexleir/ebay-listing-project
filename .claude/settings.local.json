@@ -25,7 +25,10 @@
       "Bash(node --test server/tests/inventory.test.js)",
       "Bash(node --test server/tests/routes-inventory.test.js)",
       "Bash(node --test server/tests/routes-extra.test.js)",
-      "Bash(node --test server/tests/listings-inventory-bootstrap.test.js)"
+      "Bash(node --test server/tests/listings-inventory-bootstrap.test.js)",
+      "Bash(node --test server/tests/ebay-push-inventory.test.js)",
+      "Bash(node --test server/tests/sold-transition.test.js)",
+      "Bash(node --test server/tests/listings-sold-sync.test.js)"
     ]
   }
 }

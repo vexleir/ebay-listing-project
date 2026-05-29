@@ -111,6 +111,41 @@ async function deleteInventoryItem(companyId, id) {
   return { deleted: result.deletedCount || 0 };
 }
 
+// INV-002 push counter sync — atomic increment / decrement on the three
+// quantity columns. Used by the push and sold-sync hooks so the inventory
+// truth reflects what's actually live on eBay.
+//
+// `deltas` is `{ quantityOnHand?, quantityListed?, quantitySold? }`. Any
+// omitted field is left untouched. Returns the updated doc, or null when
+// no matching SKU is found (the caller is then responsible for deciding
+// whether to bootstrap an inventory row first).
+async function incrementInventoryCounters(companyId, sku, deltas = {}) {
+  if (!companyId) throw Object.assign(new Error('companyId required'), { status: 400 });
+  const normalized = normalizeInventorySku(sku);
+  if (!normalized) throw Object.assign(new Error('sku required'), { status: 400 });
+
+  const incFields = {};
+  for (const field of ['quantityOnHand', 'quantityListed', 'quantitySold']) {
+    if (typeof deltas[field] === 'number' && Number.isFinite(deltas[field])) {
+      incFields[field] = Math.trunc(deltas[field]);
+    }
+  }
+  if (Object.keys(incFields).length === 0) {
+    return getInventoryItemBySku(companyId, normalized);
+  }
+
+  const db = await getDb();
+  const updateResult = await db.collection(COLLECTION).updateOne(
+    { companyId, sku: normalized },
+    { $inc: incFields, $set: { updatedAt: new Date().toISOString() } },
+  );
+  if (!updateResult.matchedCount) return null;
+
+  // Re-read so the caller sees the post-increment counters; $inc is atomic
+  // but doesn't return the modified doc on older drivers.
+  return getInventoryItemBySku(companyId, normalized);
+}
+
 // INV-002 auto-bootstrap — when a listing is staged with a SKU, the route
 // handler calls this to ensure the inventory truth catches up automatically.
 // Idempotent: returns the existing item when one already has this SKU; only
@@ -154,4 +189,5 @@ module.exports = {
   updateInventoryItem,
   deleteInventoryItem,
   ensureInventoryItemForSku,
+  incrementInventoryCounters,
 };

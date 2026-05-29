@@ -221,6 +221,56 @@ export default function SettingsPanelView({ appPassword, isEbayConnected, staged
         </Field>
       </div>
 
+      {/* AI Token Quota */}
+      <div className="glass-panel" style={{ padding: '1.5rem' }}>
+        <SectionHeader
+          title="AI Token Quota"
+          sub="Daily cap on Gemini tokens this account can spend. Useful when multiple users share a Google billing account."
+        />
+        <Field
+          label="Daily token limit"
+          hint="Leave blank to use the system default (100,000 tokens). The cap resets at midnight UTC each day."
+        >
+          <input
+            className="input-base"
+            type="number"
+            min="0"
+            step="1000"
+            disabled={!!settings.aiQuotaDisabled}
+            value={settings.aiDailyTokenLimit ?? ''}
+            onChange={(e) => {
+              const raw = e.target.value;
+              setSettings((prev) => ({
+                ...prev,
+                aiDailyTokenLimit: raw === '' ? undefined : Math.max(0, parseInt(raw, 10) || 0),
+              }));
+            }}
+            placeholder="100000"
+            style={{ maxWidth: '200px' }}
+            aria-label="Daily AI token limit"
+          />
+        </Field>
+        <Field
+          label="Quota status"
+          hint="Disabling the quota removes the daily 429 cap. Per-request rate limits still apply."
+        >
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.9rem' }}>
+            <input
+              type="checkbox"
+              checked={!!settings.aiQuotaDisabled}
+              onChange={(e) => setSettings((prev) => ({ ...prev, aiQuotaDisabled: e.target.checked }))}
+              aria-label="Disable AI daily token quota"
+            />
+            <span>Disable the daily token quota (no limit)</span>
+          </label>
+        </Field>
+        {settings.aiQuotaDisabled && (
+          <div style={{ padding: '8px 12px', background: 'rgba(245,158,11,0.10)', border: '1px solid rgba(245,158,11,0.35)', borderRadius: '6px', fontSize: '0.82rem', color: 'var(--warning)' }}>
+            Daily cap is OFF — Gemini calls will run without a per-day token ceiling.
+          </div>
+        )}
+      </div>
+
       {/* Description Templates */}
       <div className="glass-panel" style={{ padding: '1.5rem' }}>
         <SectionHeader title="Description Templates" sub="HTML header and footer automatically wrapped around every AI-generated description when pushed to eBay. Stored description stays clean — wrapper is applied at push time only." />

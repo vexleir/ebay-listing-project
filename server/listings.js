@@ -36,6 +36,15 @@ async function getAllListingsMeta(companyId) {
   ).toArray();
 }
 
+// Single-doc fetch used by the sold-sync inventory hook so the PUT handler
+// can detect a transition (was-not-sold → is-now-sold). Returns null when
+// no match. Tenant-scoped via the companyId filter.
+async function getListing(companyId, id) {
+  if (!companyId || !id) return null;
+  const db = await getDb();
+  return db.collection('listings').findOne({ companyId, id });
+}
+
 async function createListing(companyId, listing) {
   const db = await getDb();
   const { _id, ...doc } = listing;
@@ -113,6 +122,10 @@ async function getAiDailyQuotaStatus(companyId) {
   ]);
   const envLimit = parsePositiveInt(process.env.AI_DAILY_TOKEN_LIMIT, 100000);
   const limit = parsePositiveInt(settings.aiDailyTokenLimit ?? settings.aiDailyTokenQuota, envLimit);
+  // When the company-level toggle is set, treat the quota as off entirely.
+  // The middleware short-circuits its 429 check on this flag; the frontend
+  // can show "No limit" / "Unlimited" wherever the quota normally surfaces.
+  const disabled = !!settings.aiQuotaDisabled;
   const promptTokens = doc?.promptTokens || 0;
   const completionTokens = doc?.completionTokens || 0;
   const totalTokens = doc?.totalTokens || 0;
@@ -120,11 +133,12 @@ async function getAiDailyQuotaStatus(companyId) {
   return {
     day,
     limit,
+    disabled,
     promptTokens,
     completionTokens,
     totalTokens,
     callCount,
-    remainingTokens: Math.max(0, limit - totalTokens),
+    remainingTokens: disabled ? Number.POSITIVE_INFINITY : Math.max(0, limit - totalTokens),
     resetAt: nextUtcMidnightIso(day),
   };
 }
@@ -159,7 +173,7 @@ async function getActiveListings(companyId) {
 }
 
 module.exports = {
-  getListings, createListing, updateListing, deleteListing,
+  getListings, getListing, createListing, updateListing, deleteListing,
   getAllListingsMeta, getActiveListings,
   getSettings, saveSettings,
   incrementTokenUsage, getTokenUsage, getAiDailyQuotaStatus,

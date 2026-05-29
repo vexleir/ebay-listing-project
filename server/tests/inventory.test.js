@@ -35,11 +35,17 @@ function makeFakeDb() {
       updateOne: async (query, update) => {
         for (const [key, doc] of store) {
           if (matchesQuery(doc, query)) {
-            store.set(key, { ...doc, ...(update.$set || {}) });
-            return { modifiedCount: 1 };
+            const next = { ...doc, ...(update.$set || {}) };
+            if (update.$inc) {
+              for (const [field, delta] of Object.entries(update.$inc)) {
+                next[field] = (next[field] || 0) + delta;
+              }
+            }
+            store.set(key, next);
+            return { modifiedCount: 1, matchedCount: 1 };
           }
         }
-        return { modifiedCount: 0 };
+        return { modifiedCount: 0, matchedCount: 0 };
       },
       deleteOne: async (query) => {
         for (const [key, doc] of store) {
@@ -308,4 +314,70 @@ test('ensureInventoryItemForSku does not cross tenants', async () => {
 
 test('ensureInventoryItemForSku throws on missing companyId', async () => {
   await assert.rejects(() => inventory.ensureInventoryItemForSku('', 'X'), /companyId required/);
+});
+
+// ── incrementInventoryCounters ─────────────────────────────────────────────
+
+test('incrementInventoryCounters atomically adjusts the three counters', async () => {
+  await inventory.createInventoryItem('co1', { id: 'i', sku: 'X', quantityOnHand: 5 });
+  const updated = await inventory.incrementInventoryCounters('co1', 'X', {
+    quantityOnHand: -1, quantityListed: 1,
+  });
+  assert.equal(updated.quantityOnHand, 4);
+  assert.equal(updated.quantityListed, 1);
+  assert.equal(updated.quantitySold, 0);
+});
+
+test('incrementInventoryCounters refreshes updatedAt', async () => {
+  const created = await inventory.createInventoryItem('co1', { id: 'i', sku: 'X' });
+  await new Promise((r) => setTimeout(r, 5));
+  const updated = await inventory.incrementInventoryCounters('co1', 'X', { quantityListed: 1 });
+  assert.notEqual(updated.updatedAt, created.updatedAt);
+});
+
+test('incrementInventoryCounters returns null when no SKU match', async () => {
+  const out = await inventory.incrementInventoryCounters('co1', 'MISSING', { quantityListed: 1 });
+  assert.equal(out, null);
+});
+
+test('incrementInventoryCounters ignores non-numeric / non-finite deltas', async () => {
+  await inventory.createInventoryItem('co1', { id: 'i', sku: 'X', quantityOnHand: 3 });
+  const updated = await inventory.incrementInventoryCounters('co1', 'X', {
+    quantityOnHand: 'abc', quantityListed: NaN, quantitySold: 2,
+  });
+  assert.equal(updated.quantityOnHand, 3); // unchanged
+  assert.equal(updated.quantityListed, 0); // unchanged
+  assert.equal(updated.quantitySold, 2);
+});
+
+test('incrementInventoryCounters truncates fractional deltas to integers', async () => {
+  await inventory.createInventoryItem('co1', { id: 'i', sku: 'X' });
+  const updated = await inventory.incrementInventoryCounters('co1', 'X', { quantityListed: 2.9 });
+  assert.equal(updated.quantityListed, 2);
+});
+
+test('incrementInventoryCounters with empty deltas returns the existing doc', async () => {
+  await inventory.createInventoryItem('co1', { id: 'i', sku: 'X', quantityOnHand: 4 });
+  const out = await inventory.incrementInventoryCounters('co1', 'X', {});
+  assert.equal(out.quantityOnHand, 4);
+});
+
+test('incrementInventoryCounters is case-insensitive on the SKU lookup', async () => {
+  await inventory.createInventoryItem('co1', { id: 'i', sku: 'WIDGET-1' });
+  const updated = await inventory.incrementInventoryCounters('co1', 'widget-1', { quantityListed: 1 });
+  assert.equal(updated.quantityListed, 1);
+});
+
+test('incrementInventoryCounters throws on missing companyId or SKU', async () => {
+  await assert.rejects(() => inventory.incrementInventoryCounters('', 'X', { quantityListed: 1 }), /companyId required/);
+  await assert.rejects(() => inventory.incrementInventoryCounters('co1', '', { quantityListed: 1 }), /sku required/);
+});
+
+test('incrementInventoryCounters does not cross tenants', async () => {
+  await inventory.createInventoryItem('co1', { id: 'i', sku: 'X', quantityOnHand: 5 });
+  const out = await inventory.incrementInventoryCounters('co2', 'X', { quantityListed: 1 });
+  assert.equal(out, null);
+  // co1's record is untouched.
+  const original = await inventory.getInventoryItem('co1', 'i');
+  assert.equal(original.quantityListed, 0);
 });

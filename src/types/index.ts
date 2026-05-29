@@ -51,6 +51,13 @@ export interface UserSettings {
   defaultPaymentPolicyId?: string;
   defaultReturnPolicyId?: string;
   promotedListingPct?: number;
+  // Per-company daily AI token cap. Blank / undefined falls back to the
+  // AI_DAILY_TOKEN_LIMIT env var (default 100000).
+  aiDailyTokenLimit?: number;
+  // When true, skip the daily-quota 429 check entirely. Sellers who pay
+  // their own AI bills can turn the cap off; the per-call rate limits
+  // still apply.
+  aiQuotaDisabled?: boolean;
 }
 
 export interface EbayPolicy {

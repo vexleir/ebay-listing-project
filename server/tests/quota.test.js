@@ -123,6 +123,37 @@ test('enforceAiDailyQuota passes the request company id through to getAiDailyQuo
   assert.deepEqual(seen, ['co_42']);
 });
 
+test('enforceAiDailyQuota short-circuits to allow when the company has disabled the quota', async () => {
+  fakeListings.__nextQuota = {
+    day: '2026-05-29',
+    limit: 0,            // would normally block every request
+    disabled: true,
+    totalTokens: 99999,
+    remainingTokens: 0,
+    resetAt: '2026-05-30T00:00:00.000Z',
+  };
+  const res = makeRes();
+  const ok = await quota.enforceAiDailyQuota({ companyId: 'c1' }, res, 999999);
+  assert.equal(ok, true);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body, null);
+});
+
+test('enforceAiDailyQuota still enforces when disabled is explicitly false', async () => {
+  fakeListings.__nextQuota = {
+    day: '2026-05-29',
+    limit: 100,
+    disabled: false,
+    totalTokens: 99,
+    remainingTokens: 1,
+    resetAt: '2026-05-30T00:00:00.000Z',
+  };
+  const res = makeRes();
+  const ok = await quota.enforceAiDailyQuota({ companyId: 'c1' }, res, 5);
+  assert.equal(ok, false);
+  assert.equal(res.statusCode, 429);
+});
+
 // ── recordTokenUsage ────────────────────────────────────────────────────────
 
 test('recordTokenUsage is a no-op when tokenUsage is falsy', async () => {

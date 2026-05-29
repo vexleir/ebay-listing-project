@@ -12,8 +12,13 @@ const AI_OPTIMIZE_QUOTA_RESERVE_TOKENS = parsePositiveIntEnv('AI_OPTIMIZE_QUOTA_
 // Returns true if the request may proceed. Writes a 429 response and returns
 // false if the company has insufficient quota for the requested reserve.
 // Route handlers should `if (!await enforceAiDailyQuota(req, res, RESERVE)) return;`
+//
+// When the company's `aiQuotaDisabled` setting is true, the quota check is
+// bypassed entirely. Sellers (or admins acting on their behalf) can toggle
+// this from the Settings panel to remove the per-day cap.
 async function enforceAiDailyQuota(req, res, reserveTokens) {
   const quota = await getAiDailyQuotaStatus(req.companyId);
+  if (quota.disabled) return true;
   if (quota.remainingTokens < reserveTokens) {
     res.status(429).json({
       error: 'Your AI quota for today has been reached.',

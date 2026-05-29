@@ -12,12 +12,14 @@ const { requireSuperAdmin } = require('../auth');
 const { createRequireDebugEndpointsEnabled } = require('../middleware/requireDebugEndpoints');
 const {
   getListings,
+  getListing,
   createListing,
   updateListing,
   deleteListing,
   getAllListingsMeta,
 } = require('../listings');
-const { ensureInventoryItemForSku } = require('../inventory');
+const { ensureInventoryItemForSku, incrementInventoryCounters } = require('../inventory');
+const { detectSoldTransition } = require('../services/inventory/soldTransition');
 const { getDb } = require('../db');
 
 const router = express.Router();
@@ -64,7 +66,28 @@ router.post('/', async (req, res) => {
 
 router.put('/:id', async (req, res) => {
   try {
-    await updateListing(req.companyId, req.params.id, req.body.updates);
+    const updates = req.body.updates || {};
+
+    // INV-002 sold-sync wiring — load the existing record FIRST so we can
+    // tell whether this update flips the sold flag. The detector returns
+    // null for any update that doesn't cross the sold boundary so we don't
+    // pay for the Mongo round-trip on price-only / image-only edits.
+    let soldTransition = null;
+    if ('soldAt' in updates) {
+      const existing = await getListing(req.companyId, req.params.id);
+      soldTransition = detectSoldTransition(existing, updates);
+    }
+
+    await updateListing(req.companyId, req.params.id, updates);
+
+    if (soldTransition) {
+      try {
+        await incrementInventoryCounters(req.companyId, soldTransition.sku, soldTransition.deltas);
+      } catch (e) {
+        console.warn(`[listings] sold counter update failed for sku=${soldTransition.sku}: ${e.message}`);
+      }
+    }
+
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });

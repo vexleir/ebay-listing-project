@@ -25,6 +25,7 @@ const {
   uploadImagesToEps,
 } = require('../../services/ebay/listingLifecycle');
 const { resolveReviseImageUrls } = require('../../services/ebay/reviseImages');
+const { incrementInventoryCounters } = require('../../inventory');
 
 // Helper: respond with the legacy { error } string AND the new errorDetails
 // shape from the translator when a rule matches. Frontend can opt into
@@ -218,6 +219,23 @@ router.post('/end-listing', ebayWriteRateLimit, async (req, res) => {
 router.post('/draft', ebayWriteRateLimit, async (req, res) => {
   try {
     const result = await pushListingToEbay({ ...req.body, companyId: req.companyId }, pushDeps);
+
+    // INV-002 push counter sync — when the push succeeds, the SKU now has
+    // one more unit listed and one fewer on the seller's shelf. Non-fatal:
+    // a missing inventory row or a Mongo hiccup only loses the bookkeeping
+    // tick, not the successful push.
+    const sku = req.body?.listing?.sku;
+    if (typeof sku === 'string' && sku.trim()) {
+      try {
+        await incrementInventoryCounters(req.companyId, sku, {
+          quantityOnHand: -1,
+          quantityListed: 1,
+        });
+      } catch (e) {
+        console.warn(`[draft] inventory counter update failed for sku=${sku}: ${e.message}`);
+      }
+    }
+
     res.json({ success: true, ...result });
   } catch (error) {
     sendEbayPushError(res, error);
