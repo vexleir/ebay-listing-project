@@ -19,6 +19,39 @@ async function bootstrap() {
     await db.collection('companies').createIndex({ id: 1 }, { unique: true });
     await db.collection('listings').createIndex({ companyId: 1, status: 1 });
 
+    // --- Container Management Collections & Indexes ---
+
+    // containers collection
+    await db.collection('containers').createIndex({ companyId: 1, name: 1 }, { unique: true });
+    await db.collection('containers').createIndex({ companyId: 1, status: 1 });
+    await db.collection('containers').createIndex({ companyId: 1, containerType: 1 });
+    await db.collection('containers').createIndex({ companyId: 1, building: 1, room: 1, shelf: 1, shelfRow: 1 });
+    await db.collection('containers').createIndex({ companyId: 1, fullnessPercentage: 1 });
+    await db.collection('containers').createIndex({ companyId: 1, createdAt: 1 });
+    await db.collection('containers').createIndex({ companyId: 1, updatedAt: 1 });
+
+    // container_aliases collection
+    await db.collection('container_aliases').createIndex({ companyId: 1, normalizedValue: 1 });
+    await db.collection('container_aliases').createIndex({ companyId: 1, containerId: 1 });
+    await db.collection('container_aliases').createIndex({ companyId: 1, aliasValue: 1 });
+
+    // container_item_assignments collection
+    await db.collection('container_item_assignments').createIndex({ companyId: 1, containerId: 1 });
+    await db.collection('container_item_assignments').createIndex({ companyId: 1, itemId: 1, itemType: 1 }, { unique: true });
+    await db.collection('container_item_assignments').createIndex({ companyId: 1, assignedAt: 1 });
+
+    // container_audit collection
+    await db.collection('container_audit').createIndex({ companyId: 1, entityId: 1, timestamp: -1 });
+    await db.collection('container_audit').createIndex({ companyId: 1, timestamp: -1 });
+    await db.collection('container_audit').createIndex({ companyId: 1, actionType: 1 });
+
+    // review_queue collection
+    await db.collection('review_queue').createIndex({ companyId: 1, status: 1, confidenceScore: -1 });
+    await db.collection('review_queue').createIndex({ companyId: 1, originalSku: 1 });
+
+    // container_types collection (simple collection for type definitions)
+    await db.collection('container_types').createIndex({ companyId: 1, name: 1 }, { unique: true });
+
     // Find or create the default FlipSide Collectibles company
     let company = (await db.collection('companies').find({}).toArray()).find((c) => c.name === 'FlipSide Collectibles');
     if (!company) {

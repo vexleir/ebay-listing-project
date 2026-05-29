@@ -31,6 +31,7 @@ const ebayCompsRoutes = require('./routes/ebay/comps');
 const ebayLifecycleRoutes = require('./routes/ebay/lifecycle');
 const ebaySyncRoutes = require('./routes/ebay/sync');
 const barcodeRoutes = require('./routes/barcode');
+const containerRoutes = require('./routes/containers');
 const publicAuthRoutes = require('./routes/publicAuth');
 const meRoutes = require('./routes/me');
 
@@ -66,6 +67,7 @@ app.use('/api', aiRoutes);
 app.use('/api/barcode', barcodeRoutes);
 app.use('/api/optimizer', optimizerRoutes);
 app.use('/api/inventory', inventoryRoutes);
+app.use('/api/containers', containerRoutes);
 app.use('/api/intelligence', intelligenceRoutes);
 app.use('/api/admin', adminRoutes);
 
