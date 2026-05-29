@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import type { StagedListing } from '../types';
 import { TrendingUp, Package, Tag, DollarSign, BarChart2, Clock, Zap, Download, Calendar } from 'lucide-react';
 import RepricingAdvisor from './RepricingAdvisor';
+import OptimizerImpactPanel from './OptimizerImpactPanel';
 import { calculateNetProfit } from '../utils/fees';
 
 interface AnalyticsProps {
@@ -526,6 +527,13 @@ export default function Analytics({ staged, listed, appPassword }: AnalyticsProp
             <p style={{ marginTop: '0.75rem', fontSize: '0.72rem', color: 'var(--text-secondary)', opacity: 0.7 }}>
               Avg net is only computed for sold items with a cost basis recorded — the (n/N) annotation shows how many of each tag's sales qualified.
             </p>
+          </div>
+        )}
+
+        {/* Optimizer Impact Panel */}
+        {appPassword && (
+          <div style={{ gridColumn: 'span 2' }}>
+            <OptimizerImpactPanel appPassword={appPassword} />
           </div>
         )}
 

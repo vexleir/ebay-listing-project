@@ -130,9 +130,75 @@ async function listOutcomesForCompany(companyId, { milestone, limit = 100, since
   return docs.map(({ _id, ...rest }) => rest);
 }
 
+// INTEL-003 — Optimizer action tracking. Records each revise/relist that
+// was triggered by the optimizer, capturing before/after snapshots so we
+// can later measure whether the optimization actually moved the needle.
+const OPTIMIZER_ACTIONS_COLLECTION = 'optimizer_actions';
+
+async function createOptimizerAction(companyId, doc) {
+  if (!companyId) throw Object.assign(new Error('companyId required'), { status: 400 });
+  if (!doc || !doc.id) throw Object.assign(new Error('optimizer action doc with id required'), { status: 400 });
+  if (doc.companyId && doc.companyId !== companyId) {
+    throw Object.assign(new Error('optimizer action companyId mismatch'), { status: 400 });
+  }
+  const stamped = { ...doc, companyId };
+  const db = await getDb();
+  await db.collection(OPTIMIZER_ACTIONS_COLLECTION).insertOne(stamped);
+  const { _id, ...rest } = stamped;
+  return rest;
+}
+
+async function listOptimizerActionsForCompany(companyId, { limit = 100, since } = {}) {
+  if (!companyId) return [];
+  const db = await getDb();
+  const query = { companyId };
+  if (since) query.appliedAt = { $gte: since };
+  const docs = await db.collection(OPTIMIZER_ACTIONS_COLLECTION)
+    .find(query)
+    .sort({ appliedAt: -1 })
+    .limit(Math.max(1, Math.min(500, limit)))
+    .toArray();
+  return docs.map(({ _id, ...rest }) => rest);
+}
+
+async function listOptimizerActionsForListing(companyId, listingId) {
+  if (!companyId || !listingId) return [];
+  const db = await getDb();
+  const docs = await db.collection(OPTIMIZER_ACTIONS_COLLECTION)
+    .find({ companyId, listingId })
+    .sort({ appliedAt: -1 })
+    .toArray();
+  return docs.map(({ _id, ...rest }) => rest);
+}
+
+async function getOptimizerActionStats(companyId, { since } = {}) {
+  if (!companyId) return { totalActions: 0, actionsByType: { revise: 0, relist: 0 }, uniqueListings: 0 };
+  const db = await getDb();
+  const query = { companyId };
+  if (since) query.appliedAt = { $gte: since };
+  const docs = await db.collection(OPTIMIZER_ACTIONS_COLLECTION)
+    .find(query)
+    .toArray();
+
+  const actionsByType = { revise: 0, relist: 0 };
+  const listingIds = new Set();
+  for (const doc of docs) {
+    if (doc.actionType === 'revise') actionsByType.revise++;
+    else if (doc.actionType === 'relist') actionsByType.relist++;
+    if (doc.listingId) listingIds.add(doc.listingId);
+  }
+
+  return {
+    totalActions: docs.length,
+    actionsByType,
+    uniqueListings: listingIds.size,
+  };
+}
+
 module.exports = {
   COLLECTION,
   OUTCOMES_COLLECTION,
+  OPTIMIZER_ACTIONS_COLLECTION,
   createExperiment,
   getExperiment,
   getLatestExperimentForListing,
@@ -142,4 +208,8 @@ module.exports = {
   getOutcome,
   listOutcomesForExperiment,
   listOutcomesForCompany,
+  createOptimizerAction,
+  listOptimizerActionsForCompany,
+  listOptimizerActionsForListing,
+  getOptimizerActionStats,
 };

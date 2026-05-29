@@ -19,6 +19,8 @@ const { getDb } = require('../../db');
 const { saveSettings } = require('../../listings');
 const { createDefaultRateLimiters } = require('../../middleware/rateLimit');
 const { tradingApiCall } = require('../../services/ebay/client');
+const { captureOutcomeForEbayItem } = require('../../services/intelligence/captureOutcome');
+const { getExperimentByEbayItemId, upsertOutcome } = require('../../intelligence');
 
 const { ebayReadRateLimit } = createDefaultRateLimiters();
 
@@ -135,6 +137,30 @@ router.get('/sold-items', ebayReadRateLimit, async (req, res) => {
       if (pageNumber >= totalPages || pageItems === 0) break;
     }
 
+    // INTEL-002 — Auto-fire sold milestone outcome capture for each item
+    // that matches an experiment. Non-fatal: a failure in outcome capture
+    // does NOT affect the sold-sync response.
+    let capturedOutcomes = 0;
+    const captureDeps = { getExperimentByEbayItemId, upsertOutcome };
+    for (const item of items) {
+      try {
+        const result = await captureOutcomeForEbayItem(req.companyId, item.itemId, {
+          milestone: 'sold',
+          stats: {
+            finalSalePrice: item.soldPrice,
+            soldAt: item.soldDate,
+            quantitySold: item.quantitySold,
+          },
+          status: 'completed',
+        }, captureDeps);
+        if (result && !result.skipped) {
+          capturedOutcomes += 1;
+        }
+      } catch (e) {
+        console.warn('[sold-items] outcome capture failed for item', item.itemId, ':', e.message);
+      }
+    }
+
     // Persist sync metadata. Failure here is non-fatal — the seller still
     // gets their data, but the "last synced" badge won't refresh.
     const syncedAt = new Date().toISOString();
@@ -155,6 +181,7 @@ router.get('/sold-items', ebayReadRateLimit, async (req, res) => {
       pagesFetched,
       totalEntries,
       syncedAt,
+      capturedOutcomes,
     });
   } catch (e) {
     console.error('[sold-items] error:', e.message);

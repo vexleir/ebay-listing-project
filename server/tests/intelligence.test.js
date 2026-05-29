@@ -363,3 +363,145 @@ test('listOutcomesForCompany honors the limit', async () => {
   const out = await intelligence.listOutcomesForCompany('co1', { limit: 2 });
   assert.equal(out.length, 2);
 });
+
+// ── INTEL-003 optimizer actions CRUD ───────────────────────────────────────
+
+function exampleOptimizerAction(overrides = {}) {
+  return {
+    id: 'oa1',
+    companyId: 'co1',
+    listingId: 'L1',
+    ebayItemId: '123',
+    actionType: 'revise',
+    appliedAt: '2026-06-01T10:00:00.000Z',
+    createdAt: '2026-06-01T10:00:00.000Z',
+    beforeSnapshot: { title: 'Old Title', price: '19.99', descriptionLength: 100, itemSpecificsCount: 2, imageCount: 3 },
+    afterSnapshot: { title: 'New Title', price: '24.99', descriptionLength: 150, itemSpecificsCount: 4, imageCount: 5 },
+    reasonCodes: ['title_changed', 'price_changed'],
+    expectedImpact: { scoreChange: 12, priceChange: 5 },
+    ...overrides,
+  };
+}
+
+// ── createOptimizerAction ──────────────────────────────────────────────────
+
+test('createOptimizerAction persists the doc and returns it without _id', async () => {
+  const out = await intelligence.createOptimizerAction('co1', exampleOptimizerAction());
+  assert.equal(out.id, 'oa1');
+  assert.equal(out.companyId, 'co1');
+  assert.equal(out.actionType, 'revise');
+  assert.equal(out._id, undefined);
+});
+
+test('createOptimizerAction rejects missing companyId', async () => {
+  await assert.rejects(
+    () => intelligence.createOptimizerAction('', exampleOptimizerAction()),
+    /companyId required/,
+  );
+});
+
+test('createOptimizerAction rejects missing doc.id', async () => {
+  await assert.rejects(
+    () => intelligence.createOptimizerAction('co1', { ...exampleOptimizerAction(), id: '' }),
+    /optimizer action doc with id required/,
+  );
+});
+
+test('createOptimizerAction rejects a companyId mismatch on the doc', async () => {
+  await assert.rejects(
+    () => intelligence.createOptimizerAction('co1', exampleOptimizerAction({ companyId: 'co2' })),
+    /companyId mismatch/,
+  );
+});
+
+test('createOptimizerAction stamps companyId when the doc has none', async () => {
+  const out = await intelligence.createOptimizerAction('co1', { ...exampleOptimizerAction(), companyId: undefined });
+  assert.equal(out.companyId, 'co1');
+});
+
+// ── listOptimizerActionsForCompany ─────────────────────────────────────────
+
+test('listOptimizerActionsForCompany returns rows sorted by appliedAt desc', async () => {
+  await intelligence.createOptimizerAction('co1', exampleOptimizerAction({ id: 'a', appliedAt: '2026-01-01T00:00:00.000Z' }));
+  await intelligence.createOptimizerAction('co1', exampleOptimizerAction({ id: 'b', appliedAt: '2026-03-01T00:00:00.000Z' }));
+  await intelligence.createOptimizerAction('co1', exampleOptimizerAction({ id: 'c', appliedAt: '2026-02-01T00:00:00.000Z' }));
+  const out = await intelligence.listOptimizerActionsForCompany('co1');
+  assert.deepEqual(out.map((d) => d.id), ['b', 'c', 'a']);
+});
+
+test('listOptimizerActionsForCompany honors the limit', async () => {
+  for (let i = 0; i < 5; i += 1) {
+    await intelligence.createOptimizerAction('co1', exampleOptimizerAction({
+      id: `oa${i}`,
+      appliedAt: `2026-06-0${i + 1}T00:00:00.000Z`,
+    }));
+  }
+  const out = await intelligence.listOptimizerActionsForCompany('co1', { limit: 2 });
+  assert.equal(out.length, 2);
+});
+
+test('listOptimizerActionsForCompany filters by since', async () => {
+  await intelligence.createOptimizerAction('co1', exampleOptimizerAction({ id: 'old', appliedAt: '2026-01-01T00:00:00.000Z' }));
+  await intelligence.createOptimizerAction('co1', exampleOptimizerAction({ id: 'new', appliedAt: '2026-05-01T00:00:00.000Z' }));
+  const out = await intelligence.listOptimizerActionsForCompany('co1', { since: '2026-03-01T00:00:00.000Z' });
+  assert.deepEqual(out.map((d) => d.id), ['new']);
+});
+
+test('listOptimizerActionsForCompany returns empty for missing companyId', async () => {
+  assert.deepEqual(await intelligence.listOptimizerActionsForCompany(''), []);
+});
+
+test('listOptimizerActionsForCompany does not cross tenants', async () => {
+  await intelligence.createOptimizerAction('co1', exampleOptimizerAction({ id: 'a' }));
+  await intelligence.createOptimizerAction('co2', exampleOptimizerAction({ id: 'b', companyId: 'co2' }));
+  const out = await intelligence.listOptimizerActionsForCompany('co1');
+  assert.deepEqual(out.map((d) => d.id), ['a']);
+});
+
+// ── listOptimizerActionsForListing ─────────────────────────────────────────
+
+test('listOptimizerActionsForListing returns actions for a specific listing', async () => {
+  await intelligence.createOptimizerAction('co1', exampleOptimizerAction({ id: 'a', listingId: 'L1', appliedAt: '2026-01-01T00:00:00.000Z' }));
+  await intelligence.createOptimizerAction('co1', exampleOptimizerAction({ id: 'b', listingId: 'L2', appliedAt: '2026-02-01T00:00:00.000Z' }));
+  await intelligence.createOptimizerAction('co1', exampleOptimizerAction({ id: 'c', listingId: 'L1', appliedAt: '2026-03-01T00:00:00.000Z' }));
+  const out = await intelligence.listOptimizerActionsForListing('co1', 'L1');
+  assert.deepEqual(out.map((d) => d.id), ['c', 'a']);
+});
+
+test('listOptimizerActionsForListing returns empty for missing args', async () => {
+  assert.deepEqual(await intelligence.listOptimizerActionsForListing('', 'L1'), []);
+  assert.deepEqual(await intelligence.listOptimizerActionsForListing('co1', ''), []);
+});
+
+// ── getOptimizerActionStats ────────────────────────────────────────────────
+
+test('getOptimizerActionStats returns correct aggregate shape', async () => {
+  await intelligence.createOptimizerAction('co1', exampleOptimizerAction({ id: 'a', actionType: 'revise', listingId: 'L1' }));
+  await intelligence.createOptimizerAction('co1', exampleOptimizerAction({ id: 'b', actionType: 'relist', listingId: 'L2' }));
+  await intelligence.createOptimizerAction('co1', exampleOptimizerAction({ id: 'c', actionType: 'revise', listingId: 'L1' }));
+  const stats = await intelligence.getOptimizerActionStats('co1');
+  assert.equal(stats.totalActions, 3);
+  assert.equal(stats.actionsByType.revise, 2);
+  assert.equal(stats.actionsByType.relist, 1);
+  assert.equal(stats.uniqueListings, 2);
+});
+
+test('getOptimizerActionStats returns zeroed shape for missing companyId', async () => {
+  const stats = await intelligence.getOptimizerActionStats('');
+  assert.deepEqual(stats, { totalActions: 0, actionsByType: { revise: 0, relist: 0 }, uniqueListings: 0 });
+});
+
+test('getOptimizerActionStats filters by since', async () => {
+  await intelligence.createOptimizerAction('co1', exampleOptimizerAction({ id: 'old', appliedAt: '2026-01-01T00:00:00.000Z', listingId: 'L1' }));
+  await intelligence.createOptimizerAction('co1', exampleOptimizerAction({ id: 'new', appliedAt: '2026-05-01T00:00:00.000Z', listingId: 'L2' }));
+  const stats = await intelligence.getOptimizerActionStats('co1', { since: '2026-03-01T00:00:00.000Z' });
+  assert.equal(stats.totalActions, 1);
+  assert.equal(stats.uniqueListings, 1);
+});
+
+test('getOptimizerActionStats does not cross tenants', async () => {
+  await intelligence.createOptimizerAction('co1', exampleOptimizerAction({ id: 'a' }));
+  await intelligence.createOptimizerAction('co2', exampleOptimizerAction({ id: 'b', companyId: 'co2' }));
+  const stats = await intelligence.getOptimizerActionStats('co1');
+  assert.equal(stats.totalActions, 1);
+});

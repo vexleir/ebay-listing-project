@@ -15,8 +15,15 @@ const {
   getOutcome,
   listOutcomesForExperiment,
   listOutcomesForCompany,
+  listOptimizerActionsForCompany,
+  listOptimizerActionsForListing,
+  getOptimizerActionStats,
 } = require('../intelligence');
+const { computeOptimizerImpact } = require('../services/intelligence/impactAggregation');
 const { captureOutcomeForEbayItem } = require('../services/intelligence/captureOutcome');
+const { runScheduledCapture } = require('../services/intelligence/scheduledCapture');
+const { getValidAccessToken } = require('../ebayAuth');
+const { tradingApiCall } = require('../services/ebay/client');
 
 const router = express.Router();
 
@@ -141,6 +148,102 @@ router.post('/outcomes/capture', async (req, res) => {
     res.status(201).json(result.outcome);
   } catch (e) {
     handleError(res, e, 'captureOutcome');
+  }
+});
+
+// ── scheduled capture ─────────────────────────────────────────────────
+
+// POST /api/intelligence/capture-milestones — trigger scheduled milestone
+// capture for the authenticated company. Accepts optional `dryRun` boolean
+// in the request body. Returns the summary object from runScheduledCapture.
+router.post('/capture-milestones', async (req, res) => {
+  try {
+    const { dryRun } = req.body || {};
+
+    // Build a fetchEbayStats helper that calls GetItem via tradingApiCall
+    // to retrieve the listing's current view count, watcher count,
+    // quantity sold, and status.
+    async function fetchEbayStats(companyId, ebayItemId) {
+      const token = await getValidAccessToken(companyId);
+      const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <ItemID>${ebayItemId}</ItemID>
+  <IncludeWatchCount>true</IncludeWatchCount>
+  <DetailLevel>ReturnAll</DetailLevel>
+</GetItemRequest>`;
+      const resp = await tradingApiCall({ callName: 'GetItem', xmlBody: xml, token });
+      const body = resp.data;
+      const get = (tag) => {
+        const r = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`);
+        const m = r.exec(body);
+        return m ? m[1].trim() : null;
+      };
+      return {
+        viewCount: parseInt(get('HitCount') || '0', 10),
+        watchCount: parseInt(get('WatchCount') || '0', 10),
+        quantitySold: parseInt(get('QuantitySold') || '0', 10),
+        status: get('ListingStatus') || 'unknown',
+      };
+    }
+
+    const summary = await runScheduledCapture(
+      { companyId: req.companyId, dryRun: !!dryRun },
+      {
+        listExperimentsForCompany,
+        listOutcomesForExperiment,
+        fetchEbayStats,
+        captureOutcomeForEbayItem,
+        getExperimentByEbayItemId,
+        upsertOutcome,
+      },
+    );
+
+    res.json(summary);
+  } catch (e) {
+    handleError(res, e, 'captureMilestones');
+  }
+});
+
+// ── optimizer actions ─────────────────────────────────────────────────
+
+// GET /api/intelligence/optimizer-actions — list optimizer actions for the
+// authenticated company, newest first.
+// Query: ?limit=50&since=2026-01-01T00:00:00.000Z
+router.get('/optimizer-actions', async (req, res) => {
+  try {
+    const limit = Math.max(1, Math.min(500, parseInt(req.query.limit, 10) || 100));
+    const since = req.query.since || undefined;
+    const items = await listOptimizerActionsForCompany(req.companyId, { limit, since });
+    res.json({ items, total: items.length });
+  } catch (e) {
+    handleError(res, e, 'listOptimizerActions');
+  }
+});
+
+// GET /api/intelligence/optimizer-actions/by-listing/:listingId — all
+// optimizer actions for a specific listing, newest first.
+router.get('/optimizer-actions/by-listing/:listingId', async (req, res) => {
+  try {
+    const items = await listOptimizerActionsForListing(req.companyId, req.params.listingId);
+    res.json({ items, total: items.length });
+  } catch (e) {
+    handleError(res, e, 'listOptimizerActionsForListing');
+  }
+});
+
+// GET /api/intelligence/optimizer-impact — pre-aggregated impact metrics
+// for the optimizer panel. Query: ?since=2026-01-01T00:00:00.000Z
+router.get('/optimizer-impact', async (req, res) => {
+  try {
+    const since = req.query.since || undefined;
+    const impact = await computeOptimizerImpact(req.companyId, { since }, {
+      listOptimizerActionsForCompany,
+      listOutcomesForCompany,
+      getOptimizerActionStats,
+    });
+    res.json(impact);
+  } catch (e) {
+    handleError(res, e, 'optimizerImpact');
   }
 });
 

@@ -26,8 +26,9 @@ const {
 } = require('../../services/ebay/listingLifecycle');
 const { resolveReviseImageUrls } = require('../../services/ebay/reviseImages');
 const { incrementInventoryCounters } = require('../../inventory');
-const { createExperiment } = require('../../intelligence');
+const { createExperiment, createOptimizerAction } = require('../../intelligence');
 const { buildExperimentSnapshot } = require('../../services/intelligence/snapshot');
+const { buildOptimizerAction, extractListingSnapshot, deriveReasonCodes } = require('../../services/intelligence/optimizerAction');
 const crypto = require('crypto');
 
 // Helper: respond with the legacy { error } string AND the new errorDetails
@@ -187,6 +188,37 @@ router.post('/revise', ebayWriteRateLimit, async (req, res) => {
         await updateListing(req.companyId, listingId, { images: resolvedImageUrls, updatedAt: Date.now() });
       } catch (e) {
         console.warn(`[revise] image revise succeeded but local cache update failed for ${listingId}: ${e.message}`);
+      }
+    }
+
+    // INTEL-003 — record optimizer action when the revise was triggered by
+    // the optimizer. Non-fatal: a Mongo blip or builder error only loses
+    // the tracking row, not the successful revise.
+    if (req.body.optimizerApplied === true) {
+      try {
+        const before = extractListingSnapshot(req.body.originalListing || {});
+        const after = extractListingSnapshot({
+          title: newTitle || req.body.originalListing?.title,
+          price: newPrice || req.body.originalListing?.price,
+          description: description || req.body.originalListing?.description,
+          itemSpecifics: mergedSpecifics || req.body.originalListing?.itemSpecifics,
+          images: images || req.body.originalListing?.images,
+        });
+        const reasonCodes = deriveReasonCodes(before, after);
+        const doc = buildOptimizerAction({
+          id: crypto.randomUUID(),
+          companyId: req.companyId,
+          listingId: listingId || req.body.originalListing?.id || '',
+          ebayItemId: itemId,
+          actionType: 'revise',
+          before,
+          after,
+          reasonCodes,
+          expectedImpact: req.body.optimizerResult?.expectedImpact || {},
+        });
+        await createOptimizerAction(req.companyId, doc);
+      } catch (e) {
+        console.warn(`[revise] optimizer action capture failed for ${itemId}: ${e.message}`);
       }
     }
 
@@ -443,6 +475,37 @@ router.post('/relist', ebayWriteRateLimit, async (req, res) => {
       await createExperiment(req.companyId, snapshot);
     } catch (e) {
       console.warn(`[relist] experiment snapshot failed for itemId=${result.draftId}: ${e.message}`);
+    }
+
+    // INTEL-003 — record optimizer action when the relist was triggered by
+    // the optimizer. Non-fatal: a Mongo blip or builder error only loses
+    // the tracking row, not the successful relist.
+    if (req.body.optimizerApplied === true) {
+      try {
+        const before = extractListingSnapshot(req.body.originalListing || {});
+        const after = extractListingSnapshot({
+          title: listingWithSku.title || req.body.originalListing?.title,
+          price: listingWithSku.price || req.body.originalListing?.price,
+          description: listingWithSku.description || req.body.originalListing?.description,
+          itemSpecifics: mergedSpecifics || req.body.originalListing?.itemSpecifics,
+          images: listingWithSku.images || req.body.originalListing?.images,
+        });
+        const reasonCodes = deriveReasonCodes(before, after);
+        const doc = buildOptimizerAction({
+          id: crypto.randomUUID(),
+          companyId: req.companyId,
+          listingId: listingId || req.body.originalListing?.id || '',
+          ebayItemId: result.draftId,
+          actionType: 'relist',
+          before,
+          after,
+          reasonCodes,
+          expectedImpact: req.body.optimizerResult?.expectedImpact || {},
+        });
+        await createOptimizerAction(req.companyId, doc);
+      } catch (e) {
+        console.warn(`[relist] optimizer action capture failed for ${result.draftId}: ${e.message}`);
+      }
     }
 
     res.json({ success: true, ...result, oldItemId });
