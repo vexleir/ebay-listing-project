@@ -19,6 +19,7 @@ import StagedListingActions from './staged/StagedListingActions';
 import StagedListingCard from './staged/StagedListingCard';
 import StagedListingListRow from './staged/StagedListingListRow';
 import PushToEbayModal, { type PushModalState } from './staged/PushToEbayModal';
+import { findLiveListingConflicts } from '../utils/duplicateSku';
 import {
   computeHealthScore,
   autoConditionId,
@@ -456,6 +457,14 @@ export default function StagedListingsView({ listings, allListings, onUpdate, on
           onExtraSpecificsChange={setPushExtraSpecifics}
           onClose={() => setPushModal(null)}
           onConfirm={confirmPushToEbay}
+          // INV-002 warn-before-push — compute conflicts against the union
+          // pool (allListings) so live items in the Listed tab show up
+          // even though they aren't in the staged-only `listings` array.
+          liveSkuConflicts={findLiveListingConflicts(
+            pushModal.listing.sku,
+            allListings ?? listings,
+            pushModal.listing.id,
+          )}
         />
       )}
 

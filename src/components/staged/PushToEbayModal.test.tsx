@@ -162,4 +162,66 @@ describe('PushToEbayModal', () => {
     fireEvent.click(screen.getByRole('presentation'));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  // ── INV-002 warn-before-push gate ───────────────────────────────────────
+
+  it('does NOT render the SKU conflict warning when liveSkuConflicts is empty', () => {
+    render(<PushToEbayModal {...defaults({ liveSkuConflicts: [] })} />);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText('SKU already live on eBay')).toBeNull();
+  });
+
+  it('renders the SKU conflict warning with title + count when there is a conflict', () => {
+    const conflict = makeListing({ id: 'live1', title: 'Live Camera Listing', ebayDraftId: '123456789012' });
+    render(<PushToEbayModal {...defaults({ liveSkuConflicts: [conflict] })} />);
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(screen.getByText('SKU already live on eBay')).toBeInTheDocument();
+    expect(screen.getByText(/This SKU is currently on 1 live listing/)).toBeInTheDocument();
+    expect(screen.getByText(/Live Camera Listing/)).toBeInTheDocument();
+    expect(screen.getByText('123456789012')).toBeInTheDocument();
+  });
+
+  it('switches to the plural copy when there are multiple conflicts', () => {
+    const a = makeListing({ id: 'a', title: 'A' });
+    const b = makeListing({ id: 'b', title: 'B' });
+    render(<PushToEbayModal {...defaults({ liveSkuConflicts: [a, b] })} />);
+    expect(screen.getByText(/This SKU is currently on 2 live listings/)).toBeInTheDocument();
+  });
+
+  it('truncates the conflict list at 3 entries with a +N more line', () => {
+    const conflicts = [1, 2, 3, 4, 5].map((n) => makeListing({ id: String(n), title: `Item ${n}` }));
+    render(<PushToEbayModal {...defaults({ liveSkuConflicts: conflicts })} />);
+    expect(screen.getByText('+2 more')).toBeInTheDocument();
+    // First three should render, fourth should not.
+    expect(screen.getByText(/Item 1/)).toBeInTheDocument();
+    expect(screen.getByText(/Item 3/)).toBeInTheDocument();
+    expect(screen.queryByText(/Item 4/)).toBeNull();
+  });
+
+  it('disables the Push button until the seller acknowledges the conflict', () => {
+    const onConfirm = vi.fn();
+    const conflict = makeListing({ id: 'live1' });
+    render(<PushToEbayModal {...defaults({ liveSkuConflicts: [conflict], onConfirm })} />);
+    const pushBtn = screen.getByRole('button', { name: 'Push to eBay' });
+    expect(pushBtn).toBeDisabled();
+    // Clicking it while disabled is a no-op.
+    fireEvent.click(pushBtn);
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it('re-enables Push after the acknowledgment checkbox is ticked', () => {
+    const onConfirm = vi.fn();
+    const conflict = makeListing({ id: 'live1' });
+    render(<PushToEbayModal {...defaults({ liveSkuConflicts: [conflict], onConfirm })} />);
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Acknowledge SKU collision and push anyway' }));
+    const pushBtn = screen.getByRole('button', { name: 'Push to eBay' });
+    expect(pushBtn).not.toBeDisabled();
+    fireEvent.click(pushBtn);
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT disable the Push button when no conflict exists', () => {
+    render(<PushToEbayModal {...defaults({ liveSkuConflicts: [] })} />);
+    expect(screen.getByRole('button', { name: 'Push to eBay' })).not.toBeDisabled();
+  });
 });

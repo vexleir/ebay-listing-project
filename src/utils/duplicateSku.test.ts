@@ -5,6 +5,8 @@ import {
   buildActiveSkuMap,
   findConflictingListings,
   hasSkuConflict,
+  isLiveListing,
+  findLiveListingConflicts,
 } from './duplicateSku';
 import type { StagedListing } from '../types';
 
@@ -115,5 +117,63 @@ describe('hasSkuConflict', () => {
   it('returns false when only your own listing holds the SKU', () => {
     const me = listing({ id: 'me', sku: 'X' });
     expect(hasSkuConflict('X', [me], 'me')).toBe(false);
+  });
+});
+
+describe('isLiveListing', () => {
+  it('is true for a listed item with a SKU that is not sold', () => {
+    expect(isLiveListing(listing({ sku: 'X', status: 'listed' }))).toBe(true);
+  });
+
+  it('is false for staged items even when they have a SKU', () => {
+    expect(isLiveListing(listing({ sku: 'X', status: 'staged' }))).toBe(false);
+  });
+
+  it('is false for a listed item that has been marked sold', () => {
+    expect(isLiveListing(listing({ sku: 'X', status: 'listed', soldAt: 1 }))).toBe(false);
+  });
+
+  it('is false when SKU is blank', () => {
+    expect(isLiveListing(listing({ sku: '', status: 'listed' }))).toBe(false);
+    expect(isLiveListing(listing({ sku: '   ', status: 'listed' }))).toBe(false);
+  });
+});
+
+describe('findLiveListingConflicts', () => {
+  it('returns the live listings that share the SKU, excluding the current id', () => {
+    const live = listing({ id: 'live1', sku: 'WIDGET', status: 'listed' });
+    const stagedDup = listing({ id: 'stage1', sku: 'WIDGET', status: 'staged' });
+    const otherSku = listing({ id: 'other', sku: 'GADGET', status: 'listed' });
+    const conflicts = findLiveListingConflicts('WIDGET', [live, stagedDup, otherSku]);
+    expect(conflicts.map((l) => l.id)).toEqual(['live1']);
+  });
+
+  it('does NOT flag staged listings as conflicts (push converts staged → listed)', () => {
+    const stagedA = listing({ id: 'a', sku: 'X', status: 'staged' });
+    const stagedB = listing({ id: 'b', sku: 'X', status: 'staged' });
+    expect(findLiveListingConflicts('X', [stagedA, stagedB])).toEqual([]);
+  });
+
+  it('does NOT flag a listed item that has been marked sold', () => {
+    const sold = listing({ id: 'sold', sku: 'REUSED', status: 'listed', soldAt: 1 });
+    const live = listing({ id: 'live', sku: 'REUSED', status: 'listed' });
+    expect(findLiveListingConflicts('REUSED', [sold, live]).map((l) => l.id)).toEqual(['live']);
+  });
+
+  it('excludes the listing whose id matches currentListingId', () => {
+    const a = listing({ id: 'a', sku: 'X', status: 'listed' });
+    const b = listing({ id: 'b', sku: 'X', status: 'listed' });
+    expect(findLiveListingConflicts('X', [a, b], 'a').map((l) => l.id)).toEqual(['b']);
+  });
+
+  it('is case-insensitive', () => {
+    const a = listing({ id: 'a', sku: 'Widget-1', status: 'listed' });
+    expect(findLiveListingConflicts('widget-1', [a]).map((l) => l.id)).toEqual(['a']);
+  });
+
+  it('returns empty for blank or undefined SKU', () => {
+    const a = listing({ id: 'a', sku: 'X', status: 'listed' });
+    expect(findLiveListingConflicts('', [a])).toEqual([]);
+    expect(findLiveListingConflicts(undefined, [a])).toEqual([]);
   });
 });

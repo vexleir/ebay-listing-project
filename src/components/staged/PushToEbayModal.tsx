@@ -3,9 +3,9 @@
 // state through a single `onChange(patch)` callback so the parent doesn't
 // have to thread setters per field.
 
-import { useRef } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { X, RefreshCw, AlertTriangle } from 'lucide-react';
+import { X, RefreshCw, AlertTriangle, AlertOctagon } from 'lucide-react';
 import type { StagedListing, EbayPolicy } from '../../types';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
@@ -35,6 +35,11 @@ export interface PushToEbayModalProps {
   onExtraSpecificsChange: (next: ExtraSpecific[]) => void;
   onClose: () => void;
   onConfirm: () => void;
+  // INV-002 warn-before-push — other listings that already have this SKU
+  // live on eBay. Empty / undefined disables the gate. When non-empty, the
+  // modal shows a warning panel and gates the Push button behind an
+  // acknowledgment checkbox so sellers can't accidentally double-list.
+  liveSkuConflicts?: StagedListing[];
 }
 
 export default function PushToEbayModal({
@@ -44,6 +49,7 @@ export default function PushToEbayModal({
   onExtraSpecificsChange,
   onClose,
   onConfirm,
+  liveSkuConflicts = [],
 }: PushToEbayModalProps) {
   // UX-002: Escape dismisses the modal unless the policies/category fetch is
   // still in flight (matches the existing no-action-during-load behavior —
@@ -56,6 +62,14 @@ export default function PushToEbayModal({
   const typeSpecificMissing =
     !Object.keys(state.listing.itemSpecifics || {}).some((k) => k.toLowerCase() === 'type')
     && !extraSpecifics.some((s) => s.name.toLowerCase() === 'type');
+
+  // INV-002 — reset the acknowledgment any time the conflict set itself
+  // changes (e.g. the seller closes + reopens the modal, or another tab
+  // changes the listings state) so the gate can't silently stay green.
+  const [acknowledgedSkuConflict, setAcknowledgedSkuConflict] = useState(false);
+  const hasLiveSkuConflict = liveSkuConflicts.length > 0;
+  useEffect(() => { setAcknowledgedSkuConflict(false); }, [liveSkuConflicts.length, state.listing.id]);
+  const pushBlocked = hasLiveSkuConflict && !acknowledgedSkuConflict;
 
   return createPortal(
     <div
@@ -281,9 +295,62 @@ export default function PushToEbayModal({
               ))}
             </div>
 
+            {hasLiveSkuConflict && (
+              <div
+                role="alert"
+                style={{
+                  marginTop: '0.75rem', padding: '10px 12px',
+                  background: 'rgba(239, 68, 68, 0.10)',
+                  border: '1px solid rgba(239, 68, 68, 0.4)',
+                  borderRadius: '8px',
+                  fontSize: '0.85rem',
+                  display: 'flex', alignItems: 'flex-start', gap: '8px',
+                }}
+              >
+                <AlertOctagon size={16} style={{ color: '#ef4444', flexShrink: 0, marginTop: '2px' }} aria-hidden="true" />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, color: '#fca5a5' }}>
+                    SKU already live on eBay
+                  </div>
+                  <div style={{ marginTop: '4px', color: 'var(--text-secondary)', fontSize: '0.82rem' }}>
+                    This SKU is currently on {liveSkuConflicts.length} live listing{liveSkuConflicts.length > 1 ? 's' : ''}. Pushing now will create a duplicate.
+                  </div>
+                  <ul style={{ margin: '6px 0 0 0', paddingLeft: '1.1rem', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                    {liveSkuConflicts.slice(0, 3).map((l) => (
+                      <li key={l.id} style={{ marginBottom: '2px' }}>
+                        {l.title.substring(0, 60)}{l.title.length > 60 ? '…' : ''}
+                        {l.ebayDraftId && <> — eBay item <span style={{ fontFamily: 'monospace' }}>{l.ebayDraftId}</span></>}
+                      </li>
+                    ))}
+                    {liveSkuConflicts.length > 3 && (
+                      <li style={{ fontStyle: 'italic' }}>+{liveSkuConflicts.length - 3} more</li>
+                    )}
+                  </ul>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px', fontSize: '0.82rem', cursor: 'pointer', color: 'var(--text-primary)' }}>
+                    <input
+                      type="checkbox"
+                      checked={acknowledgedSkuConflict}
+                      onChange={(e) => setAcknowledgedSkuConflict(e.target.checked)}
+                      aria-label="Acknowledge SKU collision and push anyway"
+                    />
+                    Push anyway — I understand this will create a duplicate listing
+                  </label>
+                </div>
+              </div>
+            )}
+
             <div className="modal-sticky-actions">
               <button className="btn-secondary" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
-              <button className="btn-primary" style={{ flex: 2 }} onClick={onConfirm}>Push to eBay</button>
+              <button
+                className="btn-primary"
+                style={{ flex: 2 }}
+                onClick={onConfirm}
+                disabled={pushBlocked}
+                aria-disabled={pushBlocked}
+                title={pushBlocked ? 'Acknowledge the SKU conflict before pushing' : undefined}
+              >
+                Push to eBay
+              </button>
             </div>
           </div>
         )}

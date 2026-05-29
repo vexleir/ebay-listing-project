@@ -26,6 +26,9 @@ const {
 } = require('../../services/ebay/listingLifecycle');
 const { resolveReviseImageUrls } = require('../../services/ebay/reviseImages');
 const { incrementInventoryCounters } = require('../../inventory');
+const { createExperiment } = require('../../intelligence');
+const { buildExperimentSnapshot } = require('../../services/intelligence/snapshot');
+const crypto = require('crypto');
 
 // Helper: respond with the legacy { error } string AND the new errorDetails
 // shape from the translator when a rule matches. Frontend can opt into
@@ -236,6 +239,31 @@ router.post('/draft', ebayWriteRateLimit, async (req, res) => {
       }
     }
 
+    // INTEL-001 — record the listing snapshot at publish time so we can
+    // later correlate it with eBay's outcome (views, sold price, time to
+    // sale). Non-fatal: a missing prompt version or Mongo blip only loses
+    // the experiment row, not the successful push.
+    try {
+      const snapshot = buildExperimentSnapshot({
+        id: `exp-${crypto.randomUUID()}`,
+        companyId: req.companyId,
+        listing: req.body?.listing || {},
+        ebayItemId: result.draftId,
+        pushContext: {
+          categoryId: req.body?.overrideCategoryId,
+          shippingPolicyId: req.body?.overrideFulfillmentPolicyId,
+          bestOfferEnabled: !!req.body?.bestOffer,
+        },
+        promptVersion: req.body?.listing?.tokenUsage?.promptVersion,
+        optimizerVersion: req.body?.listing?.optimizerVersion,
+        listingScoreAtPublish: req.body?.listing?.healthScore,
+        source: 'push',
+      });
+      await createExperiment(req.companyId, snapshot);
+    } catch (e) {
+      console.warn(`[draft] experiment snapshot failed for itemId=${result.draftId}: ${e.message}`);
+    }
+
     res.json({ success: true, ...result });
   } catch (error) {
     sendEbayPushError(res, error);
@@ -391,6 +419,30 @@ router.post('/relist', ebayWriteRateLimit, async (req, res) => {
       } catch (e) {
         console.warn(`[relist] failed to update listing ${listingId} with new draftId ${result.draftId}: ${e.message}`);
       }
+    }
+
+    // INTEL-001 — record the relist as a fresh experiment so the
+    // analytics can split first publishes from relists. Same non-fatal
+    // policy as the /draft hook.
+    try {
+      const snapshot = buildExperimentSnapshot({
+        id: `exp-${crypto.randomUUID()}`,
+        companyId: req.companyId,
+        listing: listingWithSku,
+        ebayItemId: result.draftId,
+        pushContext: {
+          categoryId: liveCategoryId || req.body.overrideCategoryId || listing.categoryId,
+          shippingPolicyId: livePolicies.shipping || req.body.overrideFulfillmentPolicyId,
+          bestOfferEnabled: !!req.body.bestOffer,
+        },
+        promptVersion: listingWithSku?.tokenUsage?.promptVersion,
+        optimizerVersion: listingWithSku?.optimizerVersion,
+        listingScoreAtPublish: listingWithSku?.healthScore,
+        source: 'relist',
+      });
+      await createExperiment(req.companyId, snapshot);
+    } catch (e) {
+      console.warn(`[relist] experiment snapshot failed for itemId=${result.draftId}: ${e.message}`);
     }
 
     res.json({ success: true, ...result, oldItemId });

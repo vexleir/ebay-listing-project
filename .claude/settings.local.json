@@ -28,7 +28,18 @@
       "Bash(node --test server/tests/listings-inventory-bootstrap.test.js)",
       "Bash(node --test server/tests/ebay-push-inventory.test.js)",
       "Bash(node --test server/tests/sold-transition.test.js)",
-      "Bash(node --test server/tests/listings-sold-sync.test.js)"
+      "Bash(node --test server/tests/listings-sold-sync.test.js)",
+      "Bash(node --test server/tests/intelligence-snapshot.test.js)",
+      "Bash(node --test server/tests/intelligence.test.js)",
+      "Bash(node --test server/tests/ebay-push-experiment.test.js)",
+      "Bash(node --test server/tests/routes-intelligence.test.js)",
+      "Bash(node --test server/tests/)",
+      "Bash(findstr /n \"INTEL-001\" \"f:\\\\Sandbox\\\\ebay-listing-project\\\\IMPLEMENTATION_UPDATE_PLAN.md\")",
+      "Bash(powershell -Command \"\\(Get-Content 'f:\\\\Sandbox\\\\ebay-listing-project\\\\IMPLEMENTATION_UPDATE_PLAN.md' | Measure-Object -Line\\).Lines\")",
+      "Bash(powershell -Command \"Select-String -Path 'f:\\\\Sandbox\\\\ebay-listing-project\\\\IMPLEMENTATION_UPDATE_PLAN.md' -Pattern 'warn-before-push gate|ImageEditModal upload bugfix|AI quota admin controls|end-listing counter|sold-sync counter|INV-002 push counter sync' | Select-Object -First 10 LineNumber, Line | Format-Table -Wrap\")",
+      "Bash(node --test server/tests/intelligence-outcome.test.js)",
+      "Bash(node --test server/tests/intelligence-capture-outcome.test.js)",
+      "Bash(node --test server/tests/*.test.js)"
     ]
   }
 }

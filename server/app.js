@@ -24,6 +24,7 @@ const imagesRoutes = require('./routes/images');
 const aiRoutes = require('./routes/ai');
 const optimizerRoutes = require('./routes/optimizer');
 const inventoryRoutes = require('./routes/inventory');
+const intelligenceRoutes = require('./routes/intelligence');
 const ebayAuthRoutes = require('./routes/ebay/auth');
 const ebayReadOnlyRoutes = require('./routes/ebay/readonly');
 const ebayCompsRoutes = require('./routes/ebay/comps');
@@ -65,6 +66,7 @@ app.use('/api', aiRoutes);
 app.use('/api/barcode', barcodeRoutes);
 app.use('/api/optimizer', optimizerRoutes);
 app.use('/api/inventory', inventoryRoutes);
+app.use('/api/intelligence', intelligenceRoutes);
 app.use('/api/admin', adminRoutes);
 
 // eBay routers — split by concern (auth / read-only / comps / lifecycle / sync)

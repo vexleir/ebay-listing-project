@@ -65,3 +65,31 @@ export function hasSkuConflict(
 ): boolean {
   return findConflictingListings(sku, allListings, currentListingId).length > 0;
 }
+
+// True when this listing is currently live on eBay (status === 'listed',
+// not sold). Used by the warn-before-push gate — staged drafts of the
+// same SKU don't matter at push time because pushing one of them simply
+// flips its status to 'listed'.
+export function isLiveListing(listing: StagedListing): boolean {
+  if (!normalizeSku(listing.sku)) return false;
+  if (listing.soldAt) return false;
+  return listing.status === 'listed';
+}
+
+// Returns the OTHER LIVE listings that share `sku` with the caller. Used
+// by PushToEbayModal to warn the seller that the SKU is already on a
+// live eBay listing — pushing would create a duplicate. `currentListingId`
+// is excluded so a listing pushing itself doesn't self-flag.
+export function findLiveListingConflicts(
+  sku: string | undefined | null,
+  allListings: StagedListing[],
+  currentListingId?: string,
+): StagedListing[] {
+  const key = normalizeSku(sku);
+  if (!key) return [];
+  return allListings.filter((l) =>
+    isLiveListing(l)
+    && normalizeSku(l.sku) === key
+    && l.id !== currentListingId,
+  );
+}
