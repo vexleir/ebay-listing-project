@@ -199,19 +199,32 @@ export default function ImageEditModal({ listing, appPassword, onSave, onClose }
 
       let uploadedUrls: string[] = [];
       if (toUpload.length > 0) {
-        const base64Array = await Promise.all(toUpload.map(({ file }) => new Promise<string>((resolve, reject) => {
+        // Cloudinary's uploader expects the FULL data URI
+        // (`data:image/png;base64,iVBORw0…`). Stripping the prefix here was
+        // the original IMG-003 save bug — Cloudinary then errored with no
+        // `.message`, the server's `{ error: undefined }` serialized to
+        // `{}`, and the user saw "Failed to save images: {}".
+        const dataUrls = await Promise.all(toUpload.map(({ file }) => new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
-          reader.onload = () => resolve((reader.result as string).split(',')[1]);
+          reader.onload = () => resolve(reader.result as string);
           reader.onerror = reject;
           reader.readAsDataURL(file);
         })));
         const resp = await fetch('/api/images/upload', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${appPassword}` },
-          body: JSON.stringify({ images: base64Array }),
+          body: JSON.stringify({ images: dataUrls }),
         });
-        if (!resp.ok) throw new Error(await resp.text());
+        if (!resp.ok) {
+          // Surface HTTP status + body so future failures are diagnosable
+          // (the previous shape was `throw new Error("{}")`).
+          const body = await resp.text().catch(() => '');
+          throw new Error(`Image upload failed (${resp.status} ${resp.statusText})${body ? `: ${body}` : ''}`);
+        }
         const data = await resp.json();
+        if (!Array.isArray(data?.urls)) {
+          throw new Error('Image upload returned an unexpected response shape');
+        }
         uploadedUrls = data.urls as string[];
       }
 

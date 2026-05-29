@@ -50,7 +50,34 @@ function detectSoldTransition(existing, updates) {
   return { sku, deltas: { quantitySold: -1, quantityListed: 1 } };
 }
 
+// INV-002 end-listing counter wiring — when a listed item is moved back to
+// staged (the explicit "Move to Staged" flow), the unit returns to the
+// shelf. Detector returns the deltas for the route to apply, or null when
+// the update doesn't cross the listed→staged boundary.
+//
+// Skip the transition when the item is also being marked sold in the same
+// PUT — the sold transition is the primary signal there and double-firing
+// would compound the listed decrement.
+function detectListedToStagedTransition(existing, updates) {
+  if (!existing || !updates || typeof updates !== 'object') return null;
+  if (!('status' in updates)) return null;
+  const wasListed = existing.status === 'listed';
+  const willBeStaged = updates.status === 'staged';
+  if (!wasListed || !willBeStaged) return null;
+  // If the same update also marks the item sold, defer to the sold
+  // transition — that one writes both `quantitySold +1` and
+  // `quantityListed −1`, which already covers the listed decrement.
+  if ('soldAt' in updates && updates.soldAt) return null;
+  // Already-sold items live in a different bucket; moving an archived sold
+  // item back to staged shouldn't restore a unit to on-hand.
+  if (isSoldState(existing)) return null;
+  const sku = existing.sku;
+  if (typeof sku !== 'string' || !sku.trim()) return null;
+  return { sku, deltas: { quantityOnHand: 1, quantityListed: -1 } };
+}
+
 module.exports = {
   isSoldState,
   detectSoldTransition,
+  detectListedToStagedTransition,
 };

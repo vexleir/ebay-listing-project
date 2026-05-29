@@ -19,7 +19,10 @@ const {
   getAllListingsMeta,
 } = require('../listings');
 const { ensureInventoryItemForSku, incrementInventoryCounters } = require('../inventory');
-const { detectSoldTransition } = require('../services/inventory/soldTransition');
+const {
+  detectSoldTransition,
+  detectListedToStagedTransition,
+} = require('../services/inventory/soldTransition');
 const { getDb } = require('../db');
 
 const router = express.Router();
@@ -68,14 +71,20 @@ router.put('/:id', async (req, res) => {
   try {
     const updates = req.body.updates || {};
 
-    // INV-002 sold-sync wiring — load the existing record FIRST so we can
-    // tell whether this update flips the sold flag. The detector returns
-    // null for any update that doesn't cross the sold boundary so we don't
-    // pay for the Mongo round-trip on price-only / image-only edits.
+    // INV-002 counter wiring — load the existing record FIRST when we
+    // might cross either of two boundaries: the sold flag, or the
+    // listed→staged status transition (the explicit "Move to Staged"
+    // flow that delists without selling). The detectors return null for
+    // updates that don't cross their boundary so price/image-only edits
+    // don't pay for the Mongo round-trip.
     let soldTransition = null;
-    if ('soldAt' in updates) {
+    let stagedTransition = null;
+    const mayCrossSold = 'soldAt' in updates;
+    const mayCrossStatus = 'status' in updates;
+    if (mayCrossSold || mayCrossStatus) {
       const existing = await getListing(req.companyId, req.params.id);
-      soldTransition = detectSoldTransition(existing, updates);
+      if (mayCrossSold) soldTransition = detectSoldTransition(existing, updates);
+      if (mayCrossStatus) stagedTransition = detectListedToStagedTransition(existing, updates);
     }
 
     await updateListing(req.companyId, req.params.id, updates);
@@ -85,6 +94,13 @@ router.put('/:id', async (req, res) => {
         await incrementInventoryCounters(req.companyId, soldTransition.sku, soldTransition.deltas);
       } catch (e) {
         console.warn(`[listings] sold counter update failed for sku=${soldTransition.sku}: ${e.message}`);
+      }
+    }
+    if (stagedTransition) {
+      try {
+        await incrementInventoryCounters(req.companyId, stagedTransition.sku, stagedTransition.deltas);
+      } catch (e) {
+        console.warn(`[listings] move-to-staged counter update failed for sku=${stagedTransition.sku}: ${e.message}`);
       }
     }
 

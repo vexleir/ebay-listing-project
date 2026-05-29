@@ -23,8 +23,16 @@ router.post('/upload', imageRateLimit, async (req, res) => {
     const urls = await Promise.all(images.map((img) => uploadImage(img)));
     res.json({ urls });
   } catch (e) {
-    console.error('[images/upload] error:', e.message);
-    res.status(500).json({ error: e.message });
+    // Cloudinary errors sometimes arrive without a `.message` (e.g.
+    // `e.http_code` / `e.error` on the SDK error shape). Build a usable
+    // string so the client never sees `{ error: undefined }` → "{}".
+    const detail =
+      (e && e.message)
+      || (e && e.error && (e.error.message || (typeof e.error === 'string' ? e.error : null)))
+      || (e && e.http_code ? `Cloudinary HTTP ${e.http_code}` : null)
+      || 'Image upload failed (no detail returned)';
+    console.error('[images/upload] error:', detail, e);
+    res.status(500).json({ error: detail });
   }
 });
 

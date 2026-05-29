@@ -216,3 +216,64 @@ test('PUT /api/listings/:id passes the company id through to the inventory call'
     server.close();
   }
 });
+
+// ── listed→staged ("Move to Staged") transition ────────────────────────────
+
+test('PUT /api/listings/:id increments on-hand and decrements listed on listed→staged', async () => {
+  seed('co1', 'L1', { sku: 'WIDGET-1', status: 'listed' });
+  const server = await startServer(buildApp());
+  try {
+    const res = await request(server, 'PUT', '/api/listings/L1', {
+      updates: { status: 'staged', ebayDraftId: null },
+    });
+    assert.equal(res.status, 200);
+    assert.equal(counterCalls.length, 1);
+    assert.equal(counterCalls[0].sku, 'WIDGET-1');
+    assert.deepEqual(counterCalls[0].deltas, { quantityOnHand: 1, quantityListed: -1 });
+  } finally {
+    server.close();
+  }
+});
+
+test('PUT /api/listings/:id does NOT touch counters on a status change that is not listed→staged', async () => {
+  // staged→staged is a no-op; the detector should bail.
+  seed('co1', 'L1', { sku: 'WIDGET-1', status: 'staged' });
+  const server = await startServer(buildApp());
+  try {
+    await request(server, 'PUT', '/api/listings/L1', { updates: { status: 'staged' } });
+    assert.equal(counterCalls.length, 0);
+  } finally {
+    server.close();
+  }
+});
+
+test('PUT /api/listings/:id only fires the sold transition when both sold + status are in updates', async () => {
+  // The detector logic explicitly defers to sold when both signals fire so
+  // we don't double-decrement listed (sold already brings listed -1).
+  seed('co1', 'L1', { sku: 'WIDGET-1', status: 'listed', soldAt: null });
+  const server = await startServer(buildApp());
+  try {
+    await request(server, 'PUT', '/api/listings/L1', {
+      updates: { status: 'staged', soldAt: 1700000000000 },
+    });
+    assert.equal(counterCalls.length, 1);
+    assert.deepEqual(counterCalls[0].deltas, { quantitySold: 1, quantityListed: -1 });
+  } finally {
+    server.close();
+  }
+});
+
+test('PUT /api/listings/:id still returns 200 when the move-to-staged counter throws (non-fatal)', async () => {
+  counterThrow = new Error('mongo down');
+  seed('co1', 'L1', { sku: 'WIDGET-1', status: 'listed' });
+  const server = await startServer(buildApp());
+  try {
+    const res = await request(server, 'PUT', '/api/listings/L1', {
+      updates: { status: 'staged' },
+    });
+    assert.equal(res.status, 200);
+    assert.equal(counterCalls.length, 1);
+  } finally {
+    server.close();
+  }
+});
