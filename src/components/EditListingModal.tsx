@@ -7,6 +7,8 @@ import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useFocusTrap } from '../hooks/useFocusTrap';
 import { findConflictingListings } from '../utils/duplicateSku';
 import DuplicateSkuWarning from './DuplicateSkuWarning';
+import InventoryItemBadge from './InventoryItemBadge';
+import { useInventorySkuLookup } from '../hooks/useInventorySkuLookup';
 import ImageEditModal from './ImageEditModal';
 
 interface EditListingModalProps {
@@ -83,6 +85,9 @@ export default function EditListingModal({ listing, appPassword, allListings = [
     () => findConflictingListings(sku, allListings, listing.id),
     [sku, allListings, listing.id],
   );
+
+  // INV-002 follow-through — durable inventory lookup against /api/inventory.
+  const inventoryLookup = useInventorySkuLookup(sku, appPassword);
 
   // UX-002 — Escape dismisses the modal, but only when nothing is in flight
   // (matches the Cancel button's disabled gating on line 217ish).
@@ -304,6 +309,7 @@ export default function EditListingModal({ listing, appPassword, allListings = [
               <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>SKU</label>
               <input className="input-base" value={sku} onChange={e => setSku(e.target.value)} />
               <DuplicateSkuWarning conflicts={skuConflicts} />
+              <InventoryItemBadge item={inventoryLookup.item} loading={inventoryLookup.loading} hideLoading />
             </div>
             <div>
               <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>Quantity</label>

@@ -17,6 +17,7 @@ const {
   deleteListing,
   getAllListingsMeta,
 } = require('../listings');
+const { ensureInventoryItemForSku } = require('../inventory');
 const { getDb } = require('../db');
 
 const router = express.Router();
@@ -39,6 +40,21 @@ router.post('/', async (req, res) => {
     const listing = req.body.listing;
     console.log(`[listings] POST company=${req.companyId} id=${listing?.id} title=${listing?.title?.substring(0, 40)}`);
     await createListing(req.companyId, listing);
+
+    // INV-002 auto-bootstrap — if the staged listing carries a SKU, make
+    // sure the durable inventory record exists. Idempotent on repeat SKUs.
+    // Failures here are non-fatal: the listing was already saved and a
+    // missing inventory row only suppresses the badge UX, not the workflow.
+    if (listing && typeof listing.sku === 'string' && listing.sku.trim()) {
+      try {
+        await ensureInventoryItemForSku(req.companyId, listing.sku, {
+          costBasis: listing.costBasis,
+        });
+      } catch (e) {
+        console.warn(`[listings] inventory bootstrap failed for sku=${listing.sku}: ${e.message}`);
+      }
+    }
+
     res.json({ success: true });
   } catch (e) {
     console.error('[listings] POST error:', e.message);

@@ -5,6 +5,8 @@ import { useToast } from '../context/ToastContext';
 import { calculateNetProfit } from '../utils/fees';
 import { findConflictingListings } from '../utils/duplicateSku';
 import DuplicateSkuWarning from './DuplicateSkuWarning';
+import InventoryItemBadge from './InventoryItemBadge';
+import { useInventorySkuLookup } from '../hooks/useInventorySkuLookup';
 
 interface ResultsEditorProps {
   data: {
@@ -107,6 +109,10 @@ export default function ResultsEditor({ data, images, existingImageUrls, allList
     () => findConflictingListings(sku, allListings, currentListingId),
     [sku, allListings, currentListingId],
   );
+
+  // INV-002 follow-through — query the durable inventory record so sellers
+  // see "this SKU is in inventory: 3 on hand, 1 listed" before they stage.
+  const inventoryLookup = useInventorySkuLookup(sku, appPassword);
 
   return (
     <div className="glass-panel responsive-panel-padding" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -231,6 +237,7 @@ export default function ResultsEditor({ data, images, existingImageUrls, allList
             <label style={{ display: 'flex', marginBottom: '8px', color: 'var(--text-secondary)' }}>SKU / Custom Label <span style={{ fontSize: '0.75rem', opacity: 0.6, marginLeft: '4px' }}>(sent to eBay)</span></label>
             <input type="text" className="input-base" value={sku} onChange={e => setSku(e.target.value)} placeholder="e.g. ITEM-001" />
             <DuplicateSkuWarning conflicts={skuConflicts} />
+            <InventoryItemBadge item={inventoryLookup.item} loading={inventoryLookup.loading} hideLoading />
           </div>
           <div>
             <label style={{ display: 'flex', marginBottom: '8px', color: 'var(--text-secondary)' }}>Quantity <span style={{ fontSize: '0.75rem', opacity: 0.6, marginLeft: '4px' }}>(how many available)</span></label>

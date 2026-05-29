@@ -19,7 +19,13 @@
       "Bash(npx vitest *)",
       "Bash(node --test server/tests/quota.test.js)",
       "Bash(node --test server/tests/revise-images.test.js)",
-      "Bash(grep -n -E \"\\(document.body\\\\s*\\\\\\)|^}\\\\s*$|^// PushModal|^function ImageEditModal|export default function StagedListings\\)\" src/components/StagedListings.tsx)"
+      "Bash(grep -n -E \"\\(document.body\\\\s*\\\\\\)|^}\\\\s*$|^// PushModal|^function ImageEditModal|export default function StagedListings\\)\" src/components/StagedListings.tsx)",
+      "Bash(node --test server/tests/application-token.test.js)",
+      "Bash(node --test server/tests/inventory-validate.test.js)",
+      "Bash(node --test server/tests/inventory.test.js)",
+      "Bash(node --test server/tests/routes-inventory.test.js)",
+      "Bash(node --test server/tests/routes-extra.test.js)",
+      "Bash(node --test server/tests/listings-inventory-bootstrap.test.js)"
     ]
   }
 }
