@@ -188,10 +188,14 @@ export default function ContainerManagement({ appPassword }: ContainerManagement
   const handleMerge = async () => {
     if (!selectedContainer || !mergeTargetId.trim()) return;
     try {
-      const resp = await fetch(`/api/containers/${selectedContainer.id}/merge`, {
+      // Backend semantics: POST /:id/merge where :id is the TARGET (kept) and
+      // body.sourceId is the SOURCE (archived). The UI merges the currently
+      // selected container INTO the chosen target, so selectedContainer is the
+      // source and mergeTargetId is the target.
+      const resp = await fetch(`/api/containers/${mergeTargetId.trim()}/merge`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ targetContainerId: mergeTargetId.trim() }),
+        body: JSON.stringify({ sourceId: selectedContainer.id }),
       });
       if (!resp.ok) {
         const err = await resp.json();
@@ -220,7 +224,7 @@ export default function ContainerManagement({ appPassword }: ContainerManagement
       const resp = await fetch(`/api/containers/${selectedContainer.id}/split`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ newContainers: newContainerNames.map(n => ({ name: n })) }),
+        body: JSON.stringify({ newContainers: newContainerNames }),
       });
       if (!resp.ok) {
         const err = await resp.json();
@@ -244,14 +248,28 @@ export default function ContainerManagement({ appPassword }: ContainerManagement
       ? moveItemIds.split(',').map(id => id.trim()).filter(Boolean)
       : undefined;
     try {
-      const resp = await fetch(`/api/containers/${selectedContainer.id}/move-items`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          targetContainerId: moveTargetId.trim(),
-          ...(itemIdList ? { itemIds: itemIdList } : {}),
-        }),
-      });
+      let resp: Response;
+      if (itemIdList && itemIdList.length > 0) {
+        // Move specific items from this container to the target.
+        resp = await fetch(`/api/containers/${selectedContainer.id}/move-items`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            targetContainerId: moveTargetId.trim(),
+            itemIds: itemIdList,
+          }),
+        });
+      } else {
+        // No specific IDs — move ALL items via the bulk endpoint.
+        resp = await fetch('/api/containers/bulk/move-items', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            sourceContainerId: selectedContainer.id,
+            targetContainerId: moveTargetId.trim(),
+          }),
+        });
+      }
       if (!resp.ok) {
         const err = await resp.json();
         throw new Error(err.error || 'Failed to move items');
