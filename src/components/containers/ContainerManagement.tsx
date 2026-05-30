@@ -1,11 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
-import { PlusCircle, ArrowLeft, Archive, RotateCcw, Merge, Split, MoveRight, Wand2, Loader2 } from 'lucide-react';
+import { PlusCircle, ArrowLeft, Archive, RotateCcw, Merge, Split, MoveRight, Wand2, Loader2, ClipboardList, Layers, History } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
 import ContainerList from './ContainerList';
 import ContainerForm from './ContainerForm';
+import ReviewQueue from './ReviewQueue';
+import BulkOperations from './BulkOperations';
+import AuditHistory from './AuditHistory';
 import type { ContainerRecord, ContainerType } from './ContainerList';
 
 type View = 'list' | 'detail' | 'create' | 'edit';
+type SubTab = 'containers' | 'review-queue' | 'bulk-operations';
 
 interface ContainerManagementProps {
   appPassword: string;
@@ -24,6 +28,9 @@ export default function ContainerManagement({ appPassword }: ContainerManagement
   // Filters
   const [statusFilter, setStatusFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
+
+  // Sub-tab navigation (containers list, review queue, bulk operations)
+  const [subTab, setSubTab] = useState<SubTab>('containers');
 
   // Modal states
   const [mergeModalOpen, setMergeModalOpen] = useState(false);
@@ -450,6 +457,14 @@ export default function ContainerManagement({ appPassword }: ContainerManagement
           </div>
         )}
 
+        {/* ─── Audit History ───────────────────────────────────────── */}
+        <div style={{ marginTop: '2rem' }}>
+          <h3 style={{ margin: '0 0 0.75rem', fontSize: '1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <History size={16} /> Audit History
+          </h3>
+          <AuditHistory containerId={c.id} appPassword={appPassword} />
+        </div>
+
         {/* ─── Merge Modal ─────────────────────────────────────────── */}
         {mergeModalOpen && (
           <div style={modalOverlayStyle} onClick={() => setMergeModalOpen(false)}>
@@ -547,6 +562,80 @@ export default function ContainerManagement({ appPassword }: ContainerManagement
   // List view (default)
   return (
     <div>
+      {/* ─── Sub-tab navigation ─────────────────────────────────────── */}
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>
+        <button
+          onClick={() => setSubTab('containers')}
+          style={{
+            padding: '8px 16px',
+            borderRadius: '8px',
+            border: '1px solid',
+            borderColor: subTab === 'containers' ? 'var(--glass-border)' : 'transparent',
+            background: subTab === 'containers' ? 'var(--glass-bg)' : 'transparent',
+            color: subTab === 'containers' ? 'var(--text-primary)' : 'var(--text-secondary)',
+            cursor: 'pointer',
+            fontSize: '0.85rem',
+            fontWeight: subTab === 'containers' ? 600 : 400,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+        >
+          <Layers size={15} /> Containers
+        </button>
+        <button
+          onClick={() => setSubTab('review-queue')}
+          style={{
+            padding: '8px 16px',
+            borderRadius: '8px',
+            border: '1px solid',
+            borderColor: subTab === 'review-queue' ? 'var(--glass-border)' : 'transparent',
+            background: subTab === 'review-queue' ? 'var(--glass-bg)' : 'transparent',
+            color: subTab === 'review-queue' ? 'var(--text-primary)' : 'var(--text-secondary)',
+            cursor: 'pointer',
+            fontSize: '0.85rem',
+            fontWeight: subTab === 'review-queue' ? 600 : 400,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+        >
+          <ClipboardList size={15} /> Review Queue
+        </button>
+        <button
+          onClick={() => setSubTab('bulk-operations')}
+          style={{
+            padding: '8px 16px',
+            borderRadius: '8px',
+            border: '1px solid',
+            borderColor: subTab === 'bulk-operations' ? 'var(--glass-border)' : 'transparent',
+            background: subTab === 'bulk-operations' ? 'var(--glass-bg)' : 'transparent',
+            color: subTab === 'bulk-operations' ? 'var(--text-primary)' : 'var(--text-secondary)',
+            cursor: 'pointer',
+            fontSize: '0.85rem',
+            fontWeight: subTab === 'bulk-operations' ? 600 : 400,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+        >
+          <Layers size={15} /> Bulk Operations
+        </button>
+      </div>
+
+      {/* ─── Review Queue sub-tab ──────────────────────────────────── */}
+      {subTab === 'review-queue' && (
+        <ReviewQueue appPassword={appPassword} />
+      )}
+
+      {/* ─── Bulk Operations sub-tab ──────────────────────────────── */}
+      {subTab === 'bulk-operations' && (
+        <BulkOperations appPassword={appPassword} />
+      )}
+
+      {/* ─── Containers list sub-tab ──────────────────────────────── */}
+      {subTab === 'containers' && (
+        <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
         <h2 style={{ margin: 0, fontSize: '1.15rem' }}>Containers</h2>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -628,6 +717,8 @@ export default function ContainerManagement({ appPassword }: ContainerManagement
         typeFilter={typeFilter}
         onTypeFilterChange={setTypeFilter}
       />
+        </>
+      )}
 
       {/* ─── Generate Confirmation Modal ─────────────────────────────── */}
       {generateConfirmOpen && (
