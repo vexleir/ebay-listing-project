@@ -19,6 +19,7 @@ import Feedback from './components/Feedback';
 import LoginScreen from './components/LoginScreen';
 import ConfirmDialog from './components/ConfirmDialog';
 import ContainerManagement from './components/containers/ContainerManagement';
+import ErrorBoundary from './components/ErrorBoundary';
 import { generateListing } from './services/ai';
 import type { StagedListing } from './types';
 import { useToast } from './context/ToastContext';
@@ -685,6 +686,7 @@ function App() {
         </header>
 
       <main className="app-main">
+        <ErrorBoundary area={`the ${activeTab} view`} resetKey={activeTab}>
         {isLoadingListings ? (
           <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>Loading listings...</div>
         ) : activeTab === 'new' ? (
@@ -759,6 +761,7 @@ function App() {
             <SettingsPanel appPassword={appPassword} isEbayConnected={isEbayConnected} staged={stagedListings} listed={listedProducts} />
           </div>
         )}
+        </ErrorBoundary>
       </main>
       </div>
 
