@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, Shield, DollarSign, Zap, Download, ChevronLeft, ChevronRight, Layers, HelpCircle, MessageSquare, Menu, X } from 'lucide-react';
+import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, Shield, DollarSign, Zap, Download, ChevronLeft, ChevronRight, Layers, HelpCircle, MessageSquare, Menu, X, Package } from 'lucide-react';
 import './index.css';
 import { useIsMobile } from './hooks/useMediaQuery';
 
@@ -18,6 +18,10 @@ import HelpPage from './components/HelpPage';
 import Feedback from './components/Feedback';
 import LoginScreen from './components/LoginScreen';
 import ConfirmDialog from './components/ConfirmDialog';
+import ContainerManagement from './components/containers/ContainerManagement';
+import ReviewQueue from './components/containers/ReviewQueue';
+import BulkOperations from './components/containers/BulkOperations';
+import AuditHistory from './components/containers/AuditHistory';
 import { generateListing } from './services/ai';
 import type { StagedListing } from './types';
 import { useToast } from './context/ToastContext';
@@ -58,7 +62,7 @@ function App() {
   });
 
   const [stagedListings, setStagedListings] = useState<StagedListing[]>([]);
-  const [activeTab, setActiveTab] = useState<'new' | 'bulk' | 'staged' | 'listed' | 'sold' | 'analytics' | 'settings' | 'optimizer' | 'admin' | 'ebay-import' | 'help' | 'feedback'>('new');
+  const [activeTab, setActiveTab] = useState<'new' | 'bulk' | 'staged' | 'listed' | 'sold' | 'analytics' | 'settings' | 'optimizer' | 'admin' | 'ebay-import' | 'help' | 'feedback' | 'containers'>('new');
   const [listedProducts, setListedProducts] = useState<StagedListing[]>([]);
   const [isLoadingListings, setIsLoadingListings] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => localStorage.getItem('sidebar_collapsed') === '1');
@@ -592,6 +596,7 @@ function App() {
           <button title="Sold" style={sidebarBtnStyle('sold')} onClick={() => switchTab('sold')}><DollarSign size={18} />{sidebarLabel(`Sold (${listedProducts.filter(l => !!l.soldAt).length})`)}</button>
           <button title="Analytics" style={sidebarBtnStyle('analytics')} onClick={() => switchTab('analytics')}><BarChart2 size={18} />{sidebarLabel('Analytics')}</button>
           <button title="Optimizer" style={sidebarBtnStyle('optimizer')} onClick={() => switchTab('optimizer')}><Zap size={18} />{sidebarLabel('Optimizer')}</button>
+          <button title="Containers" style={sidebarBtnStyle('containers')} onClick={() => switchTab('containers')}><Package size={18} />{sidebarLabel('Containers')}</button>
           {currentUser?.role === 'superadmin' && (
             <button title="Admin" style={sidebarBtnStyle('admin')} onClick={() => switchTab('admin')}><Shield size={18} />{sidebarLabel('Admin')}</button>
           )}
@@ -731,6 +736,10 @@ function App() {
               onImported={handleEbayImported}
               existingEbayIds={new Set(listedProducts.map(l => l.ebayDraftId).filter((id): id is string => !!id))}
             />
+          </div>
+        ) : activeTab === 'containers' ? (
+          <div className="animate-fade-in">
+            <ContainerManagement appPassword={appPassword} />
           </div>
         ) : activeTab === 'admin' && currentUser?.role === 'superadmin' ? (
           <div className="animate-fade-in">
