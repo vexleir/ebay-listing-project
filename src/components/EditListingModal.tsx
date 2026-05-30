@@ -93,9 +93,13 @@ export default function EditListingModal({ listing, appPassword, allListings = [
 
   // Load container options for the dropdown
   useEffect(() => {
-    fetch('/api/containers?status=Active', { headers: { Authorization: `Bearer ${appPassword}` } })
+    fetch('/api/containers', { headers: { Authorization: `Bearer ${appPassword}` } })
       .then(r => r.ok ? r.json() : { containers: [] })
-      .then(data => setContainerOptions((data.containers || []).map((c: any) => ({ id: c.id, name: c.name }))))
+      .then(data => setContainerOptions(
+        (data.containers || [])
+          .filter((c: any) => c.status !== 'Archived')
+          .map((c: any) => ({ id: c.id, name: c.name }))
+      ))
       .catch(() => {});
   }, [appPassword]);
 
