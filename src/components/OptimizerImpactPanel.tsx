@@ -33,8 +33,19 @@ export default function OptimizerImpactPanel({ appPassword }: OptimizerImpactPan
     fetch('/api/intelligence/optimizer-impact', {
       headers: { 'Authorization': `Bearer ${appPassword}` },
     })
-      .then(r => r.json())
-      .then((result: OptimizerImpactData) => setData(result))
+      .then(r => r.ok ? r.json() : null)
+      .then((result) => {
+        // Guard against error responses (e.g. { error: "..." }) or malformed
+        // payloads — only accept objects that have the expected numeric shape.
+        if (result && typeof result.totalActions === 'number') {
+          setData({
+            ...result,
+            strongestWins: Array.isArray(result.strongestWins) ? result.strongestWins : [],
+          });
+        } else {
+          setData(null);
+        }
+      })
       .catch(() => setData(null))
       .finally(() => setLoading(false));
   }, [appPassword]);
@@ -105,7 +116,7 @@ export default function OptimizerImpactPanel({ appPassword }: OptimizerImpactPan
       </div>
 
       {/* Strongest Wins */}
-      {data.strongestWins.length > 0 && (
+      {data.strongestWins && data.strongestWins.length > 0 && (
         <div className="glass-card" style={{ padding: '1.25rem' }}>
           <h4 style={{ margin: '0 0 0.75rem 0', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-secondary)' }}>
             <Award size={14} /> Strongest Wins
