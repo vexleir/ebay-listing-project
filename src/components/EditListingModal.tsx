@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Save, Send, Plus, Trash2, ImagePlus } from 'lucide-react';
 import type { StagedListing } from '../types';
@@ -60,6 +60,8 @@ export default function EditListingModal({ listing, appPassword, allListings = [
   const [sku, setSku] = useState(listing.sku || '');
   const [quantity, setQuantity] = useState<string>(listing.quantity ? String(listing.quantity) : '1');
   const [sellerNotes, setSellerNotes] = useState(listing.sellerNotes || '');
+  const [containerId, setContainerId] = useState(listing.containerId || '');
+  const [containerOptions, setContainerOptions] = useState<{ id: string; name: string }[]>([]);
   const [specifics, setSpecifics] = useState<{ name: string; value: string }[]>(
     Object.entries(listing.itemSpecifics || {}).map(([name, value]) => ({ name, value }))
   );
@@ -89,6 +91,14 @@ export default function EditListingModal({ listing, appPassword, allListings = [
   // INV-002 follow-through — durable inventory lookup against /api/inventory.
   const inventoryLookup = useInventorySkuLookup(sku, appPassword);
 
+  // Load container options for the dropdown
+  useEffect(() => {
+    fetch('/api/containers?status=Active', { headers: { Authorization: `Bearer ${appPassword}` } })
+      .then(r => r.ok ? r.json() : { containers: [] })
+      .then(data => setContainerOptions((data.containers || []).map((c: any) => ({ id: c.id, name: c.name }))))
+      .catch(() => {});
+  }, [appPassword]);
+
   // UX-002 — Escape dismisses the modal, but only when nothing is in flight
   // (matches the Cancel button's disabled gating on line 217ish).
   useEscapeKey(onClose, !saving && !pushing);
@@ -105,6 +115,8 @@ export default function EditListingModal({ listing, appPassword, allListings = [
     sku: sku || undefined,
     quantity: Math.max(1, parseInt(quantity, 10) || 1),
     sellerNotes: sellerNotes || undefined,
+    containerId: containerId || undefined,
+    containerName: containerOptions.find(c => c.id === containerId)?.name || undefined,
     itemSpecifics: Object.fromEntries(
       specifics.filter(s => s.name.trim() && s.value.trim()).map(s => [s.name.trim(), s.value.trim()])
     ),
@@ -316,6 +328,20 @@ export default function EditListingModal({ listing, appPassword, allListings = [
               <input className="input-base" type="number" min="1" step="1" value={quantity} onChange={e => setQuantity(e.target.value)} />
             </div>
           </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>Container</label>
+            <select className="input-base" value={containerId} onChange={e => setContainerId(e.target.value)}>
+              <option value="">No container assigned</option>
+              {containerOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            {containerId && (
+              <p style={{ margin: '4px 0 0', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                This listing is stored in the selected container.
+              </p>
+            )}
+          </div>
+
           <div>
             <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>Seller Notes (internal)</label>
             <input className="input-base" value={sellerNotes} onChange={e => setSellerNotes(e.target.value)} />

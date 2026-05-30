@@ -24,6 +24,9 @@ export interface StagedListing {
   soldPrice?: string;
   shippingLabelCost?: string;
   seoKeywords?: string;
+  // Container assignment (links listing to a physical storage container)
+  containerId?: string;
+  containerName?: string;
   // Package dimensions (used by eBay for calculated shipping / shipping rate calcs).
   // Strings so empty inputs round-trip cleanly through the form.
   packageLength?: string;
