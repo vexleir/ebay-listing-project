@@ -59,12 +59,46 @@ export default function Analytics({ staged, listed, appPassword }: AnalyticsProp
   useEffect(() => {
     if (!appPassword) return;
     fetch('/api/token-usage', { headers: { 'Authorization': `Bearer ${appPassword}` } })
-      .then(r => r.json())
-      .then(data => setTokenStats(data))
-      .catch(() => {});
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data || typeof data !== 'object' || data.error) {
+          setTokenStats(null);
+          return;
+        }
+        // Normalize null/undefined numeric fields to 0 so downstream
+        // .toLocaleString() / .toFixed() calls never hit null.
+        const num = (v: unknown): number => (typeof v === 'number' && !Number.isNaN(v) ? v : 0);
+        const normalized: TokenStats = {
+          promptTokens: num(data.promptTokens),
+          completionTokens: num(data.completionTokens),
+          totalTokens: num(data.totalTokens),
+          callCount: num(data.callCount),
+          daily: data.daily
+            ? {
+                day: data.daily.day ?? '',
+                limit: num(data.daily.limit),
+                promptTokens: num(data.daily.promptTokens),
+                completionTokens: num(data.daily.completionTokens),
+                totalTokens: num(data.daily.totalTokens),
+                callCount: num(data.daily.callCount),
+                remainingTokens: num(data.daily.remainingTokens),
+                resetAt: data.daily.resetAt ?? '',
+              }
+            : undefined,
+          quota: data.quota
+            ? {
+                dailyTokenLimit: num(data.quota.dailyTokenLimit),
+                remainingTokens: num(data.quota.remainingTokens),
+                resetAt: data.quota.resetAt ?? '',
+              }
+            : undefined,
+        };
+        setTokenStats(normalized);
+      })
+      .catch(() => setTokenStats(null));
     fetch('/api/settings', { headers: { 'Authorization': `Bearer ${appPassword}` } })
-      .then(r => r.json())
-      .then(data => { if (data.promotedListingPct) setPromotedPct(data.promotedListingPct); })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data && data.promotedListingPct) setPromotedPct(data.promotedListingPct); })
       .catch(() => {});
   }, [appPassword]);
 
