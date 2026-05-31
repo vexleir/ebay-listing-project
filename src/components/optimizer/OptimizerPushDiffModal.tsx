@@ -1,6 +1,11 @@
 // FE-003 — the "Confirm changes before push" modal shown in the optimizer
 // edit phase. Pure: parent owns the listing + the proposed edits; this
 // component just renders the diff and proxies confirm/close.
+//
+// `computePushDiff` is exported alongside the component so its comparison
+// rules can be unit-tested directly. The fast-refresh rule only affects dev
+// HMR, so disable it here rather than splitting a 1-function helper out.
+/* eslint-disable react-refresh/only-export-components */
 
 import { useRef } from 'react';
 import { createPortal } from 'react-dom';

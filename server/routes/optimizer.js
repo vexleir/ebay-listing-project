@@ -30,16 +30,19 @@ router.get('/fetch', async (req, res) => {
   }
 });
 
+// P0.1 — `/comps` now returns ACTIVE market comps via the Browse API, not
+// sold data (eBay deprecated the Finding API sold search). The response
+// carries `mode: 'active'` so the UI can label it honestly.
 router.get('/comps', compsRateLimit, async (req, res) => {
   const { query, categoryId } = req.query;
   if (!query) return res.status(400).json({ error: 'query required' });
   try {
     const comps = await fetchSoldComps(query.trim(), categoryId || '');
-    res.json({ comps });
+    res.json({ comps, mode: 'active' });
   } catch (e) {
     console.error('[optimizer/comps] error:', e.message);
     // Return empty rather than error so UI degrades gracefully
-    res.json({ comps: [], error: e.message });
+    res.json({ comps: [], mode: 'active', error: e.message });
   }
 });
 

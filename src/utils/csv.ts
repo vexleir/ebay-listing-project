@@ -30,10 +30,11 @@ export function buildCsv(headers: string[], rows: CsvCell[][]): string {
   return lines.join('\r\n');
 }
 
-// Trigger a browser download. Uses `﻿` (BOM) so Excel detects UTF-8.
-// `filename` should include the .csv extension.
+// Trigger a browser download. Prepends a UTF-8 byte-order mark (\uFEFF) so
+// Excel detects UTF-8. `filename` should include the .csv extension.
 export function downloadCsv(filename: string, csv: string): void {
-  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const BOM = '\uFEFF';
+  const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

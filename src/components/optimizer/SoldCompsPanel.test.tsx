@@ -19,31 +19,31 @@ function comp(overrides: Partial<SoldComp> = {}): SoldComp {
 describe('SoldCompsPanel', () => {
   it('shows the empty-state copy when comps is empty and not loading', () => {
     render(<SoldCompsPanel comps={[]} loading={false} />);
-    expect(screen.getByText('No sold comps found.')).toBeInTheDocument();
+    expect(screen.getByText('No active comps found.')).toBeInTheDocument();
   });
 
   it('does NOT show the empty-state copy while loading', () => {
     render(<SoldCompsPanel comps={[]} loading={true} />);
-    expect(screen.queryByText('No sold comps found.')).toBeNull();
+    expect(screen.queryByText('No active comps found.')).toBeNull();
   });
 
-  it('skips the Sold Median card when fewer than 3 comps', () => {
+  it('skips the Active Median card when fewer than 3 comps', () => {
     render(<SoldCompsPanel comps={[comp({ price: 10 }), comp({ price: 20 })]} loading={false} />);
-    expect(screen.queryByText('Sold Median Price')).toBeNull();
+    expect(screen.queryByText('Active Median Price')).toBeNull();
   });
 
-  it('renders the Sold Median card when ≥3 comps with the correct median', () => {
+  it('renders the Active Median card when ≥3 comps with the correct median', () => {
     render(
       <SoldCompsPanel
         comps={[comp({ price: 10 }), comp({ price: 20 }), comp({ price: 30 }), comp({ price: 40 })]}
         loading={false}
       />,
     );
-    expect(screen.getByText('Sold Median Price')).toBeInTheDocument();
+    expect(screen.getByText('Active Median Price')).toBeInTheDocument();
     // Median of [10,20,30,40] = 25 — none of the comp rows render $25 so this
     // text uniquely identifies the median card.
     expect(screen.getByText(/^\$25\.00$/)).toBeInTheDocument();
-    expect(screen.getByText('from 4 recent sales')).toBeInTheDocument();
+    expect(screen.getByText('from 4 active listings')).toBeInTheDocument();
   });
 
   it('caps the visible rows to maxToShow', () => {

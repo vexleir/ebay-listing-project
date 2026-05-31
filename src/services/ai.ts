@@ -32,7 +32,7 @@ export async function generateListing(images: File[], instructions: string, appP
 
   if (!resp.ok) {
     let errText = await resp.text();
-    try { errText = JSON.parse(errText).error; } catch {}
+    try { errText = JSON.parse(errText).error; } catch { /* keep raw text */ }
     throw new Error(errText);
   }
 

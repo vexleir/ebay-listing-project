@@ -1,5 +1,7 @@
 const axios = require('axios');
 const { getValidAccessToken } = require('./ebayAuth');
+const { getApplicationToken } = require('./services/ebay/applicationToken');
+const { BROWSE_API_URL } = require('./services/ebay/client');
 
 // @google/genai is ESM-only; load it lazily so this CJS module can require it.
 let _GoogleGenAI = null;
@@ -16,6 +18,8 @@ const GENERATION_CONFIG = { thinkingConfig: { thinkingBudget: 0 } };
 
 // AI-001 prompt registry — see services/ai/prompts.js.
 const { optimizerPrompt, OPTIMIZER_VERSION } = require('./services/ai/prompts');
+// P1.6 — shared Gemini model discovery + preference ordering.
+const { getBestGeminiModel } = require('./services/ai/modelSelect');
 
 // ─── XML Helpers ──────────────────────────────────────────────────────────────
 
@@ -203,47 +207,55 @@ async function fetchListingForOptimizer(itemId, companyId) {
   };
 }
 
-// ─── Fetch sold comps via Finding API ────────────────────────────────────────
+// ─── Fetch market comps via the Browse API ───────────────────────────────────
+//
+// P0.1 — this used to call eBay's Finding API `findCompletedItems` for *sold*
+// comps. eBay has deprecated the Finding API and restricted the sold/completed
+// search, so that path returned errors/empty in production. We now use the
+// Browse API (the same supported source the Repricing Advisor already uses),
+// which returns *active* listings — NOT sold data. Callers / UI must label
+// these as "active market comps", not "sold comps".
+//
+// If/when Marketplace Insights API access is granted, swap this implementation
+// to pull true sold data; the return shape is kept stable so callers don't
+// need to change.
+async function fetchActiveComps(keywords, categoryId) {
+  const token = await getApplicationToken();
 
-async function fetchSoldComps(keywords, categoryId) {
-  const appId = process.env.EBAY_CLIENT_ID;
-  if (!appId) throw new Error('EBAY_CLIENT_ID not configured');
+  const params = {
+    q: keywords,
+    limit: 12,
+    filter: 'buyingOptions:{FIXED_PRICE}',
+    sort: 'price',
+  };
+  if (categoryId) params.category_ids = String(categoryId);
 
-  const params = new URLSearchParams({
-    'OPERATION-NAME': 'findCompletedItems',
-    'SERVICE-VERSION': '1.0.0',
-    'SECURITY-APPNAME': appId,
-    'RESPONSE-DATA-FORMAT': 'JSON',
-    'keywords': keywords,
-    'itemFilter(0).name': 'SoldItemsOnly',
-    'itemFilter(0).value': 'true',
-    'paginationInput.entriesPerPage': '12',
-    'sortOrder': 'EndTimeSoonest',
+  const resp = await axios.get(BROWSE_API_URL, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'X-EBAY-C-MARKETPLACE-ID': 'EBAY_US',
+      'Content-Type': 'application/json',
+    },
+    params,
   });
-  if (categoryId) params.set('categoryId', categoryId);
 
-  const resp = await axios.get(
-    `https://svcs.ebay.com/services/search/FindingService/v1?${params.toString()}`
-  );
-
-  const items =
-    resp.data?.findCompletedItemsResponse?.[0]?.searchResult?.[0]?.item || [];
-
-  return items
-    .filter(item => {
-      const sold = item.sellingStatus?.[0]?.sellingState?.[0];
-      return sold === 'EndedWithSales';
-    })
-    .map(item => ({
-      title: item.title?.[0] || '',
-      price: parseFloat(item.sellingStatus?.[0]?.currentPrice?.[0]?.__value__ || '0'),
-      currency: item.sellingStatus?.[0]?.currentPrice?.[0]?.['@currencyId'] || 'USD',
-      condition: item.condition?.[0]?.conditionDisplayName?.[0] || '',
-      endDate: item.listingInfo?.[0]?.endTime?.[0] || '',
-      url: item.viewItemURL?.[0] || '',
-      image: item.galleryURL?.[0] || '',
-    }));
+  const summaries = resp.data?.itemSummaries || [];
+  return summaries.map((item) => ({
+    title: item.title || '',
+    price: parseFloat(item.price?.value || '0'),
+    currency: item.price?.currency || 'USD',
+    condition: item.condition || '',
+    // Browse returns active listings — there is no sold/end date. Kept in the
+    // shape for backward compatibility with the existing frontend type.
+    endDate: '',
+    url: item.itemWebUrl || '',
+    image: item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl || '',
+  }));
 }
+
+// Backward-compatible alias. The route + tests still import `fetchSoldComps`;
+// it now resolves to active market comps via the Browse API.
+const fetchSoldComps = fetchActiveComps;
 
 // ─── AI Optimize ─────────────────────────────────────────────────────────────
 
@@ -251,31 +263,8 @@ async function aiOptimizeListing(listingData, apiKey) {
   const GoogleGenAI = await loadGenAI();
   const ai = new GoogleGenAI({ apiKey });
 
-  // Pick best available model — prefer flash, then newer versions
-  let modelName = 'gemini-2.5-flash';
-  try {
-    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
-    if (resp.ok) {
-      const data = await resp.json();
-      const versionScore = (name) => {
-        if (name.includes('2.5')) return 0;
-        if (name.includes('2.0')) return 1;
-        if (name.includes('1.5')) return 2;
-        return 3;
-      };
-      const models = data.models
-        .filter(m => m.supportedGenerationMethods?.includes('generateContent') && m.name?.includes('gemini'))
-        .map(m => m.name.replace('models/', ''));
-      models.sort((a, b) => {
-        const aFlash = a.includes('flash'), bFlash = b.includes('flash');
-        if (aFlash !== bFlash) return aFlash ? -1 : 1;
-        return versionScore(a) - versionScore(b);
-      });
-      if (models.length > 0) modelName = models[0];
-    }
-  } catch (e) {
-    // fall through to default
-  }
+  // Pick best available model — prefer flash, then newer versions (P1.6).
+  const modelName = await getBestGeminiModel(apiKey);
 
   const { title, description, itemSpecifics, price, categoryName, conditionName, categorySpecifics } = listingData;
 
@@ -328,4 +317,4 @@ async function aiOptimizeListing(listingData, apiKey) {
   };
 }
 
-module.exports = { fetchListingForOptimizer, fetchSoldComps, aiOptimizeListing };
+module.exports = { fetchListingForOptimizer, fetchActiveComps, fetchSoldComps, aiOptimizeListing };

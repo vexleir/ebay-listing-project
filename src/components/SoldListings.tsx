@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Trash2, RotateCcw, Search, ChevronDown, LayoutGrid, List, DollarSign, TrendingUp, Package, Check, X, Download } from 'lucide-react';
+import { Trash2, RotateCcw, Search, ChevronDown, LayoutGrid, List, DollarSign, TrendingUp, Package, Check, X, Download, RefreshCw } from 'lucide-react';
 import type { StagedListing } from '../types';
 import { useToast } from '../context/ToastContext';
 import { calculateNetProfit } from '../utils/fees';
@@ -12,6 +12,12 @@ interface SoldListingsProps {
   onDelete: (id: string) => void;
   onUnmarkSold: (id: string) => void;
   onRelist?: (listing: StagedListing) => void;
+  // P0.2 — sold-history sync controls. Optional so the component still
+  // renders in isolation (tests) without an eBay connection.
+  isEbayConnected?: boolean;
+  lookbackDays?: number;
+  onLookbackChange?: (days: number) => void;
+  onSyncSold?: (lookbackDays: number) => void | Promise<void>;
 }
 
 type SortOption = 'sold-desc' | 'sold-asc' | 'revenue-desc' | 'revenue-asc' | 'title-asc';
@@ -26,13 +32,24 @@ function formatDate(ts: number | undefined): string {
   return new Date(ts).toLocaleDateString();
 }
 
-export default function SoldListings({ listings, onDelete, onUnmarkSold, onRelist }: SoldListingsProps) {
+export default function SoldListings({ listings, onDelete, onUnmarkSold, onRelist, isEbayConnected, lookbackDays = 30, onLookbackChange, onSyncSold }: SoldListingsProps) {
   const { toast } = useToast();
   const [sort, setSort] = useState<SortOption>('sold-desc');
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [lightboxImages, setLightboxImages] = useState<string[] | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [syncing, setSyncing] = useState(false);
+
+  const handleSyncClick = async () => {
+    if (!onSyncSold) return;
+    setSyncing(true);
+    try {
+      await onSyncSold(lookbackDays);
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   // FE-004 follow-through — search / pagination state moves to the shared hook.
   const filterFn = useCallback((l: StagedListing, q: string) =>
@@ -69,7 +86,7 @@ export default function SoldListings({ listings, onDelete, onUnmarkSold, onRelis
   // local `sort` state — reset manually so sorting from page 3 lands on page 1.
   useEffect(() => { setCurrentPage(1); }, [sort, setCurrentPage]);
 
-  const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const selectAllFiltered = () => setSelectedIds(new Set(filtered.map(l => l.id)));
   const clearSelection = () => setSelectedIds(new Set());
   const handleBulkDelete = () => { Array.from(selectedIds).forEach(id => onDelete(id)); clearSelection(); };
@@ -91,12 +108,42 @@ export default function SoldListings({ listings, onDelete, onUnmarkSold, onRelis
     return sum + (np.netProfit || 0);
   }, 0);
 
+  // Sync control — rendered in both the empty state and the toolbar so a
+  // seller with zero synced sales can still pull their eBay sold history.
+  const syncControls = onSyncSold ? (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+      <label style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>Look back</label>
+      <select
+        className="input-base"
+        aria-label="Sold history lookback window"
+        value={lookbackDays}
+        onChange={e => onLookbackChange?.(parseInt(e.target.value, 10))}
+        style={{ width: 'auto', padding: '5px 8px', fontSize: '0.8rem', cursor: 'pointer' }}
+      >
+        <option value={30}>30 days</option>
+        <option value={60}>60 days</option>
+        <option value={90}>90 days</option>
+      </select>
+      <button
+        onClick={handleSyncClick}
+        disabled={syncing || !isEbayConnected}
+        title={isEbayConnected ? 'Sync sold items from eBay' : 'Connect to eBay first'}
+        style={{ fontSize: '0.8rem', padding: '6px 12px', background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.3)', color: 'var(--success)', borderRadius: '6px', cursor: syncing || !isEbayConnected ? 'default' : 'pointer', opacity: syncing || !isEbayConnected ? 0.5 : 1, display: 'flex', alignItems: 'center', gap: '5px', whiteSpace: 'nowrap' }}
+      >
+        <RefreshCw size={13} style={syncing ? { animation: 'spin 1s linear infinite' } : undefined} />
+        {syncing ? 'Syncing…' : 'Sync Sold'}
+      </button>
+    </div>
+  ) : null;
+
   if (listings.length === 0) {
     return (
       <div className="glass-panel" style={{ padding: '4rem 2rem', textAlign: 'center' }}>
         <DollarSign size={48} style={{ color: 'var(--text-secondary)', opacity: 0.3, marginBottom: '1rem' }} />
         <h2 style={{ marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>No Sold Items</h2>
-        <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Items marked as sold will appear here.</p>
+        <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: syncControls ? '1.5rem' : 0 }}>Items marked as sold will appear here.</p>
+        {syncControls && <div style={{ display: 'flex', justifyContent: 'center' }}>{syncControls}</div>}
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
@@ -275,6 +322,7 @@ export default function SoldListings({ listings, onDelete, onUnmarkSold, onRelis
           style={{ fontSize: '0.8rem', padding: '5px 10px', background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.3)', color: 'var(--success)', borderRadius: '6px', cursor: 'pointer', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '5px' }}>
           <Download size={13} /> Export CSV
         </button>
+        {syncControls}
         <div style={{ display: 'flex', gap: '0.25rem' }}>
           <button onClick={() => setViewMode('grid')} title="Grid view" style={{ padding: '6px 10px', background: viewMode === 'grid' ? 'var(--glass-bg)' : 'transparent', border: '1px solid', borderColor: viewMode === 'grid' ? 'var(--glass-border)' : 'transparent', color: 'var(--text-primary)', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
             <LayoutGrid size={18} />

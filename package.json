@@ -7,11 +7,13 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "lint:strict": "eslint . --max-warnings 0",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:server": "npm --prefix server test",
-    "test:all": "npm test && npm run test:server"
+    "test:all": "npm test && npm run test:server",
+    "verify": "npm run lint && npm run build && npm run test:all"
   },
   "engines": {
     "node": ">=20.19.0"

@@ -2,6 +2,11 @@ import { createContext, useContext, useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { CheckCircle2, XCircle, Info, X } from 'lucide-react';
 
+// This module intentionally exports both the ToastProvider component and the
+// `useToast` hook — they're a single cohesive API and splitting them adds
+// churn for no runtime benefit. The fast-refresh rule only affects dev HMR.
+/* eslint-disable react-refresh/only-export-components */
+
 type ToastType = 'success' | 'error' | 'info';
 
 interface ToastAction { label: string; onClick: () => void; }

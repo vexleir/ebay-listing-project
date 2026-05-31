@@ -1,29 +1,33 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { PlusCircle, List, Check, AlertTriangle, BarChart2, Settings, Shield, DollarSign, Zap, Download, ChevronLeft, ChevronRight, Layers, HelpCircle, MessageSquare, Menu, X, Package } from 'lucide-react';
 import './index.css';
 import { useIsMobile } from './hooks/useMediaQuery';
 
 import Uploader from './components/Uploader';
-import BulkUploader from './components/BulkUploader';
 import ResultsEditor from './components/ResultsEditor';
-import StagedListings from './components/StagedListings';
-import ListedProducts from './components/ListedProducts';
-import SoldListings from './components/SoldListings';
-import Analytics from './components/Analytics';
-import SettingsPanel from './components/SettingsPanel';
-import ListingOptimizer from './components/ListingOptimizer';
-import AdminPanel from './components/AdminPanel';
-import EbayImportTab from './components/EbayImportTab';
-import HelpPage from './components/HelpPage';
-import Feedback from './components/Feedback';
 import LoginScreen from './components/LoginScreen';
 import ConfirmDialog from './components/ConfirmDialog';
-import ContainerManagement from './components/containers/ContainerManagement';
 import ErrorBoundary from './components/ErrorBoundary';
 import { generateListing } from './services/ai';
 import type { StagedListing } from './types';
 import { useToast } from './context/ToastContext';
 import './App.css';
+
+// P1.2 — code-split the heavy, less-frequently-first-painted tabs so the
+// initial bundle stays small. Each becomes its own lazily-loaded chunk that
+// only downloads when the seller opens that tab.
+const BulkUploader = lazy(() => import('./components/BulkUploader'));
+const StagedListings = lazy(() => import('./components/StagedListings'));
+const ListedProducts = lazy(() => import('./components/ListedProducts'));
+const SoldListings = lazy(() => import('./components/SoldListings'));
+const Analytics = lazy(() => import('./components/Analytics'));
+const SettingsPanel = lazy(() => import('./components/SettingsPanel'));
+const ListingOptimizer = lazy(() => import('./components/ListingOptimizer'));
+const AdminPanel = lazy(() => import('./components/AdminPanel'));
+const EbayImportTab = lazy(() => import('./components/EbayImportTab'));
+const HelpPage = lazy(() => import('./components/HelpPage'));
+const Feedback = lazy(() => import('./components/Feedback'));
+const ContainerManagement = lazy(() => import('./components/containers/ContainerManagement'));
 
 const DRAFT_INSTRUCTIONS_KEY = 'draft_instructions';
 const DRAFT_GENERATED_KEY = 'draft_generated';
@@ -345,14 +349,24 @@ function App() {
     });
   };
 
-  const handleSyncSold = async (silent = false) => {
+  // P0.2 — sold-history lookback window. The server accepts 30/60/90; the
+  // client persists the seller's choice and passes it through. Auto-sync uses
+  // 90 to avoid silently losing sales when the app is closed for >30 days.
+  const [soldLookbackDays, setSoldLookbackDays] = useState<number>(() => {
+    const stored = parseInt(localStorage.getItem('sold_lookback_days') || '', 10);
+    return [30, 60, 90].includes(stored) ? stored : 30;
+  });
+  useEffect(() => { localStorage.setItem('sold_lookback_days', String(soldLookbackDays)); }, [soldLookbackDays]);
+
+  const handleSyncSold = async (silent = false, lookbackOverride?: number) => {
     if (!isEbayConnected) { if (!silent) toast('Connect to eBay first.', 'error'); return; }
+    const lookbackDays = lookbackOverride ?? soldLookbackDays;
     try {
-      const resp = await fetch('/api/ebay/sold-items', { headers: bearerHeaders(appPassword) });
+      const resp = await fetch(`/api/ebay/sold-items?lookbackDays=${lookbackDays}`, { headers: bearerHeaders(appPassword) });
       const data = await resp.json();
       if (data.error) { if (!silent) toast('Sync failed: ' + data.error, 'error'); return; }
       const soldItems: { itemId: string; soldPrice: string; soldDate: string }[] = data.items || [];
-      if (soldItems.length === 0) { if (!silent) toast('No sold items found in the last 30 days.', 'info'); return; }
+      if (soldItems.length === 0) { if (!silent) toast(`No sold items found in the last ${lookbackDays} days.`, 'info'); return; }
       let count = 0;
       setListedProducts(prev => prev.map(l => {
         const match = soldItems.find(s => s.itemId && l.ebayDraftId && s.itemId === l.ebayDraftId);
@@ -371,11 +385,13 @@ function App() {
     }
   };
 
-  // Auto-sync sold listings every 30 minutes when eBay is connected
+  // Auto-sync sold listings every 30 minutes when eBay is connected.
+  // Uses a 90-day window (the eBay max) so closing the app for a few weeks
+  // doesn't silently drop sales from the reconciliation.
   useEffect(() => {
     if (!isEbayConnected || !isAuthenticated) return;
     const INTERVAL_MS = 30 * 60 * 1000;
-    const id = setInterval(() => handleSyncSold(true), INTERVAL_MS);
+    const id = setInterval(() => handleSyncSold(true, 90), INTERVAL_MS);
     return () => clearInterval(id);
   }, [isEbayConnected, isAuthenticated, appPassword]);
 
@@ -687,6 +703,7 @@ function App() {
 
       <main className="app-main">
         <ErrorBoundary area={`the ${activeTab} view`} resetKey={activeTab}>
+        <Suspense fallback={<div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>Loading…</div>}>
         {isLoadingListings ? (
           <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>Loading listings...</div>
         ) : activeTab === 'new' ? (
@@ -713,11 +730,20 @@ function App() {
           </div>
         ) : activeTab === 'listed' ? (
           <div className="animate-fade-in">
-            <ListedProducts listings={listedProducts} allListings={allListings} onDelete={handleDeleteListedListing} onArchive={handleArchiveListedListing} onSyncSold={handleSyncSold} onRelist={handleRelistListing} onDelistRelist={handleDelistAndRelist} onMoveToStaged={handleMoveToStaged} onMarkSold={handleMarkSold} onUpdateListing={handleUpdateListing} isEbayConnected={isEbayConnected} appPassword={appPassword} />
+            <ListedProducts listings={listedProducts} allListings={allListings} onDelete={handleDeleteListedListing} onArchive={handleArchiveListedListing} onSyncSold={() => handleSyncSold(false, soldLookbackDays)} onRelist={handleRelistListing} onDelistRelist={handleDelistAndRelist} onMoveToStaged={handleMoveToStaged} onMarkSold={handleMarkSold} onUpdateListing={handleUpdateListing} isEbayConnected={isEbayConnected} appPassword={appPassword} />
           </div>
         ) : activeTab === 'sold' ? (
           <div className="animate-fade-in">
-            <SoldListings listings={listedProducts.filter(l => !!l.soldAt)} onDelete={handleDeleteListedListing} onUnmarkSold={handleUnmarkSold} onRelist={handleRelistListing} />
+            <SoldListings
+              listings={listedProducts.filter(l => !!l.soldAt)}
+              onDelete={handleDeleteListedListing}
+              onUnmarkSold={handleUnmarkSold}
+              onRelist={handleRelistListing}
+              isEbayConnected={isEbayConnected}
+              lookbackDays={soldLookbackDays}
+              onLookbackChange={setSoldLookbackDays}
+              onSyncSold={(days) => handleSyncSold(false, days)}
+            />
           </div>
         ) : activeTab === 'analytics' ? (
           <div className="animate-fade-in">
@@ -761,6 +787,7 @@ function App() {
             <SettingsPanel appPassword={appPassword} isEbayConnected={isEbayConnected} staged={stagedListings} listed={listedProducts} />
           </div>
         )}
+        </Suspense>
         </ErrorBoundary>
       </main>
       </div>

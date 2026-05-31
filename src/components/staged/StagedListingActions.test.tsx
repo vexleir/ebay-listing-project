@@ -78,13 +78,13 @@ describe('StagedListingActions', () => {
     // happy-dom doesn't resolve CSS variables to computed values, so check
     // the raw inline style attribute instead of computedStyle.
     render(<StagedListingActions {...defaults({ isCompsActive: true })} />);
-    const btn = screen.getByLabelText('Find sold comps');
+    const btn = screen.getByLabelText('Find market comps');
     expect(btn.getAttribute('style')).toContain('var(--success)');
   });
 
   it('does NOT inject the success-color style when isCompsActive=false', () => {
     render(<StagedListingActions {...defaults({ isCompsActive: false })} />);
-    const btn = screen.getByLabelText('Find sold comps');
+    const btn = screen.getByLabelText('Find market comps');
     expect(btn.getAttribute('style') || '').not.toContain('var(--success)');
   });
 
@@ -108,7 +108,7 @@ describe('StagedListingActions', () => {
       onDelete: vi.fn(),
     };
     render(<StagedListingActions {...defaults(handlers)} />);
-    fireEvent.click(screen.getByLabelText('Find sold comps'));
+    fireEvent.click(screen.getByLabelText('Find market comps'));
     fireEvent.click(screen.getByLabelText('Re-analyze with AI'));
     fireEvent.click(screen.getByLabelText('Copy HTML description'));
     fireEvent.click(screen.getByLabelText('Edit or add images'));

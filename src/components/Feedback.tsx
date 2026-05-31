@@ -79,7 +79,8 @@ export default function Feedback({ appPassword, currentUserId, isSuperAdmin }: P
     }
   };
 
-  useEffect(() => { loadPosts(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { loadPosts(); }, []);
 
   const filteredPosts = useMemo(() => {
     return posts.filter(p => {

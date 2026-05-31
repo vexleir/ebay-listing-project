@@ -91,6 +91,11 @@ export default function StagedListingsView({ listings, allListings, onUpdate, on
   const paginatedListings = list.paginated;
   const totalPages = list.totalPages;
 
+  // Pagination reset-on-sort. The shared hook only resets on query changes
+  // (sort doesn't change result-set composition, just order), so reset here.
+  // Declared before any early return so the hook order stays stable.
+  useEffect(() => { setCurrentPage(1); }, [sortBy, setCurrentPage]);
+
   // Lightbox
   const [lightboxImages, setLightboxImages] = useState<string[] | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState(0);
@@ -100,7 +105,7 @@ export default function StagedListingsView({ listings, allListings, onUpdate, on
   const [reanalyzeInstructions, setReanalyzeInstructions] = useState('');
   const [isReanalyzing, setIsReanalyzing] = useState(false);
 
-  // Sold comps
+  // Active market comps (Browse API — active listings, not sold data)
   const [compsId, setCompsId] = useState<string | null>(null);
   const [compsData, setCompsData] = useState<{ title: string; price: string; currency: string; condition: string; url: string }[]>([]);
   const [compsLoading, setCompsLoading] = useState(false);
@@ -268,16 +273,10 @@ export default function StagedListingsView({ listings, allListings, onUpdate, on
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
   };
-
-  // Pagination clamping + reset-on-query are owned by useListFilterSort.
-  // We still need to reset to page 1 when the sort changes, since the hook
-  // intentionally only resets on query changes (sort doesn't change
-  // result-set composition, just order).
-  useEffect(() => { setCurrentPage(1); }, [sortBy, setCurrentPage]);
 
   const selectAll = () => setSelectedIds(new Set(visibleListings.map(l => l.id)));
   const clearSelection = () => setSelectedIds(new Set());
@@ -322,14 +321,14 @@ export default function StagedListingsView({ listings, allListings, onUpdate, on
       });
       const data = await resp.json();
       if (data.error) {
-        toast(`Sold comps error: ${data.error}`, 'error');
+        toast(`Market comps error: ${data.error}`, 'error');
         setCompsId(null);
       } else {
         setCompsData(data.items || []);
-        if ((data.items || []).length === 0) toast('No recent sold comps found for this search.', 'info');
+        if ((data.items || []).length === 0) toast('No active comps found for this search.', 'info');
       }
     } catch (e: any) {
-      toast('Failed to fetch sold comps: ' + e.message, 'error');
+      toast('Failed to fetch market comps: ' + e.message, 'error');
       setCompsId(null);
     } finally {
       setCompsLoading(false);

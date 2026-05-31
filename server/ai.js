@@ -22,6 +22,9 @@ const {
   LISTING_FINAL_VERSION,
 } = require('./services/ai/prompts');
 
+// P1.6 — shared Gemini model discovery + preference ordering.
+const { getPreferredGeminiModels } = require('./services/ai/modelSelect');
+
 async function generateListing(imageParts, instructions, apiKey) {
   const GoogleGenAI = await loadGenAI();
   const ai = new GoogleGenAI({ apiKey });
@@ -143,37 +146,7 @@ async function generateListing(imageParts, instructions, apiKey) {
     };
   };
 
-  let availableModels = [];
-  try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
-    if (response.ok) {
-      const data = await response.json();
-      availableModels = data.models
-        .filter(m => m.supportedGenerationMethods.includes('generateContent') && m.name.includes('gemini'))
-        .map(m => m.name.replace('models/', ''));
-    }
-  } catch (e) {
-    console.warn("Could not fetch model list directly:", e);
-  }
-
-  let modelsToTry = availableModels.length > 0
-    ? availableModels
-    : ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'];
-
-  if (availableModels.length > 0) {
-    // Prefer flash variants and newer versions (2.5 → 2.0 → 1.5)
-    const versionScore = (name) => {
-      if (name.includes('2.5')) return 0;
-      if (name.includes('2.0')) return 1;
-      if (name.includes('1.5')) return 2;
-      return 3;
-    };
-    modelsToTry.sort((a, b) => {
-      const aFlash = a.includes('flash'), bFlash = b.includes('flash');
-      if (aFlash !== bFlash) return aFlash ? -1 : 1;
-      return versionScore(a) - versionScore(b);
-    });
-  }
+  let modelsToTry = await getPreferredGeminiModels(apiKey);
 
   let lastError = null;
 

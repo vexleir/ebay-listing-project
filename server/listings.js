@@ -172,9 +172,63 @@ async function getActiveListings(companyId) {
   ).toArray();
 }
 
+// P1.4 — server-side sold reconciliation. Given the sold items pulled from
+// eBay (each `{ itemId, soldPrice, soldDate }`), mark any matching listed
+// records as sold. Mirrors the optimistic client logic in App.handleSyncSold
+// but runs without a browser tab open. Only flips a listing that is not
+// already marked sold. Returns the count of newly-sold listings.
+async function reconcileSoldListings(companyId, soldItems) {
+  if (!companyId || !Array.isArray(soldItems) || soldItems.length === 0) return 0;
+  const db = await getDb();
+
+  // Index sold items by eBay item id for O(1) lookup.
+  const byItemId = new Map();
+  for (const s of soldItems) {
+    if (s && s.itemId) byItemId.set(String(s.itemId), s);
+  }
+  if (byItemId.size === 0) return 0;
+
+  // Pull the company's listed-but-not-sold records that have an eBay id.
+  const candidates = await db.collection('listings').find(
+    {
+      companyId,
+      status: 'listed',
+      ebayDraftId: { $in: [...byItemId.keys()] },
+      soldAt: { $in: [null, undefined] },
+    },
+    { projection: { _id: 1, id: 1, ebayDraftId: 1 } },
+  ).toArray();
+
+  if (candidates.length === 0) return 0;
+
+  const now = Date.now();
+  const ops = [];
+  for (const listing of candidates) {
+    const match = byItemId.get(String(listing.ebayDraftId));
+    if (!match) continue;
+    ops.push({
+      updateOne: {
+        filter: { _id: listing._id },
+        update: {
+          $set: {
+            archived: true,
+            soldAt: now,
+            soldPrice: match.soldPrice || '',
+            updatedAt: now,
+          },
+        },
+      },
+    });
+  }
+
+  if (ops.length === 0) return 0;
+  await db.collection('listings').bulkWrite(ops);
+  return ops.length;
+}
+
 module.exports = {
   getListings, getListing, createListing, updateListing, deleteListing,
-  getAllListingsMeta, getActiveListings,
+  getAllListingsMeta, getActiveListings, reconcileSoldListings,
   getSettings, saveSettings,
   incrementTokenUsage, getTokenUsage, getAiDailyQuotaStatus,
 };

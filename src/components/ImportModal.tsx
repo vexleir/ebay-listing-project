@@ -90,7 +90,7 @@ export default function ImportModal({ appPassword, isEbayConnected, onClose, onI
   const toggleItem = (itemId: string) => {
     setSelected(prev => {
       const next = new Set(prev);
-      next.has(itemId) ? next.delete(itemId) : next.add(itemId);
+      if (next.has(itemId)) next.delete(itemId); else next.add(itemId);
       return next;
     });
   };
@@ -130,8 +130,6 @@ export default function ImportModal({ appPassword, isEbayConnected, onClose, onI
     } catch (e: any) {
       setImportResult({ imported: 0, skipped: 0, failed: [{ itemId: '', title: '', reason: e.message }] });
       setStep(4);
-    } finally {
-
     }
   };
 

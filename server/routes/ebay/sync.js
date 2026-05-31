@@ -21,24 +21,14 @@ const { createDefaultRateLimiters } = require('../../middleware/rateLimit');
 const { tradingApiCall } = require('../../services/ebay/client');
 const { captureOutcomeForEbayItem } = require('../../services/intelligence/captureOutcome');
 const { getExperimentByEbayItemId, upsertOutcome } = require('../../intelligence');
+const {
+  resolveLookbackDays,
+  fetchAllSoldItems,
+  SOLD_SYNC_ALLOWED_LOOKBACK,
+  SOLD_SYNC_DEFAULT_LOOKBACK,
+} = require('../../services/ebay/soldItems');
 
 const { ebayReadRateLimit } = createDefaultRateLimiters();
-
-// Allowed sold-sync lookback values. The frontend setting offers these three
-// options; anything else falls back to the default. eBay caps the Trading
-// API at 90 days on the SoldList duration, so don't widen this without
-// switching to the Order Management API.
-const SOLD_SYNC_ALLOWED_LOOKBACK = new Set([30, 60, 90]);
-const SOLD_SYNC_DEFAULT_LOOKBACK = 30;
-const SOLD_SYNC_ENTRIES_PER_PAGE = 50;
-// Safety cap so a misconfigured response can't push us into pagination forever.
-const SOLD_SYNC_MAX_PAGES = 60;
-
-function resolveLookbackDays(raw) {
-  const n = parseInt(raw, 10);
-  if (SOLD_SYNC_ALLOWED_LOOKBACK.has(n)) return n;
-  return SOLD_SYNC_DEFAULT_LOOKBACK;
-}
 
 const router = express.Router();
 
@@ -82,60 +72,11 @@ router.get('/listing-stats', ebayReadRateLimit, async (req, res) => {
 router.get('/sold-items', ebayReadRateLimit, async (req, res) => {
   try {
     const lookbackDays = resolveLookbackDays(req.query.lookbackDays);
-    const token = await getValidAccessToken(req.companyId);
 
-    const items = [];
-    const seenItemIds = new Set();
-    let pagesFetched = 0;
-    let totalEntries = 0;
-
-    for (let pageNumber = 1; pageNumber <= SOLD_SYNC_MAX_PAGES; pageNumber++) {
-      const xml = `<?xml version="1.0" encoding="utf-8"?>
-<GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <SoldList>
-    <Include>true</Include>
-    <DurationInDays>${lookbackDays}</DurationInDays>
-    <Pagination><EntriesPerPage>${SOLD_SYNC_ENTRIES_PER_PAGE}</EntriesPerPage><PageNumber>${pageNumber}</PageNumber></Pagination>
-  </SoldList>
-  <HideVariations>true</HideVariations>
-</GetMyeBaySellingRequest>`;
-      const resp = await tradingApiCall({ callName: 'GetMyeBaySelling', xmlBody: xml, token });
-      const body = resp.data;
-      pagesFetched += 1;
-
-      // Capture total once; eBay returns this in <PaginationResult>.
-      const totalMatch = /<TotalNumberOfEntries>(\d+)<\/TotalNumberOfEntries>/.exec(body);
-      if (totalMatch) totalEntries = parseInt(totalMatch[1], 10);
-      const totalPagesMatch = /<TotalNumberOfPages>(\d+)<\/TotalNumberOfPages>/.exec(body);
-      const totalPages = totalPagesMatch ? parseInt(totalPagesMatch[1], 10) : 1;
-
-      const itemRegex = /<Item>([\s\S]*?)<\/Item>/g;
-      let pageItems = 0;
-      let m;
-      while ((m = itemRegex.exec(body)) !== null) {
-        const block = m[1];
-        const get = (tag) => {
-          const r = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`);
-          const x = r.exec(block);
-          return x ? x[1].trim() : '';
-        };
-        const itemId = get('ItemID');
-        if (!itemId || seenItemIds.has(itemId)) continue;
-        seenItemIds.add(itemId);
-        pageItems += 1;
-        items.push({
-          itemId,
-          title: get('Title'),
-          soldPrice: get('CurrentPrice') || get('SalePrice') || '',
-          soldDate: get('LastModifiedTime') || '',
-          quantitySold: get('QuantitySold') || '1',
-        });
-      }
-
-      // Stop when we've drained eBay's pagination or the current page came
-      // back empty (defensive — should match totalPages exactly).
-      if (pageNumber >= totalPages || pageItems === 0) break;
-    }
+    const { items, pagesFetched, totalEntries } = await fetchAllSoldItems(
+      { companyId: req.companyId, lookbackDays },
+      { tradingApiCall, getValidAccessToken },
+    );
 
     // INTEL-002 — Auto-fire sold milestone outcome capture for each item
     // that matches an experiment. Non-fatal: a failure in outcome capture

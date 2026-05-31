@@ -59,8 +59,8 @@ export default function StagedListingActions({
       </button>
       <button
         className="btn-icon"
-        title="Find Sold Comps"
-        aria-label="Find sold comps"
+        title="Find Market Comps"
+        aria-label="Find market comps"
         onClick={() => onFetchComps(listing)}
         style={{ color: isCompsActive ? 'var(--success)' : undefined }}
       >

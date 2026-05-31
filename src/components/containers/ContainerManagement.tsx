@@ -6,6 +6,7 @@ import ContainerForm from './ContainerForm';
 import ReviewQueue from './ReviewQueue';
 import BulkOperations from './BulkOperations';
 import AuditHistory from './AuditHistory';
+import ContainerActionModals from './ContainerActionModals';
 import type { ContainerRecord, ContainerType } from './ContainerList';
 
 type View = 'list' | 'detail' | 'create' | 'edit';
@@ -354,17 +355,6 @@ export default function ContainerManagement({ appPassword }: ContainerManagement
     border: '1px solid var(--border-color)',
   };
 
-  const inputStyle: React.CSSProperties = {
-    width: '100%',
-    padding: '8px 12px',
-    borderRadius: '8px',
-    border: '1px solid var(--border-color)',
-    background: 'var(--glass-bg)',
-    color: 'var(--text-primary)',
-    fontSize: '0.85rem',
-    marginTop: '6px',
-  };
-
   const btnPrimary: React.CSSProperties = {
     padding: '8px 16px',
     borderRadius: '8px',
@@ -483,96 +473,28 @@ export default function ContainerManagement({ appPassword }: ContainerManagement
           <AuditHistory containerId={c.id} appPassword={appPassword} />
         </div>
 
-        {/* ─── Merge Modal ─────────────────────────────────────────── */}
-        {mergeModalOpen && (
-          <div style={modalOverlayStyle} onClick={() => setMergeModalOpen(false)}>
-            <div style={modalContentStyle} onClick={e => e.stopPropagation()}>
-              <h3 style={{ margin: '0 0 1rem', fontSize: '1rem' }}>Merge Container</h3>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-                Merge "{c.name}" into another container. All items, aliases, and history will be transferred to the target.
-              </p>
-              <label style={{ fontSize: '0.82rem', fontWeight: 500 }}>Target Container ID</label>
-              <select
-                value={mergeTargetId}
-                onChange={e => setMergeTargetId(e.target.value)}
-                style={inputStyle}
-              >
-                <option value="">Select target...</option>
-                {containers.filter(ct => ct.id !== c.id && ct.status !== 'Archived').map(ct => (
-                  <option key={ct.id} value={ct.id}>{ct.name}</option>
-                ))}
-              </select>
-              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '1.25rem' }}>
-                <button onClick={() => setMergeModalOpen(false)} style={btnSecondary}>Cancel</button>
-                <button onClick={handleMerge} disabled={!mergeTargetId} style={{ ...btnPrimary, opacity: mergeTargetId ? 1 : 0.5 }}>Merge</button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ─── Split Modal ─────────────────────────────────────────── */}
-        {splitModalOpen && (
-          <div style={modalOverlayStyle} onClick={() => setSplitModalOpen(false)}>
-            <div style={modalContentStyle} onClick={e => e.stopPropagation()}>
-              <h3 style={{ margin: '0 0 1rem', fontSize: '1rem' }}>Split Container</h3>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-                Create new containers from "{c.name}". Enter comma-separated names for the new containers.
-              </p>
-              <label style={{ fontSize: '0.82rem', fontWeight: 500 }}>New Container Names</label>
-              <input
-                type="text"
-                value={splitNames}
-                onChange={e => setSplitNames(e.target.value)}
-                placeholder="e.g., Tote 1A, Tote 1B"
-                style={inputStyle}
-              />
-              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '1.25rem' }}>
-                <button onClick={() => setSplitModalOpen(false)} style={btnSecondary}>Cancel</button>
-                <button onClick={handleSplit} disabled={!splitNames.trim()} style={{ ...btnPrimary, opacity: splitNames.trim() ? 1 : 0.5 }}>Split</button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ─── Move Items Modal ────────────────────────────────────── */}
-        {moveItemsModalOpen && (
-          <div style={modalOverlayStyle} onClick={() => setMoveItemsModalOpen(false)}>
-            <div style={modalContentStyle} onClick={e => e.stopPropagation()}>
-              <h3 style={{ margin: '0 0 1rem', fontSize: '1rem' }}>Move Items</h3>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-                Move items from "{c.name}" to another container.
-              </p>
-              <label style={{ fontSize: '0.82rem', fontWeight: 500 }}>Target Container</label>
-              <select
-                value={moveTargetId}
-                onChange={e => setMoveTargetId(e.target.value)}
-                style={inputStyle}
-              >
-                <option value="">Select target...</option>
-                {containers.filter(ct => ct.id !== c.id && ct.status !== 'Archived').map(ct => (
-                  <option key={ct.id} value={ct.id}>{ct.name}</option>
-                ))}
-              </select>
-              <div style={{ marginTop: '0.75rem' }}>
-                <label style={{ fontSize: '0.82rem', fontWeight: 500 }}>Item IDs (optional, comma-separated)</label>
-                <input
-                  type="text"
-                  value={moveItemIds}
-                  onChange={e => setMoveItemIds(e.target.value)}
-                  placeholder="Leave empty to move all items"
-                  style={inputStyle}
-                />
-                <p style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
-                  Leave empty to move all items from this container.
-                </p>
-              </div>
-              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '1.25rem' }}>
-                <button onClick={() => setMoveItemsModalOpen(false)} style={btnSecondary}>Cancel</button>
-                <button onClick={handleMoveItems} disabled={!moveTargetId} style={{ ...btnPrimary, opacity: moveTargetId ? 1 : 0.5 }}>Move</button>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* ─── Detail-view action modals (Merge / Split / Move) ────── */}
+        <ContainerActionModals
+          container={c}
+          containers={containers}
+          mergeOpen={mergeModalOpen}
+          mergeTargetId={mergeTargetId}
+          onMergeTargetChange={setMergeTargetId}
+          onMergeConfirm={handleMerge}
+          onMergeClose={() => setMergeModalOpen(false)}
+          splitOpen={splitModalOpen}
+          splitNames={splitNames}
+          onSplitNamesChange={setSplitNames}
+          onSplitConfirm={handleSplit}
+          onSplitClose={() => setSplitModalOpen(false)}
+          moveOpen={moveItemsModalOpen}
+          moveTargetId={moveTargetId}
+          onMoveTargetChange={setMoveTargetId}
+          moveItemIds={moveItemIds}
+          onMoveItemIdsChange={setMoveItemIds}
+          onMoveConfirm={handleMoveItems}
+          onMoveClose={() => setMoveItemsModalOpen(false)}
+        />
       </div>
     );
   }

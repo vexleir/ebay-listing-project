@@ -56,7 +56,8 @@ describe('downloadCsv', () => {
   it('prepends a BOM and triggers an anchor click', async () => {
     // happy-dom provides URL.createObjectURL but not always with a stable
     // mock — stub it so we can assert without depending on the impl.
-    const createObjectURL = vi.fn((_blob: Blob) => 'blob:fake-url');
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const createObjectURL = vi.fn((_blob: Blob): string => 'blob:fake-url');
     const revokeObjectURL = vi.fn();
     Object.defineProperty(globalThis.URL, 'createObjectURL', { value: createObjectURL, configurable: true });
     Object.defineProperty(globalThis.URL, 'revokeObjectURL', { value: revokeObjectURL, configurable: true });

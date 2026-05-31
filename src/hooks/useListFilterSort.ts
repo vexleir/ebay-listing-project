@@ -8,7 +8,7 @@
 // changes — matches the existing per-tab behavior so nothing visible
 // changes when the tabs migrate to it.
 
-import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
+import { useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 
 export interface UseListFilterSortOptions<T> {
   items: T[];
@@ -46,13 +46,13 @@ export function useListFilterSort<T>({
 }: UseListFilterSortOptions<T>): UseListFilterSortResult<T> {
   const [query, setQueryRaw] = useState(initialQuery);
   const [perPage, setPerPage] = useState(initialPerPage);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [currentPage, setCurrentPageRaw] = useState(1);
 
-  // Query setter always resets to page 1 so the two effects (query-reset
-  // and clamp-to-max) can't race against each other.
+  // Query setter always resets to page 1 so the visible window starts at the
+  // top after a search change.
   const setQuery = (q: string) => {
     setQueryRaw(q);
-    setCurrentPage(1);
+    setCurrentPageRaw(1);
   };
 
   const visible = useMemo(() => {
@@ -67,25 +67,32 @@ export function useListFilterSort<T>({
     return out;
   }, [items, query, filter, sort]);
 
-  // Clamp the current page if the result set shrinks below it (e.g. bulk-
-  // delete leaves the user past the new last page).
-  useEffect(() => {
-    if (perPage === 0) return;
-    const max = Math.max(1, Math.ceil(visible.length / perPage));
-    if (currentPage > max) setCurrentPage(max);
-  }, [visible.length, perPage, currentPage]);
-
   const totalPages = perPage === 0 ? 1 : Math.max(1, Math.ceil(visible.length / perPage));
+
+  // Clamp during render instead of via a setState-in-effect. When the result
+  // set shrinks below the current page (e.g. after a bulk delete), we page
+  // back to the last valid page on read — no effect, no cascading render.
+  const clampedPage = Math.min(currentPage, totalPages);
+
+  // Wrap the public setter so callers can pass either a value or an updater,
+  // and the stored value always stays within [1, totalPages].
+  const setCurrentPage: Dispatch<SetStateAction<number>> = (action) => {
+    setCurrentPageRaw((prev) => {
+      const next = typeof action === 'function' ? (action as (p: number) => number)(prev) : action;
+      return Math.max(1, Math.min(next, totalPages));
+    });
+  };
+
   const paginated = perPage === 0
     ? visible
-    : visible.slice((currentPage - 1) * perPage, currentPage * perPage);
+    : visible.slice((clampedPage - 1) * perPage, clampedPage * perPage);
 
   return {
     query,
     setQuery,
     perPage,
     setPerPage,
-    currentPage,
+    currentPage: clampedPage,
     setCurrentPage,
     visible,
     paginated,
