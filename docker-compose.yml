@@ -1,0 +1,55 @@
+services:
+  mongodb:
+    image: mongo:7
+    container_name: ebay-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ebayapp
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+    volumes:
+      # Named volume, NOT a bind mount. Bind mounts into the Ubuntu distro
+      # (./data/mongodb) silently resolve to an empty shadow directory when
+      # Docker Desktop auto-starts containers at boot before the distro
+      # filesystem is up — mongod then initializes a fresh empty database
+      # and all writes are lost on the next reboot. Named volumes live in
+      # Docker's own VM and are immune to that race.
+      - mongodb_data:/data/db
+    ports:
+      - "127.0.0.1:27017:27017"
+
+  app:
+    build: ./ebay-listing-project/server
+    container_name: ebay-app
+    restart: unless-stopped
+    depends_on:
+      - mongodb
+    env_file:
+      - ./config/.env
+    volumes:
+      # Named volume for the same boot-race reason as mongodb_data above.
+      - app_images:/app/data/images
+    ports:
+      - "127.0.0.1:3001:3001"
+
+  caddy:
+    image: caddy:2
+    container_name: ebay-caddy
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Still a bind mount (it's hand-edited config). If caddy fails after a
+      # reboot with a mount error, `docker compose up -d --force-recreate caddy`
+      # (or start-servers.bat) fixes it.
+      - ./config/Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  mongodb_data:
+  app_images:
+  caddy_data:
+  caddy_config:

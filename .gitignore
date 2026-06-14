@@ -1,34 +1,17 @@
+# Environment variables / secrets (root and config folder)
+.env
+.env.*
+config/.env
+config/.env.*
+# ...but keep example/template env files
+!.env.example
+
+# Local runtime data (MongoDB files, uploaded images)
+data/
+
+# Database backups
+*.tar.gz
+
 # Logs
 logs
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-
-node_modules
-dist
-dist-ssr
-*.local
-
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-
-# Environment Variables
-.env
-.env.*
-server/.env
-server/.env.*
-
-# Runtime secrets / token stores
-server/ebay_tokens.json
-server/*tokens*.json
