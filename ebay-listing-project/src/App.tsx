@@ -212,7 +212,15 @@ function App() {
   const saveImages = (id: string, images: string[]) => {
     const store = JSON.parse(localStorage.getItem('listing_images') || '{}');
     store[id] = images;
-    localStorage.setItem('listing_images', JSON.stringify(store));
+    try {
+      localStorage.setItem('listing_images', JSON.stringify(store));
+    } catch (e) {
+      // localStorage has a ~5MB quota. Raw base64 images (used as a fallback
+      // when Cloudinary isn't configured) blow past it quickly. Don't let a
+      // cache write failure abort staging — the listing is already persisted
+      // server-side with the same images.
+      console.warn('Could not cache images in localStorage (quota likely exceeded):', e);
+    }
   };
   const loadImages = (id: string): string[] => {
     return JSON.parse(localStorage.getItem('listing_images') || '{}')[id] || [];
@@ -274,7 +282,13 @@ function App() {
   };
 
   const handleStageListing = async (listing: Omit<StagedListing, 'id' | 'createdAt'>) => {
-    await stageListingCore(listing);
+    try {
+      await stageListingCore(listing);
+    } catch (e) {
+      console.error('Failed to stage listing:', e);
+      toast('Could not stage listing. Please try again.', 'error');
+      return;
+    }
     setImages([]);
     setInstructions('');
     setGeneratedData(null);
