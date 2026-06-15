@@ -24,20 +24,27 @@ function fakeFetch(models, { ok = true } = {}) {
   });
 }
 
-test('versionScore prefers 2.5 over 2.0 over 1.5', () => {
-  assert.ok(versionScore('gemini-2.5-flash') < versionScore('gemini-2.0-flash'));
-  assert.ok(versionScore('gemini-2.0-flash') < versionScore('gemini-1.5-flash'));
-  assert.equal(versionScore('gemini-9-experimental'), 3);
+test('versionScore is higher for newer versions and generalizes past 2.5', () => {
+  // Higher = newer = preferred.
+  assert.ok(versionScore('gemini-2.5-flash') > versionScore('gemini-2.0-flash'));
+  assert.ok(versionScore('gemini-2.0-flash') > versionScore('gemini-1.5-flash'));
+  // Newer major/minor versions outrank 2.5 (the old hardcoded scoring buried these).
+  assert.ok(versionScore('gemini-3-flash') > versionScore('gemini-2.5-flash'));
+  assert.ok(versionScore('gemini-3.1-pro') > versionScore('gemini-3-pro'));
+  // Unversioned aliases rank lowest.
+  assert.equal(versionScore('gemini-flash-latest'), -1);
 });
 
 test('sortGeminiModels puts flash variants first, then newest version', () => {
   const sorted = sortGeminiModels([
     'gemini-1.5-pro',
     'gemini-2.0-flash',
+    'gemini-3-flash',
     'gemini-2.5-flash',
     'gemini-1.5-flash',
   ]);
-  assert.equal(sorted[0], 'gemini-2.5-flash');
+  // Newest flash wins.
+  assert.equal(sorted[0], 'gemini-3-flash');
   // All flash variants come before the non-flash pro.
   assert.equal(sorted[sorted.length - 1], 'gemini-1.5-pro');
 });
@@ -47,6 +54,23 @@ test('listGeminiModels filters non-gemini and non-generateContent models', async
     { name: 'gemini-2.5-flash' },
     { name: 'text-bison', methods: ['generateContent'] },
     { name: 'gemini-embed', methods: ['embedContent'] },
+  ]);
+  const models = await listGeminiModels('key', { fetchImpl });
+  assert.deepEqual(models, ['gemini-2.5-flash']);
+});
+
+test('listGeminiModels excludes non-text and non-GA model variants', async () => {
+  // All of these support generateContent and contain "gemini" but must not be
+  // picked for text listing generation.
+  const fetchImpl = fakeFetch([
+    { name: 'gemini-2.5-flash' },
+    { name: 'gemini-2.5-flash-image' },
+    { name: 'gemini-3.1-flash-image-preview' },
+    { name: 'gemini-2.5-flash-preview-tts' },
+    { name: 'gemini-3-flash-preview' },
+    { name: 'gemini-2.5-flash-lite' },
+    { name: 'gemini-2.5-computer-use-preview' },
+    { name: 'gemini-robotics-er-1.5-preview' },
   ]);
   const models = await listGeminiModels('key', { fetchImpl });
   assert.deepEqual(models, ['gemini-2.5-flash']);
